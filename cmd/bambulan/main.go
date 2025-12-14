@@ -28,6 +28,7 @@ var cli struct {
 	Capture      CaptureCmd      `cmd:"" help:"Capture camera frame"`
 	Ls           LsCmd           `cmd:"" help:"List .3mf files in directory"`
 	Download     DownloadCmd     `cmd:"" help:"Download file"`
+	Web          WebCmd          `cmd:"" help:"Start web interface"`
 }
 
 type Context struct {
