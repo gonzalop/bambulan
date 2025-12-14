@@ -57,7 +57,6 @@ func (c *CameraClient) createAuthPacket() []byte {
 }
 
 // StartStream connects to the camera and continuously sends new JPEG frames to the onImage callback.
-// onImage: Callback function that receives the JPEG byte slice for each frame.
 func (c *CameraClient) StartStream(onImage func([]byte)) error {
 	c.mu.Lock()
 	if c.streaming {

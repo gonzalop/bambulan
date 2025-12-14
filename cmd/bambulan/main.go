@@ -346,10 +346,10 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, opts))
 	slog.SetDefault(logger)
 
-	// Initialize Client
+	// Initialize Client.
 	// We create the client here but don't start it yet.
 	// Individual commands start it if needed.
-	// We need to inject OnUpdate for Status command, which we can do in StatusCmd.Run
+	// Status updates are handled by the callback injected in StatusCmd.Run.
 	client := bambulan.NewClient(cli.Host, cli.Code, cli.Serial, func(status *bambulan.PrinterStatus) {})
 
 	err := ctx.Run(&Context{Client: client})

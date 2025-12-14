@@ -11,10 +11,8 @@ type Client struct {
 }
 
 // NewClient creates a new BambuLAN Client.
-// hostname: Printer IP or hostname.
-// accessCode: Printer access code (found in settings).
-// serial: Printer serial number.
-// onUpdate: Callback function for receiving printer status updates.
+// It requires the printer's hostname (IP), access code (from settings), and serial number.
+// The onUpdate callback is invoked whenever a status update is received from the printer.
 func NewClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus)) *Client {
 	mqttClient := NewMQTTClient(hostname, accessCode, serial, onUpdate) // Pass initial callback
 	c := &Client{

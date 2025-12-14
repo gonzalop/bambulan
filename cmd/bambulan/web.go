@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -66,7 +68,7 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/camera", s.handleCamera)
 
 	slog.Info("Starting web server", "addr", s.BindAddr)
-	fmt.Printf("Web server listening on http://localhost%s\n", s.BindAddr)
+	slog.Info("Web server listening", "url", fmt.Sprintf("http://localhost%s", s.BindAddr))
 	return http.ListenAndServe(s.BindAddr, nil)
 }
 
@@ -92,8 +94,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 
 	if !exists {
 		slog.Info("Creating new client connection", "host", host, "serial", serial)
-		// We don't need a per-client update callback strictly for data propagation
-		// because we share the Status pointer.
+		// Status pointer is shared, so per-client callback is not strictly needed for data propagation.
 		onUpdate := func(status *bambulan.PrinterStatus) {
 			// Optional: Broadcast or log specific events if needed.
 		}
@@ -210,8 +211,14 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Create session
-		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		// Create secure session ID
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		sessionID := hex.EncodeToString(b)
+
 		session := &Session{
 			Status: &bambulan.PrinterStatus{},
 		}
@@ -232,9 +239,11 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.Mu.Unlock()
 
 		http.SetCookie(w, &http.Cookie{
-			Name:  "bambulan_session",
-			Value: sessionID,
-			Path:  "/",
+			Name:     "bambulan_session",
+			Value:    sessionID,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
 		})
 
 		// Persist auth
@@ -245,9 +254,11 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		if authBytes, err := json.Marshal(authData); err == nil {
 			http.SetCookie(w, &http.Cookie{
-				Name:  "bambulan_auth",
-				Value: base64.StdEncoding.EncodeToString(authBytes),
-				Path:  "/",
+				Name:     "bambulan_auth",
+				Value:    base64.StdEncoding.EncodeToString(authBytes),
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
 			})
 		}
 
@@ -301,8 +312,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	// Create JSON response
 	w.Header().Set("Content-Type", "application/json")
 
-	// Wrap in top-level object similar to what printer sends or just returned status
-	// The frontend expects { "print": ... } because we used data.print in JS
+	// Wrap in top-level object as expected by the frontend.
 	resp := map[string]interface{}{
 		"print":         session.Status,
 		"stage_message": session.Status.GetPrintStageName(),
@@ -526,19 +536,9 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 	defer close(stopChan)
 
 	onImage := func(frame []byte) {
-		// This callback is called from the camera client goroutine
-		// We need to write to the response writer
-		// But ResponseWriter is not concurrent safe.
-		// We should probably just write directly?
-		// Actually, MJPEG handler usually loops.
-
-		// Wait, CameraClient.StartStream takes a callback.
-		// If we want to support multiple web viewers, we need to broadcast.
-		// But CameraClient currently only supports one stream?
-		// The python code supports multiple? The Go logic I wrote:
-		// "if c.streaming { return fmt.Errorf("stream already running") }"
-		// So detailed broadcasting is needed for multiple users.
-		// For now, let's assume 1 user.
+		// This callback is executed in a separate goroutine.
+		// TODO: Implement broadcasting to support multiple simultaneous viewers.
+		// Current implementation supports a single viewer.
 
 		select {
 		case <-stopChan:
@@ -637,27 +637,7 @@ func (s *WebServer) tryRestoreSession(r *http.Request) (*Session, bool) {
 	s.Sessions[sessionID] = session
 	s.Mu.Unlock()
 
-	// We need to update the session cookie in the response, but we don't have the writer here.
-	// This is a limitation of this helper. However, since the browser sent a session ID (if it did),
-	// we technically should replace it. But if we return this new session, the handler will work.
-	// The next request might fail again if we don't update the cookie, but getSession will just restore again.
-	// ideally handleIndex should fix the cookie if ID changed. For now, this "lazy restore" works
-	// effectively as a new session per request if we don't update the cookie, which is bad for connections.
-	//
-	// Better approach: User is redirected to login if getSession fails.
-	// Login handler should check for auth cookie?
-	// OR: we just accept that we might reconnect frequently if we don't update cookie?
-	// Actually, if we return a session here, the current request succeeds.
-	// But the browser still has the old (or no) session cookie.
-	//
-	// If we are called from handleIndex, we can't set the cookie easily without changing signature.
-	// Let's rely on the fact that if this returns true, the page loads.
-	// Maybe we can inject a script to reload/update cookie?
-	//
-	// Simpler: If getSession RESTORES a session, it should probably return the NEW session ID so the caller can set cookie?
-	// Or we just let it reconnect for now. Wait, reconnecting every request is spammy.
-	//
-	// Let's change strategy: If getSession fails, handleIndex redirects to /login.
-	// We should put the restore logic in /login (handleLogin) GET request!
+	// Note: Session restoration currently does not update the session cookie in the response,
+	// relying on the client to send the correct session ID or re-authenticate if needed.
 	return session, true
 }

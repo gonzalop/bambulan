@@ -103,7 +103,7 @@ func (f *ftpReadCloser) Close() error {
 }
 
 // DownloadFile downloads a file from the printer to a local path.
-// onProgress: Optional callback for tracking download progress (current bytes, total bytes).
+// The onProgress callback, if not nil, reports the current downloaded bytes and total size.
 func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(int64, int64)) error {
 	reader, err := f.Download(remotePath)
 	if err != nil {
@@ -179,7 +179,7 @@ func (f *FileClient) Upload(remotePath string, content io.Reader) error {
 }
 
 // UploadFile uploads a local file to the printer.
-// onProgress: Optional callback for tracking upload progress (current bytes, total bytes).
+// The onProgress callback, if not nil, reports the current uploaded bytes and total size.
 func (f *FileClient) UploadFile(localPath, remotePath string, onProgress func(int64, int64)) error {
 	file, err := os.Open(localPath)
 	if err != nil {

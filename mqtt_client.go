@@ -162,8 +162,7 @@ func (m *MQTTClient) SendGCode(gcode string) error {
 }
 
 // StartPrint starts a print job for a file already on the printer (SD card).
-// filename: The path to the file on the printer (e.g., "Metadata/plate_1.gcode" or "model.gcode").
-// opts: Configuration options for the print job.
+// The filename specifies the path to the file on the printer (e.g., "Metadata/plate_1.gcode" or "model.gcode").
 func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) error {
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
@@ -247,7 +246,7 @@ func (m *MQTTClient) StopPrint() error {
 }
 
 // SetSpeedProfile sets the print speed profile.
-// level: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous.
+// Supported levels are: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous.
 func (m *MQTTClient) SetSpeedProfile(level string) error {
 	// level: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous
 	cmd := map[string]interface{}{

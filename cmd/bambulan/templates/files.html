@@ -63,6 +63,16 @@
             });
         }
 
+        function escapeHtml(text) {
+            if (!text) return text;
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         function loadFiles(path) {
             currentPath = path;
             document.getElementById('currentPathDisplay').innerText = path;
@@ -124,7 +134,7 @@
                             <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
                                 <a href="#" onclick="loadFiles('${newPath}')" style="display: flex; align-items: center; gap: 10px; flex: 1;">
                                     <span style="font-size: 1.2em;">📂</span> 
-                                    <span style="font-weight: 600; color: var(--text-color);">${e.Name}</span>
+                                    <span style="font-weight: 600; color: var(--text-color);">${escapeHtml(e.Name)}</span>
                                 </a>
                                 <span style="font-size: 0.8em; color: #999;">Dir</span>
                             </div>`;
@@ -135,7 +145,7 @@
                             <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
                                 <div style="display: flex; align-items: center; gap: 10px;">
                                     <span style="font-size: 1.2em;">📄</span>
-                                    <span>${e.Name}</span>
+                                    <span>${escapeHtml(e.Name)}</span>
                                 </div>
                                 <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
                                     <span style="color: #666;">${sizeMB} MB</span>
