@@ -1,4 +1,4 @@
-# BambuLAN CLI
+# BambuLAN CLI / Web Interface
 
 The `bambulan` CLI tool allows you to control and monitor your Bambu Lab printer from the command line.
 
@@ -36,6 +36,25 @@ Monitor printer status in real-time.
 ```bash
 ./bambulan status
 ```
+
+#### Web Interface
+Start the web dashboard (default port 8080).
+```bash
+./bambulan web
+# Access at http://localhost:8080
+```
+
+![Dashboard](../../assets/dashboard.png)
+
+**Features:**
+- **Dashboard**: Real-time status monitoring.
+- **Login**: Secure access with printer credentials.
+  ![Login](../../assets/login-screen.png)
+- **File Manager**: Browse and download files.
+  ![File Manager](../../assets/file-manager.png)
+- **Print Start**: Upload and start prints with options.
+  ![Start Print](../../assets/start-print.png)
+
 
 #### Controls
 ```bash
@@ -81,3 +100,4 @@ Capture a single frame from the camera.
 # Download file
 ./bambulan download /timelapse/video.mp4 [./local_video.mp4]
 ```
+

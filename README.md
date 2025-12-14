@@ -17,6 +17,8 @@ This library allows you to monitor printer status, control print jobs, view the 
     - Send raw G-Code (single line).
 - **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
 - **File Management**: List and download files (timelapses, models) via FTPS (port 990).
+- **Web Interface**: A built-in web dashboard to monitor and control the printer.
+
 
 ## Installation
 
@@ -45,13 +47,13 @@ func main() {
 
     // 2. Define a callback for status updates
     onUpdate := func(status *bambulan.PrinterStatus) {
-        fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n", 
+        fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n",
             status.NozzleTemper, status.BedTemper, status.McPercent)
     }
 
     // 3. Initialize and Start Client
     client := bambulan.NewClient(host, accessCode, serial, onUpdate)
-    
+
     if err := client.Start(); err != nil {
         log.Fatalf("Failed to connect: %v", err)
     }
@@ -99,9 +101,11 @@ if err != nil {
 err := client.File.DownloadFile("/timelapse/video.mp4", "./video.mp4")
 ```
 
-## CLI Tool
+## CLI Tool / Web Interface
 
-The included `cmd/bambulan` builds into a powerful CLI tool named `bambulan`.
+The included `cmd/bambulan` builds into a powerful CLI tool named `bambulan`, which also includes a web interface.
+
+![BambuLAN Dashboard](assets/dashboard.png)
 
 See [cmd/bambulan/README.md](cmd/bambulan/README.md) for full usage instructions.
 
