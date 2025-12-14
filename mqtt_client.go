@@ -30,6 +30,11 @@ func NewMQTTClient(hostname, accessCode, serial string, onUpdate func(*PrinterSt
 	}
 }
 
+// GetPrinterStatus returns the current status pointer.
+func (m *MQTTClient) GetPrinterStatus() *PrinterStatus {
+	return m.status
+}
+
 // Start connects to the MQTT broker and subscribes to report topics.
 func (m *MQTTClient) Start() error {
 	opts := mqtt.NewClientOptions()
@@ -65,6 +70,12 @@ func (m *MQTTClient) onConnect(client mqtt.Client) {
 		slog.Error("Error subscribing to topic", "topic", topic, "error", token.Error())
 	} else {
 		slog.Info("Subscribed to topic", "topic", topic)
+		// Request full status update to ensure we have all fields (like lights_report)
+		go func() {
+			if err := m.DumpInfo(); err != nil {
+				slog.Error("Failed to dump info on connect", "error", err)
+			}
+		}()
 	}
 }
 

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>BambuLAN Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>BambuLAN Dashboard <span
+                    style="font-weight: 400; font-size: 0.8em; color: var(--text-light);">{{.Host}}</span></h1>
+
+            <div style="display: flex; gap: 15px;">
+                <a href="/files" class="btn btn-info">Manage Files</a>
+                <a href="/logout" class="btn">Logout</a>
+            </div>
+        </header>
+
+        <div class="dashboard-grid">
+            <!-- Left Column: Camera and Monitor -->
+            <div class="column-main">
+                <div class="card" style="padding: 0; overflow: hidden; background: #000;">
+                    <img src="/camera" class="camera-feed" alt="Camera Stream" style="display: block;">
+                </div>
+
+                <div class="card">
+                    <h3>Print Progress</h3>
+                    <div
+                        style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                        <span id="stage" style="font-weight: 600; font-size: 1.2em;">Idle</span>
+                        <span style="font-weight: bold; color: var(--primary-color); font-size: 1.2em;">
+                            <span id="progress">--</span>%
+                        </span>
+                    </div>
+                    <div style="background: #e9ecef; border-radius: 4px; height: 10px; width: 100%; overflow: hidden;">
+                        <div id="progress_bar"
+                            style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.5s;">
+                        </div>
+                    </div>
+                    <div style="text-align: right; font-size: 0.9em; color: var(--text-light); margin-top: 5px;">
+                        Remaining: <span id="remaining">--</span> min
+                    </div>
+
+                    <div style="margin-top: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                        <button id="btnStart" onclick="showStartPrint()" class="btn btn-primary"
+                            style="grid-column: span 3;">🖨️ Start New Print</button>
+                        <button id="btnPause" onclick="control('pause')" class="btn">⏸️ Pause</button>
+                        <button id="btnResume" onclick="control('resume')" class="btn">▶️ Resume</button>
+                        <button id="btnStop" onclick="control('stop')" class="btn btn-danger">⏹️ Stop</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Stats and Controls -->
+            <div class="column-side">
+                <div class="card">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">Temperatures</h3>
+                        <div style="display: flex; background: #e9ecef; border-radius: 4px; padding: 2px;">
+                            <button onclick="setTempUnit('C')" id="btnUnitC"
+                                style="border: none; background: transparent; padding: 2px 8px; font-size: 0.8em; cursor: pointer; border-radius: 3px;">°C</button>
+                            <button onclick="setTempUnit('F')" id="btnUnitF"
+                                style="border: none; background: transparent; padding: 2px 8px; font-size: 0.8em; cursor: pointer; border-radius: 3px;">°F</button>
+                        </div>
+                    </div>
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <span class="metric-label">🌡️ Nozzle</span>
+                            <div class="metric-value"><span id="nozzle">--</span> <span
+                                    style="font-size: 0.7em; color: #999;">/ <span id="nozzle_target">--</span> <span
+                                        class="temp-unit">°C</span></span></div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">🌡️ Bed</span>
+                            <div class="metric-value"><span id="bed">--</span> <span
+                                    style="font-size: 0.7em; color: #999;">/ <span id="bed_target">--</span> <span
+                                        class="temp-unit">°C</span></span></div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">🌡️ Chamber</span>
+                            <div class="metric-value"><span id="chamber">--</span> <span class="temp-unit">°C</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Fans</h3>
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <span class="metric-label">💨 Part Fan</span>
+                            <div class="metric-value"><span id="fan_part">--</span>%</div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">💨 Aux Fan</span>
+                            <div class="metric-value"><span id="fan_aux">--</span>%</div>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">💨 Chamber</span>
+                            <div class="metric-value"><span id="fan_chamber">--</span>%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Controls</h3>
+
+                    <div class="control-group">
+                        <label>Chamber Light: <span id="light_state"
+                                style="font-weight: normal; margin-left: 5px;">--</span></label>
+                        <div class="button-group">
+                            <button id="btnLightOn" onclick="control('light_on')" class="btn">💡 On</button>
+                            <button id="btnLightOff" onclick="control('light_off')" class="btn">🌑 Off</button>
+                        </div>
+                    </div>
+
+                    <div class="control-group" style="margin-bottom: 0;">
+                        <label>Speed Profile: <span id="speed_lvl"
+                                style="font-weight: normal; margin-left: 5px;">--</span></label>
+                        <div class="button-group" style="display: grid; grid-template-columns: 1fr 1fr;">
+                            <button id="btnSpeed1" onclick="control('speed_silent')" class="btn">🔇 Silent</button>
+                            <button id="btnSpeed2" onclick="control('speed_std')" class="btn">▶️ Standard</button>
+                            <button id="btnSpeed3" onclick="control('speed_sport')" class="btn">🏎️ Sport</button>
+                            <button id="btnSpeed4" onclick="control('speed_ludi')" class="btn">🚀 Ludicrous</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Print Modal -->
+    <div id="printModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 20px;">Start Print</h3>
+            <form id="printForm" onsubmit="startPrint(event)">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px;">File (G-Code/3MF)</label>
+                    <input type="file" name="file" required>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px;">Bed Type</label>
+                    <select name="bed_type">
+                        <option value="auto">Auto</option>
+                        <option value="textured_plate">Textured Plate</option>
+                        <option value="cool_plate">Cool Plate</option>
+                        <option value="engineering_plate">Engineering Plate</option>
+                        <option value="high_temp_plate">High Temp Plate</option>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <label><input type="checkbox" name="bed_leveling" checked> Bed Leveling</label>
+                    <label><input type="checkbox" name="flow_calibration"> Flow Calibration</label>
+                    <label><input type="checkbox" name="timelapse"> Timelapse</label>
+                    <label><input type="checkbox" name="use_ams" id="chkUseAMS"> Use AMS</label>
+                    <label><input type="checkbox" name="vibration_calibration" checked> Vibration Calibration</label>
+                    <label><input type="checkbox" name="layer_inspection"> Layer Inspect</label>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" onclick="closeStartPrint()" class="btn">Cancel</button>
+                    <button id="startBtn" type="submit" class="btn btn-primary">Start Print</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let tempUnit = localStorage.getItem("bambulan_temp_unit") || "C";
+        let latestStatus = null;
+
+        function setTempUnit(unit) {
+            tempUnit = unit;
+            localStorage.setItem("bambulan_temp_unit", unit);
+            updateStatus();
+        }
+
+        function formatTemp(celsius) {
+            if (celsius === undefined || celsius === null) return "--";
+            if (tempUnit === "F") return Math.round((celsius * 9 / 5) + 32);
+            return Math.round(celsius);
+        }
+
+        function showStartPrint() {
+            document.getElementById('printModal').style.display = 'flex';
+            // Defaults logic for AMS
+            if (latestStatus && latestStatus.print && latestStatus.print.ams) {
+                const ams = latestStatus.print.ams;
+                // ams_exist_bits is usually a string "1" if present
+                const hasAMS = (ams.ams_exist_bits && ams.ams_exist_bits !== "0");
+                const chk = document.getElementById('chkUseAMS');
+                if (chk) chk.checked = hasAMS;
+            }
+        }
+
+        function closeStartPrint() {
+            document.getElementById('printModal').style.display = 'none';
+        }
+
+        function startPrint(e) {
+            e.preventDefault();
+            const form = document.getElementById('printForm');
+            const btn = document.getElementById('startBtn');
+            const data = new FormData(form);
+
+            btn.disabled = true;
+            btn.innerText = "Starting...";
+
+            fetch('/api/print', {
+                method: 'POST',
+                body: data
+            }).then(resp => {
+                if (!resp.ok) resp.text().then(text => alert("Start failed: " + text));
+                else {
+                    closeStartPrint();
+                    updateStatus();
+                }
+            }).finally(() => {
+                btn.disabled = false;
+                btn.innerText = "Start Print";
+            });
+        }
+
+        function updateStatus() {
+            // Update Unit UI
+            const btnC = document.getElementById('btnUnitC');
+            const btnF = document.getElementById('btnUnitF');
+            if (btnC && btnF) {
+                if (tempUnit === 'C') {
+                    btnC.style.background = '#007bff'; btnC.style.color = 'white';
+                    btnF.style.background = 'transparent'; btnF.style.color = '#333';
+                } else {
+                    btnF.style.background = '#007bff'; btnF.style.color = 'white';
+                    btnC.style.background = 'transparent'; btnC.style.color = '#333';
+                }
+            }
+
+            // Update all unit labels
+            document.querySelectorAll('.temp-unit').forEach(el => {
+                el.innerText = "°" + tempUnit;
+            });
+
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    latestStatus = data; // Store for other functions
+                    if (data.print) {
+                        const p = data.print;
+                        const stage = data.stage_message || "Idle";
+                        document.getElementById('stage').innerText = stage;
+
+                        // Show progress only if printing/preparing
+                        const isActive = (p.gcode_state === "RUNNING" || p.gcode_state === "PAUSE" || p.gcode_state === "PREPARE");
+
+                        const percent = isActive ? (p.mc_percent || 0) : 0;
+                        document.getElementById('progress').innerText = isActive ? percent : "--";
+                        document.getElementById('progress_bar').style.width = percent + "%";
+                        document.getElementById('remaining').innerText = isActive ? (p.mc_remaining_time || 0) : "--";
+
+                        document.getElementById('nozzle').innerText = formatTemp(p.nozzle_temper);
+                        document.getElementById('nozzle_target').innerText = formatTemp(p.nozzle_target_temper);
+                        document.getElementById('bed').innerText = formatTemp(p.bed_temper);
+                        document.getElementById('bed_target').innerText = formatTemp(p.bed_target_temper);
+                        document.getElementById('chamber').innerText = formatTemp(p.chamber_temper);
+
+                        document.getElementById('fan_part').innerText = p.cooling_fan_speed || 0;
+                        document.getElementById('fan_aux').innerText = p.big_fan1_speed || 0;
+                        document.getElementById('fan_chamber').innerText = p.big_fan2_speed || 0;
+
+                        // Map speed level
+                        const speeds = ["Unknown", "Silent", "Standard", "Sport", "Ludicrous"];
+                        const speedVal = p.spd_lvl || 0;
+                        document.getElementById('speed_lvl').innerText = speeds[speedVal] || speedVal;
+
+                        // Button logic
+                        const isPrinting = (p.gcode_state === "RUNNING" || p.gcode_state === "PAUSE" || p.gcode_state === "PREPARE");
+                        const isPaused = (p.gcode_state === "PAUSE");
+
+                        document.getElementById('btnStart').disabled = isPrinting;
+                        document.getElementById('btnPause').disabled = !isPrinting || isPaused;
+                        document.getElementById('btnResume').disabled = !isPaused;
+                        document.getElementById('btnStop').disabled = !isPrinting;
+
+                        // Speed buttons
+                        for (let i = 1; i <= 4; i++) {
+                            const btn = document.getElementById('btnSpeed' + i);
+                            // Reset classes
+                            btn.classList.remove('active-speed');
+                            btn.disabled = false;
+
+                            if (p.spd_lvl === i) {
+                                btn.classList.add('active-speed');
+                                btn.disabled = true;
+                            }
+                        }
+
+                        // Light buttons
+                        let lightOn = false;
+                        if (data.print.lights_report) {
+                            for (let l of data.print.lights_report) {
+                                if (l.node && l.node.toLowerCase() === "chamber_light") {
+                                    lightOn = (l.mode === "on");
+                                    break;
+                                }
+                            }
+                        }
+
+                        document.getElementById('light_state').innerText = lightOn ? "On" : "Off";
+                        const btnOn = document.getElementById('btnLightOn');
+                        const btnOff = document.getElementById('btnLightOff');
+
+                        // Reset classes
+                        btnOn.classList.remove('active-on');
+                        btnOff.classList.remove('active-off');
+                        btnOn.disabled = false;
+                        btnOff.disabled = false;
+
+                        if (lightOn) {
+                            btnOn.classList.add('active-on');
+                            btnOn.disabled = true;
+                        } else {
+                            btnOff.classList.add('active-off');
+                            btnOff.disabled = true;
+                        }
+                    }
+                })
+                .catch(err => console.error("Status fetch error:", err));
+        }
+
+        function control(cmd) {
+            fetch('/api/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'cmd=' + cmd
+            }).then(resp => {
+                if (!resp.ok) alert("Command failed");
+                else updateStatus(); // Refresh immediately
+            });
+        }
+
+        setInterval(updateStatus, 1000);
+        updateStatus();
+    </script>
+</body>
+
+</html>

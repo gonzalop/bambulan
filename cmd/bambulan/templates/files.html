@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>BambuLAN File Manager</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>File Manager</h1>
+            <div style="display: flex; gap: 15px;">
+                <a href="/" class="btn">Dashboard</a>
+                <a href="/logout" class="btn">Logout</a>
+            </div>
+        </header>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">Path: <span id="currentPathDisplay"
+                        style="font-family: monospace; background: #f0f0f0; padding: 2px 5px; border-radius: 4px;">/</span>
+                </h3>
+                <div class="button-group">
+                    <input type="file" id="uploadInput" style="display: none;" onchange="uploadFile()">
+                    <button onclick="document.getElementById('uploadInput').click()" class="btn btn-primary">Upload
+                        File</button>
+                    <button onclick="loadFiles(currentPath)" class="btn">Refresh</button>
+                </div>
+            </div>
+
+            <div id="file-list-container" style="min-height: 300px;">
+                <div id="file-list">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPath = "/";
+
+        function uploadFile() {
+            const input = document.getElementById('uploadInput');
+            if (input.files.length === 0) return;
+
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('path', currentPath);
+
+            const statusDiv = document.getElementById('file-list');
+            statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + file.name + '...</div>';
+
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            }).then(resp => {
+                if (!resp.ok) resp.text().then(text => alert("Upload failed: " + text));
+                else {
+                    loadFiles(currentPath);
+                }
+                input.value = '';
+            });
+        }
+
+        function loadFiles(path) {
+            currentPath = path;
+            document.getElementById('currentPathDisplay').innerText = path;
+            const list = document.getElementById('file-list');
+            list.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Loading...</div>';
+
+            fetch('/api/files?path=' + encodeURIComponent(path))
+                .then(response => response.json())
+                .then(entries => {
+                    if (!entries) {
+                        list.innerHTML = `<div style="text-align: center; padding: 20px;">Empty folder</div>`;
+                        // But if it's not root, we need Back button
+                        if (path !== "/") {
+                            // Logic below handles parent link
+                            let parent = path.substr(0, path.lastIndexOf('/', path.length - 2) + 1);
+                            if (path.split('/').length <= 2) parent = "/"; // Fix for top level logic
+                            // Actually a simpler way:
+                            const parts = path.split('/').filter(p => p);
+                            parts.pop();
+                            parent = "/" + parts.join("/");
+                            if (!parent.endsWith("/")) parent += "/";
+
+                            list.innerHTML = `
+                                <div style="margin-bottom: 10px;">
+                                    <a href="#" onclick="loadFiles('${parent}')" class="btn" style="padding: 5px 10px; font-size: 0.8em;">&larr; Back</a>
+                                </div>
+                                <div style="text-align: center; padding: 20px;">No files found.</div>`;
+                        }
+                        return;
+                    }
+
+                    // Sort: Directories first, then files
+                    entries.sort((a, b) => {
+                        if (a.Type === b.Type) return a.Name.localeCompare(b.Name);
+                        return a.Type === 1 ? -1 : 1;
+                    });
+
+                    let html = '<div style="display: flex; flex-direction: column; gap: 5px;">';
+
+                    if (path !== "/") {
+                        // Find parent path
+                        const parts = path.split('/').filter(p => p);
+                        parts.pop();
+                        let parent = "/" + parts.join("/");
+                        if (!parent.endsWith("/")) parent += "/";
+
+                        html += `
+                        <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee;">
+                            <a href="#" onclick="loadFiles('${parent}')" style="display: flex; align-items: center; gap: 10px;">
+                                <span>🔙</span> <strong>.. (Parent Directory)</strong>
+                            </a>
+                        </div>`;
+                    }
+
+                    entries.forEach(e => {
+                        if (e.Type === 1) { // Directory
+                            const newPath = path + e.Name + "/";
+                            html += `
+                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
+                                <a href="#" onclick="loadFiles('${newPath}')" style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                                    <span style="font-size: 1.2em;">📂</span> 
+                                    <span style="font-weight: 600; color: var(--text-color);">${e.Name}</span>
+                                </a>
+                                <span style="font-size: 0.8em; color: #999;">Dir</span>
+                            </div>`;
+                        } else {
+                            const downloadUrl = `/api/download?path=${encodeURIComponent(path + e.Name)}`;
+                            const sizeMB = (e.Size / 1024 / 1024).toFixed(2);
+                            html += `
+                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 1.2em;">📄</span>
+                                    <span>${e.Name}</span>
+                                </div>
+                                <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
+                                    <span style="color: #666;">${sizeMB} MB</span>
+                                    <a href="${downloadUrl}" target="_blank" class="btn btn-info" style="padding: 5px 10px; font-size: 0.8em; color: white;">Download</a>
+                                </div>
+                            </div>`;
+                        }
+                    });
+                    html += '</div>';
+                    list.innerHTML = html;
+                })
+                .catch(err => {
+                    console.error("File list error:", err);
+                    list.innerHTML = "Error loading files.";
+                });
+        }
+
+        loadFiles('/');
+    </script>
+</body>
+
+</html>

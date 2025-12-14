@@ -180,7 +180,18 @@ type UpgradeState struct {
 func (p *PrinterStatus) GetPrintStageName() string {
 	switch p.McPrintStage {
 	case "1":
-		return "Auto Bed Leveling"
+		// Stage 1 is "Auto Bed Leveling", but also seems to be a default/idle state
+		// when not printing. Check GcodeState to disambiguate.
+		if p.GcodeState == "RUNNING" || p.GcodeState == "PREPARE" {
+			return "Auto Bed Leveling"
+		}
+		// If not running, return the Gcode state (Idle, Failed, Finish, etc.)
+		// Capitalize first letter if possible, or just return raw.
+		if p.GcodeState == "IDLE" {
+			return "Idle"
+		}
+		// Return state as is (e.g. FAILED, FINISH) if we aren't leveling
+		return p.GcodeState
 	case "2":
 		return "Heatbed Preheating"
 	case "3":

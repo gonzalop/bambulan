@@ -15,9 +15,9 @@ import (
 )
 
 var cli struct {
-	Host   string `help:"Printer IP or hostname" env:"BAMBULAN_HOST" required:""`
-	Code   string `help:"Access code" env:"BAMBULAN_CODE" required:""`
-	Serial string `help:"Printer serial number" env:"BAMBULAN_SERIAL" required:""`
+	Host   string `help:"Printer IP or hostname" env:"BAMBULAN_HOST"`
+	Code   string `help:"Access code" env:"BAMBULAN_CODE"`
+	Serial string `help:"Printer serial number" env:"BAMBULAN_SERIAL"`
 	Level  string `help:"Log level" default:"info" enum:"debug,info,warn,error"`
 
 	Status       StatusCmd       `cmd:"" help:"Monitor printer status"`

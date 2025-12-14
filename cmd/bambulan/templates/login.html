@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>BambuLAN Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body
+    style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: var(--bg-color);">
+
+    <div class="card form-box" style="margin: 0; width: 100%; max-width: 400px;">
+        <h1 style="text-align: center; margin-bottom: 25px; color: var(--primary-color);">BambuLAN</h1>
+
+        {{if .Error}}
+        <div
+            style="background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 6px; margin-bottom: 20px; text-align: center;">
+            {{.Error}}
+        </div>
+        {{end}}
+
+        <form method="POST">
+            <div class="control-group">
+                <label>Printer IP / Hostname</label>
+                <input type="text" name="host" value="{{.Host}}" required placeholder="e.g. 192.168.1.50">
+            </div>
+
+            <div class="control-group">
+                <label>Access Code</label>
+                <input type="password" name="code" value="{{.Code}}" required placeholder="Found in Printer Settings">
+            </div>
+
+            <div class="control-group">
+                <label>Serial Number</label>
+                <input type="text" name="serial" value="{{.Serial}}" required placeholder="Printer Serial">
+            </div>
+
+            <button type="submit" class="btn btn-primary"
+                style="width: 100%; padding: 12px; font-size: 1.1em;">Connect</button>
+        </form>
+
+        <div style="text-align: center; margin-top: 20px; font-size: 0.9em; color: var(--text-light);">
+        </div>
+    </div>
+
+</body>
+
+</html>

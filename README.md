@@ -1,3 +1,5 @@
+![BambuLAN Logo](assets/bambulan.png)
+
 # BambuLAN
 
 A Go library for interacting with Bambu Lab 3D printers over the local network (LAN mode).

@@ -26,6 +26,11 @@ func NewClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus
 	return c
 }
 
+// GetPrinterStatus returns the underlying printer status.
+func (c *Client) GetPrinterStatus() *PrinterStatus {
+	return c.MQTT.GetPrinterStatus()
+}
+
 // Start initiates the MQTT connection and starts listening for status updates.
 // It returns an error if the connection fails.
 func (c *Client) Start() error {
