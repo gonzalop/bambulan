@@ -183,7 +183,7 @@ func (c *PrintStopCmd) Run(ctx *Context) error {
 
 type PrintStartCmd struct {
 	File                 string `arg:"" help:"G-code or 3MF file to print"`
-	BedType              string `help:"Bed type (auto, textured_plate, etc)" default:"auto"`
+	BedType              string `help:"Bed type (auto, textured_plate, cool_plate, engineering_plate, high_temp_plate)" default:"auto"`
 	Timelapse            bool   `help:"Enable timelapse"`
 	BedLeveling          bool   `help:"Enable bed leveling" default:"true"`
 	FlowCalibration      bool   `help:"Enable flow calibration"`

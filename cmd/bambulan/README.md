@@ -87,7 +87,7 @@ Uploads a file and starts printing.
 ```
 
 **Options:**
-- `-bed-type <string>`: Bed type (default: "auto")
+- `-bed-type <string>`: Bed type (auto, textured_plate, cool_plate, engineering_plate, high_temp_plate) (default: "auto")
 - `-timelapse`: Enable timelapse (default: false)
 - `-bed-leveling`: Enable bed leveling (default: true)
 - `-flow-calibration`: Enable flow calibration (default: false)

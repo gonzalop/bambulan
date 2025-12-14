@@ -48,7 +48,7 @@ func main() {
     // 2. Define a callback for status updates
     onUpdate := func(status *bambulan.PrinterStatus) {
         fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n",
-            status.NozzleTemper, status.BedTemper, status.McPercent)
+            status.NozzleTemp, status.BedTemp, status.McPercent)
     }
 
     // 3. Initialize and Start Client
