@@ -44,16 +44,25 @@ Start the web dashboard (default port 8080).
 # Access at http://localhost:8080
 ```
 
-![Dashboard](../../assets/dashboard.png)
-
 **Features:**
 - **Dashboard**: Real-time status monitoring.
 - **Login**: Secure access with printer credentials.
-  ![Login](../../assets/login-screen.png)
 - **File Manager**: Browse and download files.
-  ![File Manager](../../assets/file-manager.png)
 - **Print Start**: Upload and start prints with options.
-  ![Start Print](../../assets/start-print.png)
+
+**Screenshots:**
+
+### Dashboard
+![Dashboard](../../assets/dashboard.png)
+
+### Login Screen
+![Login](../../assets/login-screen.png)
+
+### File Manager
+![File Manager](../../assets/file-manager.png)
+
+### Start Print Modal
+![Start Print](../../assets/start-print.png)
 
 
 #### Controls
