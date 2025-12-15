@@ -37,7 +37,9 @@ type Context struct {
 
 // Commands
 
-type StatusCmd struct{}
+type StatusCmd struct {
+	ShowAMS bool `help:"Show AMS status"`
+}
 
 func (c *StatusCmd) Run(ctx *Context) error {
 	client := ctx.Client
@@ -55,7 +57,32 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		fmt.Printf("Fan - Aux:    %s\n", status.BigFan1Speed)
 		fmt.Printf("Fan - Chamb:  %s\n", status.BigFan2Speed)
 		fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
-		fmt.Printf("Light:        %v\n", status.LightsReport)
+		if len(status.LightsReport) > 0 {
+			fmt.Print("Light:        ")
+			for i, l := range status.LightsReport {
+				if i > 0 {
+					fmt.Print(", ")
+				}
+				fmt.Printf("%s:%s", l.Node, l.Mode)
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("Light:        N/A")
+		}
+
+		if c.ShowAMS && status.Ams != nil {
+			fmt.Println("\n--- AMS Status ---")
+			for i, unit := range status.Ams.Ams {
+				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i+1, unit.Temp, unit.Humidity)
+				for j, tray := range unit.Tray {
+					if tray.Id == "" {
+						fmt.Printf("  Slot %d: [Empty]\n", j+1)
+						continue
+					}
+					fmt.Printf("  Slot %d: %s %s (%d%%)\n", j+1, tray.TraySubBrands, tray.TrayColor, tray.Remain)
+				}
+			}
+		}
 		fmt.Println("----------------------------")
 		fmt.Println("Press Ctrl+C to exit")
 	}

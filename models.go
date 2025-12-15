@@ -193,7 +193,7 @@ func (p *PrinterStatus) GetPrintStageName() string {
 		// Return state as is (e.g. FAILED, FINISH) if we aren't leveling
 		return p.GcodeState
 	case "2":
-		return "Heatbed Preheating"
+		return "Printing"
 	case "3":
 		return "Sweeping XY Mech Mode"
 	case "4":
