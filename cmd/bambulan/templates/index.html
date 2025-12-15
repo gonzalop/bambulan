@@ -22,8 +22,20 @@
         <div class="dashboard-grid">
             <!-- Left Column: Camera and Monitor -->
             <div class="column-main">
-                <div class="card" style="padding: 0; overflow: hidden; background: #000;">
-                    <img src="/camera" class="camera-feed" alt="Camera Stream" style="display: block;">
+                <div class="card"
+                    style="padding: 0; overflow: hidden; background: #000; position: relative; width: 100%; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;">
+                    <div id="cameraPlaceholder"
+                        style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; color: #666;">
+                        <span>Video Paused</span>
+                    </div>
+                    <img id="cameraFeed" src="/camera" class="camera-feed" alt="Camera Stream"
+                        style="display: block; width: 100%;">
+                    <div style="position: absolute; bottom: 10px; right: 10px; z-index: 10;">
+                        <button id="btnToggleCamera" onclick="toggleCamera()" class="btn"
+                            style="background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 5px 10px; font-size: 0.8em;">
+                            ⏹️ Stop Video
+                        </button>
+                    </div>
                 </div>
 
                 <div class="card">
@@ -53,6 +65,7 @@
                     </div>
                 </div>
             </div>
+
 
             <!-- Right Column: Stats and Controls -->
             <div class="column-side">
@@ -187,6 +200,14 @@
             return Math.round(celsius);
         }
 
+        function formatFan(val) {
+            if (val === undefined || val === null) return 0;
+            // Bambu reports 0-15 for fans
+            let v = parseInt(val);
+            if (isNaN(v)) return 0;
+            return Math.round((v / 15) * 100);
+        }
+
         function showStartPrint() {
             document.getElementById('printModal').style.display = 'flex';
             // Defaults logic for AMS
@@ -269,9 +290,9 @@
                         document.getElementById('bed_target').innerText = formatTemp(p.bed_target_temper);
                         document.getElementById('chamber').innerText = formatTemp(p.chamber_temper);
 
-                        document.getElementById('fan_part').innerText = p.cooling_fan_speed || 0;
-                        document.getElementById('fan_aux').innerText = p.big_fan1_speed || 0;
-                        document.getElementById('fan_chamber').innerText = p.big_fan2_speed || 0;
+                        document.getElementById('fan_part').innerText = formatFan(p.cooling_fan_speed);
+                        document.getElementById('fan_aux').innerText = formatFan(p.big_fan1_speed);
+                        document.getElementById('fan_chamber').innerText = formatFan(p.big_fan2_speed);
 
                         // Map speed level
                         const speeds = ["Unknown", "Silent", "Standard", "Sport", "Ludicrous"];
@@ -342,6 +363,28 @@
                 if (!resp.ok) alert("Command failed");
                 else updateStatus(); // Refresh immediately
             });
+        }
+
+        function toggleCamera() {
+            const img = document.getElementById('cameraFeed');
+            const placeholder = document.getElementById('cameraPlaceholder');
+            const btn = document.getElementById('btnToggleCamera');
+
+            // Check if currently playing (src is not empty/placeholder)
+            if (img.src && !img.src.endsWith('#stopped')) {
+                // Stop
+                img.src = ""; // Close connection
+                img.src = "#stopped"; // prevent reloading
+                img.style.display = 'none';
+                placeholder.style.display = 'flex';
+                btn.innerHTML = "▶️ Start Video";
+            } else {
+                // Start
+                img.src = "/camera";
+                img.style.display = 'block';
+                placeholder.style.display = 'none';
+                btn.innerHTML = "⏹️ Stop Video";
+            }
         }
 
         setInterval(updateStatus, 1000);

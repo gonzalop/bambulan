@@ -502,14 +502,18 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Parse options
+	parseBool := func(v string) bool {
+		return v == "true" || v == "on" || v == "1"
+	}
+
 	opts := bambulan.PrintOptions{
 		BedType:              r.FormValue("bed_type"),
-		Timelapse:            r.FormValue("timelapse") == "true",
-		BedLeveling:          r.FormValue("bed_leveling") == "true",
-		FlowCalibration:      r.FormValue("flow_calibration") == "true",
-		VibrationCalibration: r.FormValue("vibration_calibration") == "true",
-		LayerInspection:      r.FormValue("layer_inspection") == "true",
-		UseAMS:               r.FormValue("use_ams") == "true",
+		Timelapse:            parseBool(r.FormValue("timelapse")),
+		BedLeveling:          parseBool(r.FormValue("bed_leveling")),
+		FlowCalibration:      parseBool(r.FormValue("flow_calibration")),
+		VibrationCalibration: parseBool(r.FormValue("vibration_calibration")),
+		LayerInspection:      parseBool(r.FormValue("layer_inspection")),
+		UseAMS:               parseBool(r.FormValue("use_ams")),
 	}
 
 	// 3. Start Print
