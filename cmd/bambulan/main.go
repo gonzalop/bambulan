@@ -73,13 +73,23 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		if c.ShowAMS && status.Ams != nil {
 			fmt.Println("\n--- AMS Status ---")
 			for i, unit := range status.Ams.Ams {
-				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i+1, unit.Temp, unit.Humidity)
+				hum := unit.Humidity
+				if hum == "1" {
+					hum = "1 (Dry)"
+				} else if hum == "5" {
+					hum = "5 (Wet)"
+				}
+				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i+1, unit.Temp, hum)
 				for j, tray := range unit.Tray {
 					if tray.Id == "" {
 						fmt.Printf("  Slot %d: [Empty]\n", j+1)
 						continue
 					}
-					fmt.Printf("  Slot %d: %s %s (%d%%)\n", j+1, tray.TraySubBrands, tray.TrayColor, tray.Remain)
+					remain := fmt.Sprintf("%d%%", tray.Remain)
+					if tray.Remain < 0 {
+						remain = "Capacity: N/A"
+					}
+					fmt.Printf("  Slot %d: %s %s (%s)\n", j+1, tray.TraySubBrands, tray.TrayColor, remain)
 				}
 			}
 		}

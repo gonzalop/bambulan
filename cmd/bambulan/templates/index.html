@@ -64,6 +64,11 @@
                         <button id="btnStop" onclick="control('stop')" class="btn btn-danger">⏹️ Stop</button>
                     </div>
                 </div>
+
+                <div class="card" id="cardAMS" style="display: none;">
+                    <h3>AMS</h3>
+                    <div id="amsContainer"></div>
+                </div>
             </div>
 
 
@@ -93,7 +98,7 @@
                                     style="font-size: 0.7em; color: #999;">/ <span id="bed_target">--</span> <span
                                         class="temp-unit">°C</span></span></div>
                         </div>
-                        <div class="metric-item">
+                        <div class="metric-item" id="chamber_row">
                             <span class="metric-label">🌡️ Chamber</span>
                             <div class="metric-value"><span id="chamber">--</span> <span class="temp-unit">°C</span>
                             </div>
@@ -208,6 +213,11 @@
             return Math.round((v / 15) * 100);
         }
 
+        function formatColor(hex) {
+            if (!hex || hex.length < 6) return "#cccccc";
+            return "#" + hex.substring(0, 6);
+        }
+
         function showStartPrint() {
             document.getElementById('printModal').style.display = 'flex';
             // Defaults logic for AMS
@@ -288,7 +298,14 @@
                         document.getElementById('nozzle_target').innerText = formatTemp(p.nozzle_target_temper);
                         document.getElementById('bed').innerText = formatTemp(p.bed_temper);
                         document.getElementById('bed_target').innerText = formatTemp(p.bed_target_temper);
-                        document.getElementById('chamber').innerText = formatTemp(p.chamber_temper);
+
+                        // Chamber temp of 5 often means invalid/no sensor
+                        if (p.chamber_temper > 5) {
+                            document.getElementById('chamber').innerText = formatTemp(p.chamber_temper);
+                            document.getElementById('chamber_row').style.display = 'block';
+                        } else {
+                            document.getElementById('chamber_row').style.display = 'none';
+                        }
 
                         document.getElementById('fan_part').innerText = formatFan(p.cooling_fan_speed);
                         document.getElementById('fan_aux').innerText = formatFan(p.big_fan1_speed);
@@ -348,6 +365,97 @@
                         } else {
                             btnOff.classList.add('active-off');
                             btnOff.disabled = true;
+                        }
+
+                        // AMS Logic
+                        if (p.ams && p.ams.ams && p.ams.ams.length > 0) {
+                            const amsCard = document.getElementById('cardAMS');
+                            const container = document.getElementById('amsContainer');
+                            amsCard.style.display = 'block';
+
+                            // Rebuild AMS content
+                            // Optimization: In a real app we'd diff, but for now wiping is fine
+                            container.innerHTML = "";
+
+                            p.ams.ams.forEach((unit, idx) => {
+                                const unitDiv = document.createElement('div');
+                                unitDiv.style.marginBottom = "10px";
+
+                                // Clean up humidity display
+                                // Value is typically 0-5 index, not percentage
+                                let hum = unit.humidity;
+                                if (hum === undefined || hum === null || hum === "") hum = "--";
+
+                                let humText = hum;
+                                if (hum === "1") humText = "1 (Dry)";
+                                else if (hum === "5") humText = "5 (Wet)";
+
+                                const temp = unit.temp || "--";
+
+                                unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light);">Unit ${idx + 1} (${temp}°C, Humidity: ${humText})</div>`;
+
+                                const grid = document.createElement('div');
+                                grid.style.display = 'grid';
+                                grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(120px, 1fr))';
+                                grid.style.gap = '10px';
+
+                                if (unit.tray) {
+                                    unit.tray.forEach(tray => {
+                                        // Skip empty slots if needed, but usually we want to show empty slots too?
+                                        // If tray doesn't exist or is empty, maybe show 'Empty'
+                                        // Bambu sends specific empty-ish objects. Check for valid ID or Type.
+
+                                        const color = formatColor(tray.tray_color);
+                                        const type = tray.tray_type || "Empty";
+                                        const remain = tray.remain !== undefined ? tray.remain + "%" : "--";
+                                        const unknown = (tray.remain < 0); // -1 often means unknown
+
+                                        const item = document.createElement('div');
+                                        item.style.background = '#f8f9fa';
+                                        item.style.padding = '8px';
+                                        item.style.borderRadius = '6px';
+                                        item.style.display = 'flex';
+                                        item.style.flexDirection = 'column'; // Stack vertically
+                                        item.style.gap = '2px';
+
+                                        // Top Row: Circle + Type
+                                        const topRow = document.createElement('div');
+                                        topRow.style.display = 'flex';
+                                        topRow.style.alignItems = 'center';
+                                        topRow.style.gap = '6px';
+
+                                        const circle = document.createElement('div');
+                                        circle.style.width = '14px';
+                                        circle.style.height = '14px';
+                                        circle.style.borderRadius = '50%';
+                                        circle.style.backgroundColor = color;
+                                        circle.style.border = '1px solid #ddd';
+                                        circle.title = tray.tray_color; // Tooltip with full hex
+
+                                        const typeDiv = document.createElement('div');
+                                        typeDiv.style.fontWeight = 'bold';
+                                        typeDiv.style.fontSize = '0.9em';
+                                        typeDiv.innerText = type;
+
+                                        topRow.appendChild(circle);
+                                        topRow.appendChild(typeDiv);
+
+                                        // Bottom Row: Capacity
+                                        const capDiv = document.createElement('div');
+                                        capDiv.style.fontSize = '0.8em';
+                                        capDiv.style.color = '#666';
+                                        capDiv.innerText = unknown ? "Capacity: N/A" : remain;
+
+                                        item.appendChild(topRow);
+                                        item.appendChild(capDiv);
+                                        grid.appendChild(item);
+                                    });
+                                }
+                                unitDiv.appendChild(grid);
+                                container.appendChild(unitDiv);
+                            });
+                        } else {
+                            document.getElementById('cardAMS').style.display = 'none';
                         }
                     }
                 })
