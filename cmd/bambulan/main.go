@@ -26,6 +26,7 @@ var cli struct {
 	Speed        SpeedCmd        `cmd:"" help:"Set speed: silent, standard, sport, ludicrous"`
 	Print        PrintCmd        `cmd:"" help:"Control print: start, pause, resume, stop"`
 	SendGCode    SendGCodeCmd    `cmd:"" help:"Send raw G-Code command (single line only)"`
+	Ams          AmsCmd          `cmd:"" help:"AMS controls"`
 	Capture      CaptureCmd      `cmd:"" help:"Capture camera frame"`
 	Ls           LsCmd           `cmd:"" help:"List .3mf files in directory"`
 	Download     DownloadCmd     `cmd:"" help:"Download file"`
@@ -55,9 +56,10 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		fmt.Printf("Nozzle Temp:  %.1f / %.1f °C\n", status.NozzleTemp, status.NozzleTargetTemp)
 		fmt.Printf("Bed Temp:     %.1f / %.1f °C\n", status.BedTemp, status.BedTargetTemp)
 		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
-		fmt.Printf("Fan - Part:   %s\n", status.CoolingFanSpeed)
-		fmt.Printf("Fan - Aux:    %s\n", status.BigFan1Speed)
-		fmt.Printf("Fan - Chamb:  %s\n", status.BigFan2Speed)
+		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
+		fmt.Printf("Fan - Part:   %s\n", formatFan(status.CoolingFanSpeed))
+		fmt.Printf("Fan - Aux:    %s\n", formatFan(status.BigFan1Speed))
+		fmt.Printf("Fan - Chamb:  %s\n", formatFan(status.BigFan2Speed))
 		fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
 		if len(status.LightsReport) > 0 {
 			fmt.Print("Light:        ")
@@ -74,6 +76,9 @@ func (c *StatusCmd) Run(ctx *Context) error {
 
 		if c.ShowAMS && status.Ams != nil {
 			fmt.Println("\n--- AMS Status ---")
+			// TrayNow is the global slot ID (0-15 across 4 units)
+			activeTray := status.Ams.TrayNow
+
 			for i, unit := range status.Ams.Ams {
 				hum := unit.Humidity
 				if hum == "1" {
@@ -83,15 +88,24 @@ func (c *StatusCmd) Run(ctx *Context) error {
 				}
 				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i+1, unit.Temp, hum)
 				for j, tray := range unit.Tray {
+					// Calculate global ID for this slot
+					globalID := fmt.Sprintf("%d", (i*4)+j)
+					isActive := (globalID == activeTray)
+
+					marker := " "
+					if isActive {
+						marker = "*"
+					}
+
 					if tray.Id == "" {
-						fmt.Printf("  Slot %d: [Empty]\n", j+1)
+						fmt.Printf(" %sSlot %d: [Empty]\n", marker, j+1)
 						continue
 					}
 					remain := fmt.Sprintf("%d%%", tray.Remain)
 					if tray.Remain < 0 {
 						remain = "Capacity: N/A"
 					}
-					fmt.Printf("  Slot %d: %s %s (%s)\n", j+1, tray.TraySubBrands, tray.TrayColor, remain)
+					fmt.Printf(" %sSlot %d: %s %s (%s)\n", marker, j+1, tray.TraySubBrands, tray.TrayColor, remain)
 				}
 			}
 		}
@@ -364,6 +378,21 @@ func (c *DownloadCmd) Run(ctx *Context) error {
 	return nil
 }
 
+func formatFan(val string) string {
+	if val == "" {
+		return "0%"
+	}
+	// Try to parse as integer
+	var i int
+	_, err := fmt.Sscanf(val, "%d", &i)
+	if err != nil {
+		return val
+	}
+	// Convert 0-15 scale to percentage
+	pct := float64(i) / 15.0 * 100.0
+	return fmt.Sprintf("%.0f%%", pct)
+}
+
 type DumpInfoCmd struct{}
 
 func (c *DumpInfoCmd) Run(ctx *Context) error {
@@ -404,6 +433,33 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("timeout waiting for dump info")
 	}
+}
+
+type AmsCmd struct {
+	Filament AmsFilamentCmd `cmd:"" help:"Update AMS filament properties"`
+}
+
+type AmsFilamentCmd struct {
+	Unit  int    `help:"AMS Unit ID (0-3)" default:"0"`
+	Slot  int    `help:"Slot ID (0-3)" required:""`
+	Color string `help:"Color in HEX (RRGGBBAA)" required:""`
+	Type  string `help:"Filament Type (e.g. 'PLA Basic')" required:""`
+}
+
+func (c *AmsFilamentCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	fmt.Printf("Updating AMS Unit %d Slot %d to Type='%s', Color='%s'...\n", c.Unit, c.Slot, c.Type, c.Color)
+	if err := client.MQTT.SetAMSFilament(c.Unit, c.Slot, c.Color, c.Type); err != nil {
+		return err
+	}
+	fmt.Println("Update sent.")
+	return nil
 }
 
 func main() {

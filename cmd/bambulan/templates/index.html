@@ -400,7 +400,7 @@
                                 grid.style.gap = '10px';
 
                                 if (unit.tray) {
-                                    unit.tray.forEach(tray => {
+                                    unit.tray.forEach((tray, trayIdx) => {
                                         // Skip empty slots if needed, but usually we want to show empty slots too?
                                         // If tray doesn't exist or is empty, maybe show 'Empty'
                                         // Bambu sends specific empty-ish objects. Check for valid ID or Type.
@@ -448,6 +448,17 @@
 
                                         item.appendChild(topRow);
                                         item.appendChild(capDiv);
+
+                                        // Highlight active slot
+                                        // Global ID: (unitIdx * 4) + slotIdx
+                                        const globalID = (idx * 4) + trayIdx;
+                                        // p.ams.tray_now is a hex string "0" for some reason in docs, or decimal string "0"?
+                                        // Usually it's a string index "0", "1", etc.
+                                        // Sometimes it might be 255 (empty).
+                                        if (p.ams.tray_now == globalID) {
+                                            item.style.border = '2px solid #4CAF50';
+                                        }
+
                                         grid.appendChild(item);
                                     });
                                 }
