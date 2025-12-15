@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,6 +29,7 @@ var cli struct {
 	Capture      CaptureCmd      `cmd:"" help:"Capture camera frame"`
 	Ls           LsCmd           `cmd:"" help:"List .3mf files in directory"`
 	Download     DownloadCmd     `cmd:"" help:"Download file"`
+	DumpInfo     DumpInfoCmd     `cmd:"" help:"Dump full printer status as JSON"`
 	Web          WebCmd          `cmd:"" help:"Start web interface"`
 }
 
@@ -360,6 +362,48 @@ func (c *DownloadCmd) Run(ctx *Context) error {
 	}
 	fmt.Printf("\nDownloaded in %v\n", time.Since(start))
 	return nil
+}
+
+type DumpInfoCmd struct{}
+
+func (c *DumpInfoCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	done := make(chan struct{})
+
+	// Override update handler to print JSON and exit
+	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
+		b, err := json.MarshalIndent(status, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling status: %v\n", err)
+			return
+		}
+		fmt.Println(string(b))
+		// We only want one dump
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	}
+
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+
+	// DumpInfo is called on connect, but we can also explicitly call it
+	if err := client.MQTT.DumpInfo(); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(os.Stderr, "Waiting for status dump...")
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("timeout waiting for dump info")
+	}
 }
 
 func main() {

@@ -40,6 +40,12 @@ Monitor printer status in real-time.
 
 ```
 
+#### Dump Info
+Dump the full printer status as a JSON object. Useful for debugging or inspecting raw values.
+```bash
+./bambulan dump-info
+```
+
 #### Web Interface
 Start the web dashboard (default port 8080).
 ```bash

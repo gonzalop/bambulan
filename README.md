@@ -15,6 +15,7 @@ This library allows you to monitor printer status, control print jobs, view the 
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
     - Control chamber lights.
     - Send raw G-Code (single line).
+    - Dump raw printer info (JSON).
 - **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
 - **File Management**: List and download files (timelapses, models) via FTPS (port 990).
 - **Web Interface**: A built-in web dashboard to monitor and control the printer.
