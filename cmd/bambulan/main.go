@@ -186,10 +186,10 @@ func (c *SpeedCmd) Run(ctx *Context) error {
 
 	// Map names to protocol values
 	speedMap := map[string]string{
-		"silent":    "1",
-		"standard":  "2",
-		"sport":     "3",
-		"ludicrous": "4",
+		"silent":    bambulan.SpeedSilent,
+		"standard":  bambulan.SpeedStandard,
+		"sport":     bambulan.SpeedSport,
+		"ludicrous": bambulan.SpeedLudicrous,
 	}
 
 	val := speedMap[c.Mode]

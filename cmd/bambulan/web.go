@@ -343,13 +343,13 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 	case "light_off":
 		err = session.Client.MQTT.SetChamberLight(false)
 	case "speed_silent":
-		err = session.Client.MQTT.SetSpeedProfile("1")
+		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSilent)
 	case "speed_std":
-		err = session.Client.MQTT.SetSpeedProfile("2")
+		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedStandard)
 	case "speed_sport":
-		err = session.Client.MQTT.SetSpeedProfile("3")
+		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSport)
 	case "speed_ludi":
-		err = session.Client.MQTT.SetSpeedProfile("4")
+		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedLudicrous)
 	case "pause":
 		err = session.Client.MQTT.PausePrint()
 	case "resume":

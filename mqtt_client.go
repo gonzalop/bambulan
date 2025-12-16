@@ -263,7 +263,7 @@ func (m *MQTTClient) StopPrint() error {
 }
 
 // SetSpeedProfile sets the print speed profile.
-// Supported levels are: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous.
+// Supported levels are defined by Speed* constants in models.go.
 func (m *MQTTClient) SetSpeedProfile(level string) error {
 	// level: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous
 	cmd := map[string]interface{}{

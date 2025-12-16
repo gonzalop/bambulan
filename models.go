@@ -246,3 +246,11 @@ type PrintOptions struct {
 	LayerInspection      bool
 	UseAMS               bool
 }
+
+// Speed Profile Constants
+const (
+	SpeedSilent    = "1"
+	SpeedStandard  = "2"
+	SpeedSport     = "3"
+	SpeedLudicrous = "4"
+)
