@@ -42,13 +42,19 @@ type Context struct {
 
 type StatusCmd struct {
 	ShowAMS bool `help:"Show AMS status"`
+	Watch   bool `help:"Watch for updates" short:"w"`
 }
 
 func (c *StatusCmd) Run(ctx *Context) error {
 	client := ctx.Client
+	// Channel to signal that we received at least one update
+	updateReceived := make(chan struct{}, 1)
+
 	// For status, we update the callback to print
 	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
-		fmt.Printf("\033[2J\033[H") // Clear screen
+		if c.Watch {
+			fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
+		}
 		fmt.Println("=== Bambu Printer Status ===")
 		fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.GetPrintStageName())
 		fmt.Printf("Progress:     %d%%\n", status.McPercent)
@@ -56,7 +62,6 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		fmt.Printf("Layer:        %d / %d\n", status.LayerNum, status.TotalLayerNum)
 		fmt.Printf("Nozzle Temp:  %.1f / %.1f °C\n", status.NozzleTemp, status.NozzleTargetTemp)
 		fmt.Printf("Bed Temp:     %.1f / %.1f °C\n", status.BedTemp, status.BedTargetTemp)
-		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
 		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
 		fmt.Printf("Fan - Part:   %s\n", formatFan(status.CoolingFanSpeed))
 		fmt.Printf("Fan - Aux:    %s\n", formatFan(status.BigFan1Speed))
@@ -111,22 +116,40 @@ func (c *StatusCmd) Run(ctx *Context) error {
 			}
 		}
 		fmt.Println("----------------------------")
-		fmt.Println("Press Ctrl+C to exit")
-	}
+		if c.Watch {
+			fmt.Println("Press Ctrl+C to exit")
+		}
 
-	// Capture interrupt signal
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		// Signal that we got data
+		select {
+		case updateReceived <- struct{}{}:
+		default:
+		}
+	}
 
 	if err := client.Start(); err != nil {
 		return err
 	}
 	defer client.Stop()
 
-	<-sigChan
+	// If watching, handle interrupts.
+	// If not watching, wait for first update then exit.
+	if c.Watch {
+		// Capture interrupt signal
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		<-sigChan
+		fmt.Println("\nExiting...")
+		return nil
+	}
 
-	fmt.Println("\nExiting...")
-	return nil
+	// Not watching: wait for update or timeout
+	select {
+	case <-updateReceived:
+		return nil
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("timeout waiting for printer status")
+	}
 }
 
 type ChamberLightCmd struct {
