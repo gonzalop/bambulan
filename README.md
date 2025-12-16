@@ -1,6 +1,4 @@
-<div style="text-align: center;">
 ![BambuLAN Logo](assets/bambulan.png)
-</div>
 
 # BambuLAN
 
