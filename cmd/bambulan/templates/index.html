@@ -52,8 +52,10 @@
                             style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.5s;">
                         </div>
                     </div>
-                    <div style="text-align: right; font-size: 0.9em; color: var(--text-light); margin-top: 5px;">
-                        Remaining: <span id="remaining">--</span> min
+                    <div
+                        style="display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-light); margin-top: 5px;">
+                        <span>Layer: <span id="layer_num">--</span> / <span id="total_layer">--</span></span>
+                        <span>Remaining: <span id="remaining">--</span> min</span>
                     </div>
 
                     <div style="margin-top: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
@@ -293,6 +295,8 @@
                         document.getElementById('progress').innerText = isActive ? percent : "--";
                         document.getElementById('progress_bar').style.width = percent + "%";
                         document.getElementById('remaining').innerText = isActive ? (p.mc_remaining_time || 0) : "--";
+                        document.getElementById('layer_num').innerText = isActive ? (p.layer_num || 0) : "--";
+                        document.getElementById('total_layer').innerText = isActive ? (p.total_layer_num || 0) : "--";
 
                         document.getElementById('nozzle').innerText = formatTemp(p.nozzle_temper);
                         document.getElementById('nozzle_target').innerText = formatTemp(p.nozzle_target_temper);

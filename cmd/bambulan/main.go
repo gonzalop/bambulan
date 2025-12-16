@@ -53,6 +53,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.GetPrintStageName())
 		fmt.Printf("Progress:     %d%%\n", status.McPercent)
 		fmt.Printf("Remaining:    %d min\n", status.McRemainingTime)
+		fmt.Printf("Layer:        %d / %d\n", status.LayerNum, status.TotalLayerNum)
 		fmt.Printf("Nozzle Temp:  %.1f / %.1f °C\n", status.NozzleTemp, status.NozzleTargetTemp)
 		fmt.Printf("Bed Temp:     %.1f / %.1f °C\n", status.BedTemp, status.BedTargetTemp)
 		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
