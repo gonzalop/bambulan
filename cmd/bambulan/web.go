@@ -104,8 +104,6 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 			return nil, err
 		}
 		s.ActiveClients[key] = client
-	} else {
-		slog.Debug("Reusing existing client connection", "serial", serial)
 	}
 
 	return client, nil

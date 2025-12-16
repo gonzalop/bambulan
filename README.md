@@ -110,11 +110,6 @@ The included `cmd/bambulan` builds into a powerful CLI tool named `bambulan`, wh
 
 See [cmd/bambulan/README.md](cmd/bambulan/README.md) for full usage instructions.
 
-### Build
-```bash
-go build -o bambulan ./cmd/bambulan
-```
-
 ## Development
 
 ### Prerequisites

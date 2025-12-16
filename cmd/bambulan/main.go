@@ -487,7 +487,14 @@ func (c *AmsFilamentCmd) Run(ctx *Context) error {
 }
 
 func main() {
-	ctx := kong.Parse(&cli)
+	ctx := kong.Parse(&cli,
+		kong.Name("bambulan"),
+		kong.Description("Control your Bambu Lab printer"),
+		kong.UsageOnError(),
+		kong.ConfigureHelp(kong.HelpOptions{
+			//          Compact: true,
+		}),
+	)
 
 	// Logging
 	var level slog.Level

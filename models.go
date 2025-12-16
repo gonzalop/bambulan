@@ -178,6 +178,13 @@ type UpgradeState struct {
 
 // GetPrintStageName converts the numeric print stage code into a human-readable string.
 func (p *PrinterStatus) GetPrintStageName() string {
+	// If explicitly paused, return "Paused" regardless of the mechanical stage
+	if p.GcodeState == "PAUSE" {
+		return "Paused"
+	}
+	if p.GcodeState == "FINISH" {
+		return "Finished"
+	}
 	switch p.McPrintStage {
 	case "1":
 		// Stage 1 is "Auto Bed Leveling", but also seems to be a default/idle state

@@ -11,7 +11,7 @@ go install github.com/gonzalop/bambu/cmd/bambulan
 Or build manually:
 
 ```bash
-go build -o bambulan ./cmd/bambulan
+make
 ```
 
 ## Usage
