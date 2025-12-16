@@ -18,8 +18,8 @@ This library allows you to monitor printer status, control print jobs, view the 
     - Dump raw printer info (JSON).
 - **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
 - **File Management**: List and download files (timelapses, models) via FTPS (port 990).
-- **Web Interface**: A built-in web dashboard to monitor and control the printer.
 
+A CLI built using this library, `bambulan`, also acts as a web server providing a dashboard to monitor and control the printer.
 
 ## Installation
 
@@ -109,44 +109,6 @@ The included `cmd/bambulan` builds into a powerful CLI tool named `bambulan`, wh
 ![BambuLAN Dashboard](assets/dashboard.png)
 
 See [cmd/bambulan/README.md](cmd/bambulan/README.md) for full usage instructions.
-
-## Development
-
-### Prerequisites
-- Go 1.25+
-- make
-
-### Available Commands
-
-- **Default**: Formatting, linting, and building.
-  ```bash
-  make
-  ```
-- **Build**: Compile the project.
-  ```bash
-  make build
-  ```
-- **Test**: Run unit tests.
-  ```bash
-  make test
-  ```
-- **Lint**: Run `golangci-lint` to check for specific linter errors.
-  ```bash
-  make golangci-lint-run
-  ```
-- **Format**: Format code using `goimports`.
-  ```bash
-  make fmt
-  ```
-- **Cross-compile**: Build binaries for Linux, macOS, and Windows.
-  ```bash
-  make build-all
-  ```
-- **Clean**: Remove build artifacts.
-  ```bash
-  make clean
-  ```
-
 
 ## Acknowledgements
 

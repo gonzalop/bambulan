@@ -21,20 +21,21 @@ type MQTTClient struct {
 	client     mqtt.Client
 	status     *PrinterStatus
 	OnUpdate   func(*PrinterStatus)
-	seq        int64
+	seq        atomic.Int64
 }
 
 // NewMQTTClient creates a new MQTTClient.
 func NewMQTTClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus)) *MQTTClient {
-	return &MQTTClient{
+	client := &MQTTClient{
 		Hostname:   hostname,
 		AccessCode: accessCode,
 		Serial:     serial,
 		status:     &PrinterStatus{},
 		OnUpdate:   onUpdate,
-		// Initialize sequence with timestamp to avoid collisions on restart
-		seq: time.Now().Unix(),
 	}
+	// Initialize sequence with timestamp to avoid collisions on restart
+	client.seq.Store(time.Now().Unix())
+	return client
 }
 
 // GetPrinterStatus returns the current status pointer.
@@ -43,7 +44,7 @@ func (m *MQTTClient) GetPrinterStatus() *PrinterStatus {
 }
 
 func (m *MQTTClient) getNextSequenceID() string {
-	return strconv.FormatInt(atomic.AddInt64(&m.seq, 1), 10)
+	return strconv.FormatInt(m.seq.Add(1), 10)
 }
 
 // Start connects to the MQTT broker and subscribes to report topics.
@@ -57,6 +58,8 @@ func (m *MQTTClient) Start() error {
 		InsecureSkipVerify: true,
 	})
 	opts.SetAutoReconnect(true)
+	opts.SetKeepAlive(10 * time.Second)
+	opts.SetPingTimeout(5 * time.Second)
 	opts.SetOnConnectHandler(m.onConnect)
 	opts.SetDefaultPublishHandler(m.onMessage)
 
@@ -102,18 +105,6 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	// Now merge partial.Print into m.status
-	// We do this by essentially re-unmarshalling the inner part into our existing struct
-	// Since we already unmarshalled into partial.Print, we can just manually copy or use a smarter merge.
-	// However, json.Unmarshal into existing struct is the standard way to patch.
-	// So we should actually unmarshal msg.Payload() directly into a struct that wraps our existing m.status pointer if possible?
-	// No, because `partial.Print` is a *new* struct created by Unmarshal.
-
-	// Better approach: Unmarshal payload into a map to see what fields are present, OR
-	// standard Go JSON unmarshal overwrites fields. The issue is `partial.Print` is a new object.
-	// We want to update `m.status`.
-
-	// Let's do this:
 	// 1. Get the raw "print" object from JSON.
 	// 2. Unmarshal that raw JSON into m.status
 
@@ -141,7 +132,7 @@ func (m *MQTTClient) Publish(command interface{}) error {
 		return err
 	}
 	topic := fmt.Sprintf("device/%s/request", m.Serial)
-	token := m.client.Publish(topic, 0, false, payload)
+	token := m.client.Publish(topic, 2, false, payload)
 	token.Wait()
 	return token.Error()
 }

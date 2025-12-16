@@ -58,6 +58,7 @@ func (f *FileClient) ListFiles(dir string) ([]*ftp.Entry, error) {
 
 // GetFiles returns a list of files in the specified directory with the given extension.
 func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
+	// The Bambu MCU FTPS server can't glob.
 	entries, err := f.ListFiles(dir)
 	if err != nil {
 		return nil, err
@@ -111,17 +112,6 @@ func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(
 	}
 	defer reader.Close()
 
-	// Need total size separately if we want progress, but Download doesn't return it.
-	// For now, let's optimize DownloadFile to use the existing logic if we want exact same behavior
-	// or jus reimplement on top of Download.
-	// Reimplementing to use f.Download cleanly:
-	// But f.Download requires keeping the connection open which is what we want.
-	// The original implementation got size first. Let's keep original implementation?
-	// No, let's just add Download as a separate method for streaming and leave DownloadFile as is,
-	// but maybe refactor slightly?
-	// Let's just Add Download method and leave DownloadFile mostly alone but using connect()
-	// Actually, the previous implementation of DownloadFile had logic to get size.
-	// Let's keep DownloadFile separate for now to avoid breaking existing behavior and complexity.
 	return f.downloadFileInternal(remotePath, localPath, onProgress)
 }
 
