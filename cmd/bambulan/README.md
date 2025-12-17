@@ -18,9 +18,15 @@ make
 
 Global flags are required for all commands unless environment variables are set.
 
+**Global Flags:**
+- `--host` (`-H`): Printer IP or hostname (Env: `BAMBULAN_HOST`)
+- `--code` (`-c`): Access code (Env: `BAMBULAN_CODE`)
+- `--serial` (`-s`): Printer serial number (Env: `BAMBULAN_SERIAL`)
+- `--log-level` (`-l`): Log level (debug, info, warn, error) (default: "info")
+
 ```bash
-# Using flags
-./bambulan --host <IP> --code <CODE> --serial <SERIAL> status
+# Using flags (mixed long/short example)
+./bambulan -H <IP> -c <CODE> -s <SERIAL> --log-level debug status
 
 # Using environment variables
 export BAMBULAN_HOST="192.168.1.50"
@@ -36,8 +42,9 @@ Monitor printer status in real-time.
 ```bash
 ./bambulan status
 # or with AMS details:
-./bambulan status --show-ams
-
+./bambulan status --show-ams (-a)
+# Watch mode:
+./bambulan status --watch (-w)
 ```
 
 #### Dump Info
@@ -96,13 +103,13 @@ Uploads a file and starts printing.
 ```
 
 **Options:**
-- `-bed-type <string>`: Bed type (auto, textured_plate, cool_plate, engineering_plate, high_temp_plate) (default: "auto")
-- `-timelapse`: Enable timelapse (default: false)
-- `-bed-leveling`: Enable bed leveling (default: true)
-- `-flow-calibration`: Enable flow calibration (default: false)
-- `-vibration-calibration`: Enable vibration calibration (default: true)
-- `-layer-inspection`: Enable layer inspection (default: false)
-- `-use-ams`: Use AMS (default: false)
+- `--bed-type` (`-b`) <string>: Bed type (auto, textured_plate, cool_plate, engineering_plate, high_temp_plate) (default: "auto")
+- `--timelapse` (`-t`): Enable timelapse (default: false)
+- `--bed-leveling` (`-e`): Enable bed leveling (default: true)
+- `--flow-calibration` (`-f`): Enable flow calibration (default: false)
+- `--vibration-calibration` (`-v`): Enable vibration calibration (default: true)
+- `--layer-inspection` (`-i`): Enable layer inspection (default: false)
+- `--use-ams` (`-a`): Use AMS (default: false)
 
 #### Camera
 Capture a single frame from the camera.

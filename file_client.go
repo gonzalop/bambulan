@@ -64,7 +64,6 @@ func (f *FileClient) connect() (*ftp.ServerConn, error) {
 		// Note: We do NOT use ftp.DialWithTLS here because our custom dialer
 		// already returns a TLS connection. Using both would cause double-wrapping.
 		ftp.DialWithTimeout(5*time.Second),
-		ftp.DialWithDebugOutput(os.Stdout),
 		ftp.DialWithDialFunc(fixIPDialer),
 	)
 	if err != nil {

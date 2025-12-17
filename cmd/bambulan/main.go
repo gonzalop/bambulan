@@ -16,10 +16,10 @@ import (
 )
 
 var cli struct {
-	Host   string `help:"Printer IP or hostname" env:"BAMBULAN_HOST"`
-	Code   string `help:"Access code" env:"BAMBULAN_CODE"`
-	Serial string `help:"Printer serial number" env:"BAMBULAN_SERIAL"`
-	Level  string `help:"Log level" default:"info" enum:"debug,info,warn,error"`
+	Host   string `help:"Printer IP or hostname" env:"BAMBULAN_HOST" required:"" short:"H"`
+	Code   string `help:"Access code" env:"BAMBULAN_CODE" required:"" short:"c"`
+	Serial string `help:"Printer serial number" env:"BAMBULAN_SERIAL" required:"" short:"s"`
+	Level  string `help:"Log level" default:"info" enum:"debug,info,warn,error" name:"log-level" short:"l"`
 
 	Status       StatusCmd       `cmd:"" help:"Monitor printer status"`
 	ChamberLight ChamberLightCmd `cmd:"" help:"Turn chamber light on or off"`
@@ -41,8 +41,8 @@ type Context struct {
 // Commands
 
 type StatusCmd struct {
-	ShowAMS bool `help:"Show AMS status"`
-	Watch   bool `help:"Watch for updates" short:"w"`
+	ShowAMS *bool `help:"Show AMS status (auto-detected if unset)" short:"a"`
+	Watch   bool  `help:"Watch for updates" short:"w"`
 }
 
 func (c *StatusCmd) Run(ctx *Context) error {
@@ -80,7 +80,18 @@ func (c *StatusCmd) Run(ctx *Context) error {
 			fmt.Println("Light:        N/A")
 		}
 
-		if c.ShowAMS && status.Ams != nil {
+		// Determine if we should show AMS
+		showAMS := false
+		if c.ShowAMS != nil {
+			showAMS = *c.ShowAMS
+		} else {
+			// Auto-detect: show if AMS data is present
+			if status.Ams != nil && len(status.Ams.Ams) > 0 {
+				showAMS = true
+			}
+		}
+
+		if showAMS && status.Ams != nil {
 			fmt.Println("\n--- AMS Status ---")
 			// TrayNow is the global slot ID (0-15 across 4 units)
 			activeTray := status.Ams.TrayNow
@@ -260,21 +271,61 @@ func (c *PrintStopCmd) Run(ctx *Context) error {
 
 type PrintStartCmd struct {
 	File                 string `arg:"" help:"G-code or 3MF file to print"`
-	BedType              string `help:"Bed type (auto, textured_plate, cool_plate, engineering_plate, high_temp_plate)" default:"auto"`
-	Timelapse            bool   `help:"Enable timelapse"`
-	BedLeveling          bool   `help:"Enable bed leveling" default:"true"`
-	FlowCalibration      bool   `help:"Enable flow calibration"`
-	VibrationCalibration bool   `help:"Enable vibration calibration" default:"true"`
-	LayerInspection      bool   `help:"Enable layer inspection"`
-	UseAMS               bool   `help:"Use AMS"`
+	BedType              string `help:"Bed type (auto, textured_plate, cool_plate, engineering_plate, high_temp_plate)" default:"auto" short:"b"`
+	Timelapse            bool   `help:"Enable timelapse" short:"t"`
+	BedLeveling          bool   `help:"Enable bed leveling" default:"true" short:"e"`
+	FlowCalibration      bool   `help:"Enable flow calibration" short:"f"`
+	VibrationCalibration bool   `help:"Enable vibration calibration" default:"true" short:"v"`
+	LayerInspection      bool   `help:"Enable layer inspection" short:"i"`
+	UseAMS               *bool  `help:"Use AMS (defaults to true if AMS is present)" short:"a"`
 }
 
 func (c *PrintStartCmd) Run(ctx *Context) error {
 	client := ctx.Client
-	if err := client.Start(); err != nil {
-		return err
+
+	// We need to determine UseAMS value.
+	// If the user didn't specify it (c.UseAMS == nil), we need to check the printer status.
+	// This requires connecting and waiting for the first status update.
+
+	var useAMS bool
+	if c.UseAMS != nil {
+		// User explicitly set it
+		useAMS = *c.UseAMS
+		// We still need to start the client for the print command later
+		if err := client.Start(); err != nil {
+			return err
+		}
+	} else {
+		// User didn't specify. Auto-detect.
+		fmt.Println("Checking for AMS presence...")
+		statusChan := make(chan *bambulan.PrinterStatus, 1)
+		client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
+			select {
+			case statusChan <- status:
+			default:
+			}
+		}
+
+		if err := client.Start(); err != nil {
+			return err
+		}
+
+		select {
+		case status := <-statusChan:
+			if status.Ams != nil && len(status.Ams.Ams) > 0 {
+				useAMS = true
+				fmt.Println("-> AMS detected. Enabling AMS.")
+			} else {
+				useAMS = false
+				fmt.Println("-> No AMS detected. Disabling AMS.")
+			}
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("timeout waiting for printer status to detect AMS")
+		}
 	}
-	defer client.Stop()
+	// Stop client callback to avoid noise, though client needs to stay connected
+	client.MQTT.OnUpdate = nil
+
 	time.Sleep(1 * time.Second)
 
 	localPath := c.File
@@ -305,7 +356,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		FlowCalibration:      c.FlowCalibration,
 		VibrationCalibration: c.VibrationCalibration,
 		LayerInspection:      c.LayerInspection,
-		UseAMS:               c.UseAMS,
+		UseAMS:               useAMS,
 	}
 
 	fmt.Printf("Starting print for %s...\n", filename)
@@ -316,6 +367,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		return fmt.Errorf("failed to start print: %w", err)
 	}
 	fmt.Println("Print started!")
+	defer client.Stop()
 	return nil
 }
 
@@ -494,10 +546,10 @@ type AmsCmd struct {
 }
 
 type AmsFilamentCmd struct {
-	Unit  int    `help:"AMS Unit ID (0-3)" default:"0"`
-	Slot  int    `help:"Slot ID (0-3)" required:""`
-	Color string `help:"Color in HEX (RRGGBBAA)" required:""`
-	Type  string `help:"Filament Type (e.g. 'PLA Basic')" required:""`
+	Unit  int    `help:"AMS Unit ID (0-3)" default:"0" short:"u"`
+	Slot  int    `help:"Slot ID (0-3)" required:"" short:"S"`
+	Color string `help:"Color in HEX (RRGGBBAA)" required:"" short:"C"`
+	Type  string `help:"Filament Type (e.g. 'PLA Basic')" required:"" short:"t"`
 }
 
 func (c *AmsFilamentCmd) Run(ctx *Context) error {
