@@ -18,7 +18,7 @@ GOIMPORTS = $(shell which goimports)
 GOTESTSUM=$(shell which gotestsum)
 GOLANGCILINT=$(shell which golangci-lint)
 
-.PHONY: all build run clean test build-linux build-darwin build-windows build-all fuzz
+.PHONY: all build run clean test build-all fuzz
 
 all: fmt golangci-lint-run $(GENERATED) build ; $(info $(M) building executable…) @ ## Build program binary
 
@@ -29,16 +29,16 @@ fuzz:
 	go test -fuzz=FuzzPacketMatchesFilter -fuzztime=10s ./pkg/repeater
 
 # Cross-compilation targets
-build-linux:
-	GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-linux ./cmd/bambulan
+build-linux-amd64:
+	GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-linux-amd64 ./cmd/bambulan
 
-build-darwin:
-	GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-darwin ./cmd/bambulan
+build-darwin-amd64:
+	GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-darwin-amd64 ./cmd/bambulan
 
-build-windows:
-	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-windows.exe ./cmd/bambulan
+build-windows-amd64:
+	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-windows-amd64.exe ./cmd/bambulan
 
-build-all: build-linux build-darwin build-windows
+build-all: build-linux-amd64 build-darwin-amd64 build-windows-amd64
 
 # Tools
 
