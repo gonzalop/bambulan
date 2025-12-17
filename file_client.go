@@ -15,11 +15,17 @@ import (
 
 // FileClient handles file operations (listing, uploading, downloading) over FTPS.
 type FileClient struct {
-	Hostname   string
+	// Hostname is the IP or hostname of the printer's FTPS server.
+	Hostname string
+	// AccessCode is the password for the FTPS connection.
 	AccessCode string
 }
 
 // NewFileClient creates a new FileClient.
+//
+// Parameters:
+//   - hostname: The IP address or hostname of the printer's FTPS server.
+//   - accessCode: The printer's access code, usually found in the Network settings.
 func NewFileClient(hostname, accessCode string) *FileClient {
 	return &FileClient{
 		Hostname:   hostname,
@@ -28,6 +34,11 @@ func NewFileClient(hostname, accessCode string) *FileClient {
 }
 
 func (f *FileClient) connect() (*ftp.ServerConn, error) {
+	tlsConfig := &tls.Config{
+		// Bambu Lab printers use self-signed certificates for their FTPS server.
+		InsecureSkipVerify: true,
+	}
+
 	// Use a custom dialer to intercept 0.0.0.0 addresses from the printer PASV
 	// and replace them with the actual hostname.
 	fixIPDialer := func(network, addr string) (net.Conn, error) {
@@ -46,10 +57,6 @@ func (f *FileClient) connect() (*ftp.ServerConn, error) {
 		// Proceed with the standard dial using the fixed address
 		slog.Debug("Dialing FTPS", "address", addr)
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConfig := &tls.Config{
-			// Bambu Lab printers use self-signed certificates for their FTPS server.
-			InsecureSkipVerify: true,
-		}
 		return tls.DialWithDialer(dialer, network, addr, tlsConfig)
 	}
 
@@ -73,6 +80,12 @@ func (f *FileClient) connect() (*ftp.ServerConn, error) {
 }
 
 // ListFiles returns a detailed list of files in the specified directory.
+//
+// Parameters:
+//   - dir: The remote directory path to list (e.g., "/timelapse").
+//
+// Returns:
+//   - A slice of `*ftp.Entry`, each containing file/directory information.
 func (f *FileClient) ListFiles(dir string) ([]*ftp.Entry, error) {
 	c, err := f.connect()
 	if err != nil {
@@ -87,7 +100,15 @@ func (f *FileClient) ListFiles(dir string) ([]*ftp.Entry, error) {
 	return entries, nil
 }
 
-// GetFiles returns a list of files in the specified directory with the given extension.
+// GetFiles returns a list of file names in the specified directory that match the given extension.
+// Note: The Bambu printer's FTPS server does not support globbing, so this method filters results client-side.
+//
+// Parameters:
+//   - dir: The remote directory path to search (e.g., "/timelapse").
+//   - extension: The file extension to match (e.g., ".3mf", ".mp4").
+//
+// Returns:
+//   - A slice of strings, where each string is the name of a matching file.
 func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
 	// The Bambu MCU FTPS server can't glob.
 	entries, err := f.ListFiles(dir)
@@ -105,7 +126,13 @@ func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
 }
 
 // Download streams a file from the printer.
-// The caller is responsible for closing the returned ReadCloser.
+// The caller is responsible for closing the returned `io.ReadCloser`.
+//
+// Parameters:
+//   - remotePath: The full path to the file on the printer (e.g., "/timelapse/video.mp4").
+//
+// Returns:
+//   - An `io.ReadCloser` from which the file content can be read.
 func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
 	// Note: We can't defer c.Quit() here because the caller needs to read from the connection.
 	// We wrap the ReadCloser to close the connection when done.
@@ -135,7 +162,12 @@ func (f *ftpReadCloser) Close() error {
 }
 
 // DownloadFile downloads a file from the printer to a local path.
-// The onProgress callback, if not nil, reports the current downloaded bytes and total size.
+//
+// Parameters:
+//   - remotePath: The full path to the file on the printer.
+//   - localPath: The local file system path where the file should be saved.
+//   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
+//     that reports the current download progress. `totalBytes` will be 0 if unknown.
 func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(int64, int64)) error {
 	reader, err := f.Download(remotePath)
 	if err != nil {
@@ -189,6 +221,10 @@ func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgre
 }
 
 // Upload streams content to the printer.
+//
+// Parameters:
+//   - remotePath: The full path where the file should be saved on the printer.
+//   - content: An `io.Reader` providing the content to upload.
 func (f *FileClient) Upload(remotePath string, content io.Reader) error {
 	c, err := f.connect()
 	if err != nil {
@@ -200,7 +236,12 @@ func (f *FileClient) Upload(remotePath string, content io.Reader) error {
 }
 
 // UploadFile uploads a local file to the printer.
-// The onProgress callback, if not nil, reports the current uploaded bytes and total size.
+//
+// Parameters:
+//   - localPath: The local file system path of the file to upload.
+//   - remotePath: The full path where the file should be saved on the printer.
+//   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
+//     that reports the current upload progress.
 func (f *FileClient) UploadFile(localPath, remotePath string, onProgress func(int64, int64)) error {
 	file, err := os.Open(localPath)
 	if err != nil {

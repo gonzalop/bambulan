@@ -13,16 +13,25 @@ import (
 
 // CameraClient handles the MJPEG camera stream connection over TCP/TLS.
 type CameraClient struct {
-	Hostname   string
+	// Hostname is the IP or hostname of the printer's camera stream.
+	Hostname string
+	// AccessCode is the password for the camera stream authentication.
 	AccessCode string
-	Port       int
-	Username   string
-	streaming  bool
-	stopChan   chan struct{}
-	mu         sync.Mutex
+	// Port is the TCP/TLS port for the camera stream (default 6000).
+	Port int
+	// Username is the username for camera stream authentication (default "bblp").
+	Username string
+
+	streaming bool
+	stopChan  chan struct{}
+	mu        sync.Mutex
 }
 
 // NewCameraClient creates a new CameraClient.
+//
+// Parameters:
+//   - hostname: The IP address or hostname of the printer.
+//   - accessCode: The printer's access code.
 func NewCameraClient(hostname, accessCode string) *CameraClient {
 	return &CameraClient{
 		Hostname:   hostname,
@@ -57,6 +66,20 @@ func (c *CameraClient) createAuthPacket() []byte {
 }
 
 // StartStream connects to the camera and continuously sends new JPEG frames to the onImage callback.
+// This method runs in a new goroutine and will continue until StopStream is called or an error occurs.
+//
+// Parameters:
+//   - onImage: A callback function `func(imageData []byte)` which is invoked for each received JPEG frame.
+//
+// Example:
+//
+//	err := client.Camera.StartStream(func(imgData []byte) {
+//	    fmt.Printf("Received JPEG frame of %d bytes\n", len(imgData))
+//	    // Process or save image data
+//	})
+//	if err != nil {
+//	    log.Println("Error starting stream:", err)
+//	}
 func (c *CameraClient) StartStream(onImage func([]byte)) error {
 	c.mu.Lock()
 	if c.streaming {
@@ -146,8 +169,23 @@ func (c *CameraClient) streamLoop(onImage func([]byte)) {
 	}
 }
 
-// CaptureFrame connects to the camera, captures a single frame, and closes the connection.
-// It returns the JPEG byte slice or an error.
+// CaptureFrame connects to the camera, captures a single JPEG frame, and then closes the connection.
+// This is a blocking call that will return once a frame is received or a timeout occurs.
+//
+// Returns:
+//   - A byte slice containing the JPEG image data.
+//
+// Example:
+//
+//	imgData, err := client.Camera.CaptureFrame()
+//	if err != nil {
+//	    log.Println("Error capturing frame:", err)
+//	} else {
+//	    err = os.WriteFile("frame.jpg", imgData, 0644)
+//	    if err != nil {
+//	        log.Println("Error saving frame:", err)
+//	    }
+//	}
 func (c *CameraClient) CaptureFrame() ([]byte, error) {
 	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", c.Hostname, c.Port), &tls.Config{
 		// Bambu Lab printers use self-signed certificates for their camera stream.

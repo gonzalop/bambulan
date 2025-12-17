@@ -1,34 +1,35 @@
 package bambulan
 
-// Message represents the top-level JSON structure received from the printer.
-type Message struct {
+// bambuMessage represents the top-level JSON structure received from the printer.
+// It is used internally to unwrap the "print" object.
+type bambuMessage struct {
 	Print *PrinterStatus `json:"print"`
 }
 
 // PrinterStatus contains the detailed status of the printer components.
 type PrinterStatus struct {
 	Upload                  *Upload         `json:"upload,omitempty"`
-	NozzleTemp              float64         `json:"nozzle_temper"`
-	NozzleTargetTemp        float64         `json:"nozzle_target_temper"`
-	BedTemp                 float64         `json:"bed_temper"`
-	BedTargetTemp           float64         `json:"bed_target_temper"`
-	ChamberTemp             float64         `json:"chamber_temper"`
-	McPrintStage            string          `json:"mc_print_stage"`
-	HeatbreakFanSpeed       string          `json:"heatbreak_fan_speed"`
-	CoolingFanSpeed         string          `json:"cooling_fan_speed"`
-	BigFan1Speed            string          `json:"big_fan1_speed"`
-	BigFan2Speed            string          `json:"big_fan2_speed"`
-	McPercent               int             `json:"mc_percent"`
-	McRemainingTime         int             `json:"mc_remaining_time"`
-	AMSStatus               int             `json:"ams_status"`
-	AMSRFIDStatus           int             `json:"ams_rfid_status"`
-	HwSwitchState           int             `json:"hw_switch_state"`
-	SpdMag                  int             `json:"spd_mag"`
-	SpdLvl                  int             `json:"spd_lvl"`
-	PrintError              int             `json:"print_error"`
-	Lifecycle               string          `json:"lifecycle"`
-	WifiSignal              string          `json:"wifi_signal"`
-	GcodeState              string          `json:"gcode_state"`
+	NozzleTemp              float64         `json:"nozzle_temper"`        // Actual nozzle temperature in Celsius.
+	NozzleTargetTemp        float64         `json:"nozzle_target_temper"` // Target nozzle temperature in Celsius.
+	BedTemp                 float64         `json:"bed_temper"`           // Actual bed temperature in Celsius.
+	BedTargetTemp           float64         `json:"bed_target_temper"`    // Target bed temperature in Celsius.
+	ChamberTemp             float64         `json:"chamber_temper"`       // Actual chamber temperature in Celsius.
+	McPrintStage            string          `json:"mc_print_stage"`       // Internal code for the current mechanical print stage (see GetPrintStageName).
+	HeatbreakFanSpeed       string          `json:"heatbreak_fan_speed"`  // Speed of the heatbreak fan.
+	CoolingFanSpeed         string          `json:"cooling_fan_speed"`    // Speed of the part cooling fan.
+	BigFan1Speed            string          `json:"big_fan1_speed"`       // Speed of the auxiliary fan.
+	BigFan2Speed            string          `json:"big_fan2_speed"`       // Speed of the chamber fan.
+	McPercent               int             `json:"mc_percent"`           // Print progress percentage (0-100).
+	McRemainingTime         int             `json:"mc_remaining_time"`    // Estimated remaining print time in minutes.
+	AMSStatus               int             `json:"ams_status"`           // AMS status code.
+	AMSRFIDStatus           int             `json:"ams_rfid_status"`      // AMS RFID status code.
+	HwSwitchState           int             `json:"hw_switch_state"`      // Hardware switch state.
+	SpdMag                  int             `json:"spd_mag"`              // Speed multiplier magnitude (e.g., 50, 100, 125, 166).
+	SpdLvl                  int             `json:"spd_lvl"`              // Current speed profile level (1=Silent, 2=Standard, 3=Sport, 4=Ludicrous).
+	PrintError              int             `json:"print_error"`          // Error code if a print error occurred.
+	Lifecycle               string          `json:"lifecycle"`            // Printer lifecycle state (e.g., "printing", "idle").
+	WifiSignal              string          `json:"wifi_signal"`          // WiFi signal strength.
+	GcodeState              string          `json:"gcode_state"`          // Current G-code execution state (e.g., "RUNNING", "PAUSE", "IDLE", "FINISH").
 	GcodeFilePreparePercent string          `json:"gcode_file_prepare_percent"`
 	QueueNumber             int             `json:"queue_number"`
 	QueueTotal              int             `json:"queue_total"`
@@ -49,8 +50,8 @@ type PrinterStatus struct {
 	Sdcard                  bool            `json:"sdcard"`
 	ForceUpgrade            bool            `json:"force_upgrade"`
 	MessProductionState     string          `json:"mess_production_state"`
-	LayerNum                int             `json:"layer_num"`
-	TotalLayerNum           int             `json:"total_layer_num"`
+	LayerNum                int             `json:"layer_num"`       // Current layer number.
+	TotalLayerNum           int             `json:"total_layer_num"` // Total number of layers.
 	SObj                    []interface{}   `json:"s_obj"`
 	FanGear                 int             `json:"fan_gear"`
 	Hms                     []interface{}   `json:"hms"`
@@ -62,9 +63,9 @@ type PrinterStatus struct {
 	UpgradeState            *UpgradeState   `json:"upgrade_state,omitempty"`
 	Command                 string          `json:"command"`
 	Msg                     int             `json:"msg"`
-	SequenceID              string          `json:"sequence_id"`
-	Result                  string          `json:"result"`
-	Reason                  string          `json:"reason"`
+	SequenceID              string          `json:"sequence_id"` // Sequence ID of the last command, for correlating responses.
+	Result                  string          `json:"result"`      // Result of the last command (e.g., "success").
+	Reason                  string          `json:"reason"`      // Reason for command failure, if any.
 }
 
 type Upload struct {
@@ -178,7 +179,13 @@ type UpgradeState struct {
 	Sn                  string        `json:"sn"`
 }
 
-// GetPrintStageName converts the numeric print stage code into a human-readable string.
+// GetPrintStageName converts the internal `mc_print_stage` code and `gcode_state` into a human-readable string
+// representing the current activity of the printer.
+//
+// Example:
+//
+//	status := client.GetPrinterStatus()
+//	fmt.Println("Printer stage:", status.GetPrintStageName())
 func (p *PrinterStatus) GetPrintStageName() string {
 	// If explicitly paused, return "Paused" regardless of the mechanical stage
 	if p.GcodeState == "PAUSE" {

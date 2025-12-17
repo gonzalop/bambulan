@@ -14,21 +14,33 @@ import (
 )
 
 const (
-	BambuQoS = 0 // Anything else is either blocks (sub) or is ignored (pub).
+	BambuQoS = 0 // Anything else either blocks (for subscriptions) or is ignored (for publications).
 )
 
-// MQTTClient handles the MQTT connection to the printer.
+// MQTTClient handles the MQTT connection to the printer for control and monitoring.
+// It manages the connection lifecycle, subscription to status topics, and publishing of commands.
 type MQTTClient struct {
-	Hostname   string
+	// Hostname is the IP or hostname of the printer's MQTT broker.
+	Hostname string
+	// AccessCode is the password for the MQTT connection.
 	AccessCode string
-	Serial     string
-	client     mqtt.Client
-	status     *PrinterStatus
-	OnUpdate   func(*PrinterStatus)
-	seq        atomic.Int64
+	// Serial is the printer's serial number, used to construct topic strings (device/<serial>/...).
+	Serial string
+	// OnUpdate is called whenever a new status report is received from the printer.
+	OnUpdate func(*PrinterStatus)
+
+	client mqtt.Client
+	status *PrinterStatus
+	seq    atomic.Int64
 }
 
 // NewMQTTClient creates a new MQTTClient.
+//
+// Parameters:
+//   - hostname: Printer IP/hostname.
+//   - accessCode: Printer access code (password).
+//   - serial: Printer serial number.
+//   - onUpdate: Callback for status updates.
 func NewMQTTClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus)) *MQTTClient {
 	client := &MQTTClient{
 		Hostname:   hostname,
@@ -99,7 +111,7 @@ func (m *MQTTClient) onConnect(client mqtt.Client) {
 }
 
 func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
-	var partial Message
+	var partial bambuMessage
 	// Unmarshal wrapper first
 	if err := json.Unmarshal(msg.Payload(), &partial); err != nil {
 		slog.Error("Error unmarshalling message wrapper", "error", err)
@@ -151,6 +163,8 @@ func (m *MQTTClient) Publish(command interface{}) error {
 // Commands
 
 // DumpInfo requests a full status push from the printer.
+// It sends a "pushall" command. The printer will respond by publishing a full status report to the report topic.
+// Returns the sequence ID of the request, which can be used to correlate the response.
 func (m *MQTTClient) DumpInfo() (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
@@ -164,6 +178,11 @@ func (m *MQTTClient) DumpInfo() (string, error) {
 }
 
 // SendGCode sends a single line of G-Code to the printer.
+// Returns the sequence ID of the request.
+//
+// Example:
+//
+//	client.MQTT.SendGCode("G28") // Auto-home
 func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
@@ -179,6 +198,9 @@ func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 
 // StartPrint starts a print job for a file already on the printer (SD card).
 // The filename specifies the path to the file on the printer (e.g., "Metadata/plate_1.gcode" or "model.gcode").
+// Note: You usually need to upload the file via FTPS first.
+//
+// Returns the sequence ID of the request.
 func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, error) {
 	// TODO: the .g3code.3mf files are just zip files. Perhaps we should get the file name from there.
 	//   And what about multiple plates? Metadata/model_settings.config has the file and supports
@@ -291,8 +313,16 @@ func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 }
 
 // SetAMSFilament updates the filament properties (color and type) for a specific AMS slot.
-// amsID and trayID are 0-indexed. Color is in RRGGBBAA hex format (e.g., "FF0000FF").
-// filamentType is the material type identifier (e.g., "PLA Basic").
+//
+// NOTE: This command is tricky and often doesn't work correctly with the printer's current firmware.
+//
+// Parameters:
+//   - amsID: The ID of the AMS unit (0-indexed, typically 0 for the first AMS).
+//   - trayID: The ID of the tray within the AMS unit (0-indexed, 0-3 for each AMS).
+//   - color: The filament color in RRGGBBAA hex format (e.g., "FF0000FF" for opaque red).
+//   - filamentType: The filament material type identifier (e.g., "PLA Basic", "PETG", "ABS").
+//
+// Returns the sequence ID of the request.
 func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType string) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
