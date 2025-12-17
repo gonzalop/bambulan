@@ -165,7 +165,7 @@ func (c *ChamberLightCmd) Run(ctx *Context) error {
 	time.Sleep(1 * time.Second)
 
 	state := c.State == "on"
-	if err := client.MQTT.SetChamberLight(state); err != nil {
+	if _, err := client.MQTT.SetChamberLight(state); err != nil {
 		return err
 	}
 	fmt.Printf("Set chamber light to %v\n", state)
@@ -193,7 +193,7 @@ func (c *SpeedCmd) Run(ctx *Context) error {
 	}
 
 	val := speedMap[c.Mode]
-	if err := client.MQTT.SetSpeedProfile(val); err != nil {
+	if _, err := client.MQTT.SetSpeedProfile(val); err != nil {
 		return err
 	}
 	fmt.Printf("Set speed profile to %s (%s)\n", c.Mode, val)
@@ -217,7 +217,7 @@ func (c *PrintPauseCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if err := client.MQTT.PausePrint(); err != nil {
+	if _, err := client.MQTT.PausePrint(); err != nil {
 		return err
 	}
 	fmt.Println("Sent pause command")
@@ -234,7 +234,7 @@ func (c *PrintResumeCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if err := client.MQTT.ResumePrint(); err != nil {
+	if _, err := client.MQTT.ResumePrint(); err != nil {
 		return err
 	}
 	fmt.Println("Sent resume command")
@@ -251,7 +251,7 @@ func (c *PrintStopCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if err := client.MQTT.StopPrint(); err != nil {
+	if _, err := client.MQTT.StopPrint(); err != nil {
 		return err
 	}
 	fmt.Println("Sent stop command")
@@ -312,7 +312,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 	fmt.Printf("Options: BedType=%s, AMS=%v, Leveling=%v, FlowCalibration=%v, VibrationCalibration=%v\n",
 		opts.BedType, opts.UseAMS, opts.BedLeveling, opts.FlowCalibration, opts.VibrationCalibration)
 
-	if err := client.MQTT.StartPrint(filename, opts); err != nil {
+	if _, err := client.MQTT.StartPrint(filename, opts); err != nil {
 		return fmt.Errorf("failed to start print: %w", err)
 	}
 	fmt.Println("Print started!")
@@ -325,17 +325,47 @@ type SendGCodeCmd struct {
 
 func (c *SendGCodeCmd) Run(ctx *Context) error {
 	client := ctx.Client
+	// Buffer for updates to capture response even if it comes during SendGCode return
+	updates := make(chan *bambulan.PrinterStatus, 100)
+
+	// Override update handler to capture response
+	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
+		statusCopy := *status
+		select {
+		case updates <- &statusCopy:
+		default:
+			// Buffer full, drop update (unlikely with 100 size)
+		}
+	}
+
 	if err := client.Start(); err != nil {
 		return err
 	}
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if err := client.MQTT.SendGCode(c.GCode); err != nil {
+	fmt.Println("Calling SendGCode...")
+	seqID, err := client.MQTT.SendGCode(c.GCode)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("Sent G-Code: %s\n", c.GCode)
-	return nil
+
+	fmt.Println("Waiting for response...")
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case status := <-updates:
+			if status.SequenceId == seqID {
+				if status.Result == "success" {
+					fmt.Println("Command success!")
+					return nil
+				}
+				return fmt.Errorf("command failed: result=%s, reason=%s", status.Result, status.Reason)
+			}
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for response")
+		}
+	}
 }
 
 type CaptureCmd struct {
@@ -445,7 +475,7 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 	defer client.Stop()
 
 	// DumpInfo is called on connect, but we can also explicitly call it
-	if err := client.MQTT.DumpInfo(); err != nil {
+	if _, err := client.MQTT.DumpInfo(); err != nil {
 		return err
 	}
 
@@ -472,6 +502,18 @@ type AmsFilamentCmd struct {
 
 func (c *AmsFilamentCmd) Run(ctx *Context) error {
 	client := ctx.Client
+	// Buffer for updates to capture response
+	updates := make(chan *bambulan.PrinterStatus, 100)
+
+	// Override update handler to capture response
+	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
+		statusCopy := *status
+		select {
+		case updates <- &statusCopy:
+		default:
+		}
+	}
+
 	if err := client.Start(); err != nil {
 		return err
 	}
@@ -479,11 +521,27 @@ func (c *AmsFilamentCmd) Run(ctx *Context) error {
 	time.Sleep(1 * time.Second)
 
 	fmt.Printf("Updating AMS Unit %d Slot %d to Type='%s', Color='%s'...\n", c.Unit, c.Slot, c.Type, c.Color)
-	if err := client.MQTT.SetAMSFilament(c.Unit, c.Slot, c.Color, c.Type); err != nil {
+	seqID, err := client.MQTT.SetAMSFilament(c.Unit, c.Slot, c.Color, c.Type)
+	if err != nil {
 		return err
 	}
-	fmt.Println("Update sent.")
-	return nil
+	fmt.Println("Update sent. Waiting for confirmation...")
+
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case status := <-updates:
+			if status.SequenceId == seqID {
+				if status.Result == "success" {
+					fmt.Println("Success!")
+					return nil
+				}
+				return fmt.Errorf("command failed: result=%s, reason=%s", status.Result, status.Reason)
+			}
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for confirmation")
+		}
+	}
 }
 
 func main() {

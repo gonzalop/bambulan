@@ -13,6 +13,10 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
+const (
+	BambuQoS = 0 // Anything else is either blocks (sub) or is ignored (pub).
+)
+
 // MQTTClient handles the MQTT connection to the printer.
 type MQTTClient struct {
 	Hostname   string
@@ -80,13 +84,13 @@ func (m *MQTTClient) Stop() {
 
 func (m *MQTTClient) onConnect(client mqtt.Client) {
 	topic := fmt.Sprintf("device/%s/report", m.Serial)
-	if token := client.Subscribe(topic, 0, m.onMessage); token.Wait() && token.Error() != nil {
+	if token := client.Subscribe(topic, BambuQoS, m.onMessage); token.Wait() && token.Error() != nil {
 		slog.Error("Error subscribing to topic", "topic", topic, "error", token.Error())
 	} else {
 		slog.Info("Subscribed to topic", "topic", topic)
 		// Request full status update to ensure we have all fields (like lights_report)
 		go func() {
-			if err := m.DumpInfo(); err != nil {
+			if _, err := m.DumpInfo(); err != nil {
 				slog.Error("Failed to dump info on connect", "error", err)
 			}
 		}()
@@ -120,7 +124,11 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 		}
 		slog.Debug("Received this shit:\n====BEGIN====\n%v\n==== END ====\n", "raw", printRaw)
 		if m.OnUpdate != nil {
-			m.OnUpdate(m.status)
+			// Invoke callback in a separate goroutine to avoid blocking the MQTT read loop,
+			// which is required to process PUBACKs for QoS > 0.
+			// Pass a shallow copy to minimize race conditions on immediate fields (like SequenceId/Result).
+			statusCopy := *m.status
+			go m.OnUpdate(&statusCopy)
 		}
 	}
 }
@@ -132,7 +140,10 @@ func (m *MQTTClient) Publish(command interface{}) error {
 		return err
 	}
 	topic := fmt.Sprintf("device/%s/request", m.Serial)
-	token := m.client.Publish(topic, 2, false, payload)
+
+	// Use QoS 0 for fire-and-forget sending to avoid blocking on handshake.
+	// We rely on application-level response (Sequence ID) for confirmation.
+	token := m.client.Publish(topic, BambuQoS, false, payload)
 	token.Wait()
 	return token.Error()
 }
@@ -140,41 +151,47 @@ func (m *MQTTClient) Publish(command interface{}) error {
 // Commands
 
 // DumpInfo requests a full status push from the printer.
-func (m *MQTTClient) DumpInfo() error {
+func (m *MQTTClient) DumpInfo() (string, error) {
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"pushing": map[string]interface{}{
-			"sequence_id": m.getNextSequenceID(),
+			"sequence_id": seqID,
 			"command":     "pushall",
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // SendGCode sends a single line of G-Code to the printer.
-func (m *MQTTClient) SendGCode(gcode string) error {
+func (m *MQTTClient) SendGCode(gcode string) (string, error) {
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
 			"command":     "gcode_line",
-			"sequence_id": m.getNextSequenceID(),
+			"sequence_id": seqID,
 			"param":       fmt.Sprintf("%s \n", gcode),
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // StartPrint starts a print job for a file already on the printer (SD card).
 // The filename specifies the path to the file on the printer (e.g., "Metadata/plate_1.gcode" or "model.gcode").
-func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) error {
+func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, error) {
+	// TODO: the .g3code.3mf files are just zip files. Perhaps we should get the file name from there.
+	//   And what about multiple plates? Metadata/model_settings.config has the file and supports
+	//   multiple plates.
 	param := "Metadata/plate_1.gcode"
 	if strings.HasSuffix(strings.ToLower(filename), ".gcode") {
 		param = filename
 	}
 
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
-			"sequence_id":    m.getNextSequenceID(),
+			"sequence_id":    seqID,
 			"command":        "project_file",
 			"param":          param,
 			"subtask_name":   filename,
@@ -192,18 +209,19 @@ func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) error {
 			"task_id":        "0",
 		},
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // SetChamberLight turns the chamber light on or off.
-func (m *MQTTClient) SetChamberLight(on bool) error {
+func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
 	mode := "off"
 	if on {
 		mode = "on"
 	}
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"system": map[string]interface{}{
-			"sequence_id":   m.getNextSequenceID(),
+			"sequence_id":   seqID,
 			"command":       "ledctrl",
 			"led_node":      "chamber_light",
 			"led_mode":      mode,
@@ -214,67 +232,72 @@ func (m *MQTTClient) SetChamberLight(on bool) error {
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // PausePrint pauses the current print job.
-func (m *MQTTClient) PausePrint() error {
+func (m *MQTTClient) PausePrint() (string, error) {
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
-			"sequence_id": m.getNextSequenceID(),
+			"sequence_id": seqID,
 			"command":     "pause",
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // ResumePrint resumes a paused print job.
-func (m *MQTTClient) ResumePrint() error {
+func (m *MQTTClient) ResumePrint() (string, error) {
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
-			"sequence_id": m.getNextSequenceID(),
+			"sequence_id": seqID,
 			"command":     "resume",
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // StopPrint cancels and stops the current print job.
-func (m *MQTTClient) StopPrint() error {
+func (m *MQTTClient) StopPrint() (string, error) {
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
-			"sequence_id": m.getNextSequenceID(),
+			"sequence_id": seqID,
 			"command":     "stop",
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // SetSpeedProfile sets the print speed profile.
 // Supported levels are defined by Speed* constants in models.go.
-func (m *MQTTClient) SetSpeedProfile(level string) error {
+func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 	// level: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
-			"sequence_id": m.getNextSequenceID(),
+			"sequence_id": seqID,
 			"command":     "print_speed",
 			"param":       level,
 		},
 		"user_id": "1234567890",
 	}
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }
 
 // SetAMSFilament updates the filament properties (color and type) for a specific AMS slot.
 // amsID and trayID are 0-indexed. Color is in RRGGBBAA hex format (e.g., "FF0000FF").
 // filamentType is the material type identifier (e.g., "PLA Basic").
-func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType string) error {
+func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType string) (string, error) {
+	seqID := m.getNextSequenceID()
 	cmd := map[string]interface{}{
 		"print": map[string]interface{}{
-			"sequence_id":  m.getNextSequenceID(),
+			"sequence_id":  seqID,
 			"command":      "ams_filament_setting",
 			"ams_id":       amsID,
 			"tray_id":      trayID,
@@ -284,5 +307,5 @@ func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType strin
 		"user_id": "1234567890",
 	}
 	fmt.Printf("%v\n", cmd)
-	return m.Publish(cmd)
+	return seqID, m.Publish(cmd)
 }

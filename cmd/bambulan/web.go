@@ -339,23 +339,23 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch cmd {
 	case "light_on":
-		err = session.Client.MQTT.SetChamberLight(true)
+		_, err = session.Client.MQTT.SetChamberLight(true)
 	case "light_off":
-		err = session.Client.MQTT.SetChamberLight(false)
+		_, err = session.Client.MQTT.SetChamberLight(false)
 	case "speed_silent":
-		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSilent)
+		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSilent)
 	case "speed_std":
-		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedStandard)
+		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedStandard)
 	case "speed_sport":
-		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSport)
+		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSport)
 	case "speed_ludi":
-		err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedLudicrous)
+		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedLudicrous)
 	case "pause":
-		err = session.Client.MQTT.PausePrint()
+		_, err = session.Client.MQTT.PausePrint()
 	case "resume":
-		err = session.Client.MQTT.ResumePrint()
+		_, err = session.Client.MQTT.ResumePrint()
 	case "stop":
-		err = session.Client.MQTT.StopPrint()
+		_, err = session.Client.MQTT.StopPrint()
 	default:
 		http.Error(w, "Unknown command", http.StatusBadRequest)
 		return
@@ -515,7 +515,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Start Print
-	if err := session.Client.MQTT.StartPrint(remotePath, opts); err != nil {
+	if _, err := session.Client.MQTT.StartPrint(remotePath, opts); err != nil {
 		slog.Error("Start print failed", "path", remotePath, "error", err)
 		http.Error(w, "Start print failed: "+err.Error(), http.StatusInternalServerError)
 		return

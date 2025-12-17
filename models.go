@@ -63,6 +63,8 @@ type PrinterStatus struct {
 	Command                 string          `json:"command"`
 	Msg                     int             `json:"msg"`
 	SequenceId              string          `json:"sequence_id"`
+	Result                  string          `json:"result"`
+	Reason                  string          `json:"reason"`
 }
 
 type Upload struct {
