@@ -418,7 +418,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Wrap in top-level object as expected by the frontend.
-	resp := map[string]interface{}{
+	resp := map[string]any{
 		"print":         session.Status,
 		"stage_message": session.Status.GetPrintStageName(),
 	}

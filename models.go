@@ -41,7 +41,7 @@ type PrinterStatus struct {
 	SubtaskID               string          `json:"subtask_id"`
 	SubtaskName             string          `json:"subtask_name"`
 	GcodeFile               string          `json:"gcode_file"`
-	Stg                     []interface{}   `json:"stg"`
+	Stg                     []any           `json:"stg"`
 	StgCur                  int             `json:"stg_cur"`
 	PrintType               string          `json:"print_type"`
 	HomeFlag                int             `json:"home_flag"`
@@ -52,9 +52,9 @@ type PrinterStatus struct {
 	MessProductionState     string          `json:"mess_production_state"`
 	LayerNum                int             `json:"layer_num"`       // Current layer number.
 	TotalLayerNum           int             `json:"total_layer_num"` // Total number of layers.
-	SObj                    []interface{}   `json:"s_obj"`
+	SObj                    []any           `json:"s_obj"`
 	FanGear                 int             `json:"fan_gear"`
-	Hms                     []interface{}   `json:"hms"`
+	Hms                     []any           `json:"hms"`
 	Online                  *Online         `json:"online,omitempty"`
 	Ams                     *AMS            `json:"ams,omitempty"`
 	IPCam                   *IPCam          `json:"ipcam,omitempty"`
@@ -157,26 +157,26 @@ type LightsReport struct {
 }
 
 type UpgradeState struct {
-	SequenceID          int           `json:"sequence_id"`
-	Progress            string        `json:"progress"`
-	Status              string        `json:"status"`
-	ConsistencyRequest  bool          `json:"consistency_request"`
-	DisState            int           `json:"dis_state"`
-	ErrCode             int           `json:"err_code"`
-	ForceUpgrade        bool          `json:"force_upgrade"`
-	Message             string        `json:"message"`
-	Module              string        `json:"module"`
-	NewVersionState     int           `json:"new_version_state"`
-	NewVerList          []interface{} `json:"new_ver_list"`
-	CurStateCode        int           `json:"cur_state_code"`
-	AhbNewVersionNumber string        `json:"ahb_new_version_number"`
-	AmsNewVersionNumber string        `json:"ams_new_version_number"`
-	ExtNewVersionNumber string        `json:"ext_new_version_number"`
-	Idx                 int           `json:"idx"`
-	Idx1                int           `json:"idx1"`
-	LowerLimit          string        `json:"lower_limit"`
-	OtaNewVersionNumber string        `json:"ota_new_version_number"`
-	Sn                  string        `json:"sn"`
+	SequenceID          int    `json:"sequence_id"`
+	Progress            string `json:"progress"`
+	Status              string `json:"status"`
+	ConsistencyRequest  bool   `json:"consistency_request"`
+	DisState            int    `json:"dis_state"`
+	ErrCode             int    `json:"err_code"`
+	ForceUpgrade        bool   `json:"force_upgrade"`
+	Message             string `json:"message"`
+	Module              string `json:"module"`
+	NewVersionState     int    `json:"new_version_state"`
+	NewVerList          []any  `json:"new_ver_list"`
+	CurStateCode        int    `json:"cur_state_code"`
+	AhbNewVersionNumber string `json:"ahb_new_version_number"`
+	AmsNewVersionNumber string `json:"ams_new_version_number"`
+	ExtNewVersionNumber string `json:"ext_new_version_number"`
+	Idx                 int    `json:"idx"`
+	Idx1                int    `json:"idx1"`
+	LowerLimit          string `json:"lower_limit"`
+	OtaNewVersionNumber string `json:"ota_new_version_number"`
+	Sn                  string `json:"sn"`
 }
 
 // GetPrintStageName converts the internal `mc_print_stage` code and `gcode_state` into a human-readable string

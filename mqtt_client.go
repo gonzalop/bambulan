@@ -146,7 +146,7 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 }
 
 // Publish sends a JSON command to the printer request topic.
-func (m *MQTTClient) Publish(command interface{}) error {
+func (m *MQTTClient) Publish(command any) error {
 	payload, err := json.Marshal(command)
 	if err != nil {
 		return err
@@ -167,8 +167,8 @@ func (m *MQTTClient) Publish(command interface{}) error {
 // Returns the sequence ID of the request, which can be used to correlate the response.
 func (m *MQTTClient) DumpInfo() (string, error) {
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"pushing": map[string]interface{}{
+	cmd := map[string]any{
+		"pushing": map[string]any{
 			"sequence_id": seqID,
 			"command":     "pushall",
 		},
@@ -185,8 +185,8 @@ func (m *MQTTClient) DumpInfo() (string, error) {
 //	client.MQTT.SendGCode("G28") // Auto-home
 func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"command":     "gcode_line",
 			"sequence_id": seqID,
 			"param":       fmt.Sprintf("%s \n", gcode),
@@ -211,8 +211,8 @@ func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, err
 	}
 
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"sequence_id":    seqID,
 			"command":        "project_file",
 			"param":          param,
@@ -241,8 +241,8 @@ func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
 		mode = "on"
 	}
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"system": map[string]interface{}{
+	cmd := map[string]any{
+		"system": map[string]any{
 			"sequence_id":   seqID,
 			"command":       "ledctrl",
 			"led_node":      "chamber_light",
@@ -260,8 +260,8 @@ func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
 // PausePrint pauses the current print job.
 func (m *MQTTClient) PausePrint() (string, error) {
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"sequence_id": seqID,
 			"command":     "pause",
 		},
@@ -273,8 +273,8 @@ func (m *MQTTClient) PausePrint() (string, error) {
 // ResumePrint resumes a paused print job.
 func (m *MQTTClient) ResumePrint() (string, error) {
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"sequence_id": seqID,
 			"command":     "resume",
 		},
@@ -286,8 +286,8 @@ func (m *MQTTClient) ResumePrint() (string, error) {
 // StopPrint cancels and stops the current print job.
 func (m *MQTTClient) StopPrint() (string, error) {
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"sequence_id": seqID,
 			"command":     "stop",
 		},
@@ -301,8 +301,8 @@ func (m *MQTTClient) StopPrint() (string, error) {
 func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 	// level: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"sequence_id": seqID,
 			"command":     "print_speed",
 			"param":       level,
@@ -325,8 +325,8 @@ func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 // Returns the sequence ID of the request.
 func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType string) (string, error) {
 	seqID := m.getNextSequenceID()
-	cmd := map[string]interface{}{
-		"print": map[string]interface{}{
+	cmd := map[string]any{
+		"print": map[string]any{
 			"sequence_id":  seqID,
 			"command":      "ams_filament_setting",
 			"ams_id":       amsID,
