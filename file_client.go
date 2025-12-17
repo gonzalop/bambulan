@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -26,10 +28,38 @@ func NewFileClient(hostname, accessCode string) *FileClient {
 }
 
 func (f *FileClient) connect() (*ftp.ServerConn, error) {
-	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname), ftp.DialWithTimeout(5*time.Second), ftp.DialWithTLS(&tls.Config{
-		// Bambu Lab printers use self-signed certificates for their FTPS server.
-		InsecureSkipVerify: true,
-	}))
+	// Use a custom dialer to intercept 0.0.0.0 addresses from the printer PASV
+	// and replace them with the actual hostname.
+	fixIPDialer := func(network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+
+		// If PASV asks us to connect to 0.0.0.0...
+		if host == "0.0.0.0" || host == "::" {
+			slog.Info("Fixing invalid data address", "old", addr, "new_host", f.Hostname, "port", port)
+			// Reassemble using the known good host and the new port
+			addr = net.JoinHostPort(f.Hostname, port)
+		}
+
+		// Proceed with the standard dial using the fixed address
+		slog.Debug("Dialing FTPS", "address", addr)
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		tlsConfig := &tls.Config{
+			// Bambu Lab printers use self-signed certificates for their FTPS server.
+			InsecureSkipVerify: true,
+		}
+		return tls.DialWithDialer(dialer, network, addr, tlsConfig)
+	}
+
+	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname),
+		// Note: We do NOT use ftp.DialWithTLS here because our custom dialer
+		// already returns a TLS connection. Using both would cause double-wrapping.
+		ftp.DialWithTimeout(5*time.Second),
+		ftp.DialWithDebugOutput(os.Stdout),
+		ftp.DialWithDialFunc(fixIPDialer),
+	)
 	if err != nil {
 		return nil, err
 	}
