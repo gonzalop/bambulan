@@ -20,8 +20,8 @@ type PrinterStatus struct {
 	BigFan2Speed            string          `json:"big_fan2_speed"`
 	McPercent               int             `json:"mc_percent"`
 	McRemainingTime         int             `json:"mc_remaining_time"`
-	AmsStatus               int             `json:"ams_status"`
-	AmsRfidStatus           int             `json:"ams_rfid_status"`
+	AMSStatus               int             `json:"ams_status"`
+	AMSRFIDStatus           int             `json:"ams_rfid_status"`
 	HwSwitchState           int             `json:"hw_switch_state"`
 	SpdMag                  int             `json:"spd_mag"`
 	SpdLvl                  int             `json:"spd_lvl"`
@@ -34,10 +34,10 @@ type PrinterStatus struct {
 	QueueTotal              int             `json:"queue_total"`
 	QueueEst                int             `json:"queue_est"`
 	QueueSts                int             `json:"queue_sts"`
-	ProjectId               string          `json:"project_id"`
-	ProfileId               string          `json:"profile_id"`
-	TaskId                  string          `json:"task_id"`
-	SubtaskId               string          `json:"subtask_id"`
+	ProjectID               string          `json:"project_id"`
+	ProfileID               string          `json:"profile_id"`
+	TaskID                  string          `json:"task_id"`
+	SubtaskID               string          `json:"subtask_id"`
 	SubtaskName             string          `json:"subtask_name"`
 	GcodeFile               string          `json:"gcode_file"`
 	Stg                     []interface{}   `json:"stg"`
@@ -56,13 +56,13 @@ type PrinterStatus struct {
 	Hms                     []interface{}   `json:"hms"`
 	Online                  *Online         `json:"online,omitempty"`
 	Ams                     *AMS            `json:"ams,omitempty"`
-	Ipcam                   *IPCam          `json:"ipcam,omitempty"`
+	IPCam                   *IPCam          `json:"ipcam,omitempty"`
 	VtTray                  *VTTray         `json:"vt_tray,omitempty"`
 	LightsReport            []*LightsReport `json:"lights_report,omitempty"`
 	UpgradeState            *UpgradeState   `json:"upgrade_state,omitempty"`
 	Command                 string          `json:"command"`
 	Msg                     int             `json:"msg"`
-	SequenceId              string          `json:"sequence_id"`
+	SequenceID              string          `json:"sequence_id"`
 	Result                  string          `json:"result"`
 	Reason                  string          `json:"reason"`
 }
@@ -73,12 +73,12 @@ type Upload struct {
 	Status        string `json:"status"`
 	Progress      int    `json:"progress"`
 	Message       string `json:"message"`
-	OssUrl        string `json:"oss_url"`
-	SequenceId    string `json:"sequence_id"`
+	OSSURL        string `json:"oss_url"`
+	SequenceID    string `json:"sequence_id"`
 	Speed         int    `json:"speed"`
-	TaskId        string `json:"task_id"`
+	TaskID        string `json:"task_id"`
 	TimeRemaining int    `json:"time_remaining"`
-	TroubleId     string `json:"trouble_id"`
+	TroubleID     string `json:"trouble_id"`
 }
 
 type Online struct {
@@ -141,13 +141,13 @@ type AMS struct {
 
 type IPCam struct {
 	AgoraService string `json:"agora_service"`
-	IpcamDev     string `json:"ipcam_dev"`
-	IpcamRecord  string `json:"ipcam_record"`
+	IPCamDev     string `json:"ipcam_dev"`
+	IPCamRecord  string `json:"ipcam_record"`
 	Timelapse    string `json:"timelapse"`
 	Resolution   string `json:"resolution"`
 	TutkServer   string `json:"tutk_server"`
 	ModeBits     int    `json:"mode_bits"`
-	RtspUrl      string `json:"rtsp_url"`
+	RTSPURL      string `json:"rtsp_url"`
 }
 
 type LightsReport struct {
@@ -156,7 +156,7 @@ type LightsReport struct {
 }
 
 type UpgradeState struct {
-	SequenceId          int           `json:"sequence_id"`
+	SequenceID          int           `json:"sequence_id"`
 	Progress            string        `json:"progress"`
 	Status              string        `json:"status"`
 	ConsistencyRequest  bool          `json:"consistency_request"`

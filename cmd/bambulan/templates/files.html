@@ -4,6 +4,7 @@
 <head>
     <title>BambuLAN File Manager</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{.CSRFToken}}">
     <link rel="stylesheet" href="/style.css">
 </head>
 
@@ -47,12 +48,16 @@
             const formData = new FormData();
             formData.append('file', file);
             formData.append('path', currentPath);
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
             const statusDiv = document.getElementById('file-list');
             statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + file.name + '...</div>';
 
             fetch('/api/upload', {
                 method: 'POST',
+                headers: {
+                    'X-CSRF-Token': token
+                },
                 body: formData
             }).then(resp => {
                 if (!resp.ok) resp.text().then(text => alert("Upload failed: " + text));

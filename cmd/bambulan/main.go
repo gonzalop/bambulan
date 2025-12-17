@@ -355,7 +355,7 @@ func (c *SendGCodeCmd) Run(ctx *Context) error {
 	for {
 		select {
 		case status := <-updates:
-			if status.SequenceId == seqID {
+			if status.SequenceID == seqID {
 				if status.Result == "success" {
 					fmt.Println("Command success!")
 					return nil
@@ -531,7 +531,7 @@ func (c *AmsFilamentCmd) Run(ctx *Context) error {
 	for {
 		select {
 		case status := <-updates:
-			if status.SequenceId == seqID {
+			if status.SequenceID == seqID {
 				if status.Result == "success" {
 					fmt.Println("Success!")
 					return nil

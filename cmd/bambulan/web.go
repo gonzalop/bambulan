@@ -1,11 +1,15 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -22,13 +26,15 @@ import (
 var templateFS embed.FS
 
 type WebCmd struct {
-	Bind string `help:"Address to bind to" default:":8080"`
+	Bind   string `help:"Address to bind to" default:"127.0.0.1:8080"`
+	Secret string `help:"Secret for session encryption (optional, random default)"`
 }
 
 type Session struct {
-	Client *bambulan.Client
-	Status *bambulan.PrinterStatus
-	Mu     sync.RWMutex
+	Client    *bambulan.Client
+	Status    *bambulan.PrinterStatus
+	CSRFToken string
+	Mu        sync.RWMutex
 }
 
 type WebServer struct {
@@ -38,6 +44,7 @@ type WebServer struct {
 	// Connection pooling
 	ActiveClients map[string]*bambulan.Client
 	ClientsMu     sync.Mutex
+	Key           []byte
 }
 
 func NewWebServer() *WebServer {
@@ -48,8 +55,27 @@ func NewWebServer() *WebServer {
 }
 
 func (c *WebCmd) Run(ctx *Context) error {
+	secret := c.Secret
+	if secret == "" {
+		// Generate 32 bytes of random data
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			return fmt.Errorf("failed to generate random secret: %w", err)
+		}
+		// Encode to base64 to make it printable and compact
+		secret = base64.StdEncoding.EncodeToString(b)
+		fmt.Printf("No secret provided. Generated session secret:\n\n\t%s\n\n", secret)
+		fmt.Println("To restore sessions after a restart, use this secret:")
+		fmt.Printf("\tbambulan web --secret \"%s\"\n\n", secret)
+	}
+
+	// Derive 32-byte key from secret using SHA-256
+	keyHash := sha256.Sum256([]byte(secret))
+	key := keyHash[:]
+
 	s := NewWebServer()
 	s.BindAddr = c.Bind
+	s.Key = key
 	return s.Start()
 }
 
@@ -70,6 +96,47 @@ func (s *WebServer) Start() error {
 	slog.Info("Starting web server", "addr", s.BindAddr)
 	slog.Info("Web server listening", "url", fmt.Sprintf("http://localhost%s", s.BindAddr))
 	return http.ListenAndServe(s.BindAddr, nil)
+}
+
+func encrypt(data []byte, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nonce, nonce, data, nil), nil
+}
+
+func decrypt(data []byte, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(data) < nonceSize {
+		return nil, errors.New("ciphertext too short")
+	}
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	return gcm.Open(nil, nonce, ciphertext, nil)
+}
+
+func generateRandomString(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }
 
 // getClient returns an existing client or creates a new one.
@@ -109,13 +176,33 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 	return client, nil
 }
 
+// validateCSRF checks the request for a valid CSRF token against the session.
+// It checks the "X-CSRF-Token" header and the "_csrf" form value.
+func (s *WebServer) validateCSRF(r *http.Request, session *Session) bool {
+	// 1. Check Header
+	token := r.Header.Get("X-CSRF-Token")
+	if token == "" {
+		// 2. Check Form (requires parsing form first, usually done by caller or here)
+		// Assuming caller handles form parsing if needed, but for safety we can try FormValue
+		// which parses form if not already parsed.
+		token = r.FormValue("_csrf")
+	}
+
+	if token == "" {
+		return false
+	}
+
+	// Constant time comparison not strictly necessary for random tokens but good practice
+	return token == session.CSRFToken
+}
+
 func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
@@ -132,11 +219,13 @@ func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	session.Mu.RLock()
 	defer session.Mu.RUnlock()
 	data := struct {
-		Status *bambulan.PrinterStatus
-		Host   string
+		Status    *bambulan.PrinterStatus
+		Host      string
+		CSRFToken string
 	}{
-		Status: session.Status,
-		Host:   session.Client.MQTT.Hostname,
+		Status:    session.Status,
+		Host:      session.Client.MQTT.Hostname,
+		CSRFToken: session.CSRFToken,
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		slog.Error("Template execution failed", "error", err)
@@ -144,7 +233,7 @@ func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleFiles(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
@@ -158,7 +247,14 @@ func (s *WebServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 
 	session.Mu.RLock()
 	defer session.Mu.RUnlock()
-	if err := tmpl.Execute(w, nil); err != nil {
+
+	data := struct {
+		CSRFToken string
+	}{
+		CSRFToken: session.CSRFToken,
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
 		slog.Error("Template execution failed", "error", err)
 	}
 }
@@ -218,7 +314,8 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		sessionID := hex.EncodeToString(b)
 
 		session := &Session{
-			Status: &bambulan.PrinterStatus{},
+			Status:    &bambulan.PrinterStatus{},
+			CSRFToken: generateRandomString(32),
 		}
 
 		client, err := s.getClient(data.Host, data.Code, data.Serial)
@@ -250,14 +347,22 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			"code":   data.Code,
 			"serial": data.Serial,
 		}
-		if authBytes, err := json.Marshal(authData); err == nil {
-			http.SetCookie(w, &http.Cookie{
-				Name:     "bambulan_auth",
-				Value:    base64.StdEncoding.EncodeToString(authBytes),
-				Path:     "/",
-				HttpOnly: true,
-				SameSite: http.SameSiteStrictMode,
-			})
+
+		authBytes, err := json.Marshal(authData)
+		if err == nil {
+			// Encrypt the JSON data
+			encrypted, err := encrypt(authBytes, s.Key)
+			if err == nil {
+				http.SetCookie(w, &http.Cookie{
+					Name:     "bambulan_auth",
+					Value:    base64.StdEncoding.EncodeToString(encrypted),
+					Path:     "/",
+					HttpOnly: true,
+					SameSite: http.SameSiteStrictMode,
+				})
+			} else {
+				slog.Error("Failed to encrypt auth cookie", "error", err)
+			}
 		}
 
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -266,12 +371,14 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// GET request: Try to pre-fill from cookie
 	if cookie, err := r.Cookie("bambulan_auth"); err == nil && cookie.Value != "" {
-		if dataBytes, err := base64.StdEncoding.DecodeString(cookie.Value); err == nil {
-			var authData map[string]string
-			if err := json.Unmarshal(dataBytes, &authData); err == nil {
-				data.Host = authData["host"]
-				data.Code = authData["code"]
-				data.Serial = authData["serial"]
+		if encryptedBytes, err := base64.StdEncoding.DecodeString(cookie.Value); err == nil {
+			if decryptedBytes, err := decrypt(encryptedBytes, s.Key); err == nil {
+				var authData map[string]string
+				if err := json.Unmarshal(decryptedBytes, &authData); err == nil {
+					data.Host = authData["host"]
+					data.Code = authData["code"]
+					data.Serial = authData["serial"]
+				}
 			}
 		}
 	}
@@ -298,7 +405,7 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -322,7 +429,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -330,6 +437,12 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate CSRF
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
 		return
 	}
 
@@ -370,7 +483,7 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -395,7 +508,7 @@ func (s *WebServer) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -424,7 +537,7 @@ func (s *WebServer) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -432,6 +545,12 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate CSRF
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
 		return
 	}
 
@@ -466,7 +585,7 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -474,6 +593,12 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate CSRF
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
 		return
 	}
 
@@ -525,7 +650,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(r)
+	session, ok := s.getSession(w, r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -578,11 +703,11 @@ func (s *WebServer) getSessionID(r *http.Request) (string, bool) {
 	return cookie.Value, true
 }
 
-func (s *WebServer) getSession(r *http.Request) (*Session, bool) {
+func (s *WebServer) getSession(w http.ResponseWriter, r *http.Request) (*Session, bool) {
 	id, ok := s.getSessionID(r)
 	if !ok {
 		// No session cookie, check for auth cookie to auto-login
-		return s.tryRestoreSession(r)
+		return s.tryRestoreSession(w, r)
 	}
 
 	s.Mu.RLock()
@@ -594,10 +719,10 @@ func (s *WebServer) getSession(r *http.Request) (*Session, bool) {
 	}
 
 	// Session ID exists in cookie but not in memory (restart?). Try to restore.
-	return s.tryRestoreSession(r)
+	return s.tryRestoreSession(w, r)
 }
 
-func (s *WebServer) tryRestoreSession(r *http.Request) (*Session, bool) {
+func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*Session, bool) {
 	cookie, err := r.Cookie("bambulan_auth")
 	if err != nil || cookie.Value == "" {
 		return nil, false
@@ -608,8 +733,15 @@ func (s *WebServer) tryRestoreSession(r *http.Request) (*Session, bool) {
 		return nil, false
 	}
 
+	// Decrypt
+	decryptedBytes, err := decrypt(dataBytes, s.Key)
+	if err != nil {
+		slog.Error("Failed to decrypt auth cookie", "error", err)
+		return nil, false
+	}
+
 	var authData map[string]string
-	if err := json.Unmarshal(dataBytes, &authData); err != nil {
+	if err := json.Unmarshal(decryptedBytes, &authData); err != nil {
 		return nil, false
 	}
 
@@ -624,7 +756,8 @@ func (s *WebServer) tryRestoreSession(r *http.Request) (*Session, bool) {
 	// Re-create session
 	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
 	session := &Session{
-		Status: &bambulan.PrinterStatus{},
+		Status:    &bambulan.PrinterStatus{},
+		CSRFToken: generateRandomString(32),
 	}
 
 	client, err := s.getClient(host, code, serial)
@@ -639,7 +772,14 @@ func (s *WebServer) tryRestoreSession(r *http.Request) (*Session, bool) {
 	s.Sessions[sessionID] = session
 	s.Mu.Unlock()
 
-	// Note: Session restoration currently does not update the session cookie in the response,
-	// relying on the client to send the correct session ID or re-authenticate if needed.
+	// Update the session cookie so subsequent requests use this session
+	http.SetCookie(w, &http.Cookie{
+		Name:     "bambulan_session",
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
 	return session, true
 }

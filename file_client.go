@@ -27,6 +27,7 @@ func NewFileClient(hostname, accessCode string) *FileClient {
 
 func (f *FileClient) connect() (*ftp.ServerConn, error) {
 	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname), ftp.DialWithTimeout(5*time.Second), ftp.DialWithTLS(&tls.Config{
+		// Bambu Lab printers use self-signed certificates for their FTPS server.
 		InsecureSkipVerify: true,
 	}))
 	if err != nil {

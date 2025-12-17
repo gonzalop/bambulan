@@ -59,6 +59,7 @@ func (m *MQTTClient) Start() error {
 	opts.SetPassword(m.AccessCode)
 	opts.SetClientID(fmt.Sprintf("bambu-go-%s", m.Serial))
 	opts.SetTLSConfig(&tls.Config{
+		// Bambu Lab printers use self-signed certificates for their MQTT broker.
 		InsecureSkipVerify: true,
 	})
 	opts.SetAutoReconnect(true)
@@ -122,11 +123,10 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 			slog.Error("Error updating status", "error", err)
 			return
 		}
-		slog.Debug("Received this shit:\n====BEGIN====\n%v\n==== END ====\n", "raw", printRaw)
+		slog.Debug("Message received", "raw", printRaw)
 		if m.OnUpdate != nil {
-			// Invoke callback in a separate goroutine to avoid blocking the MQTT read loop,
-			// which is required to process PUBACKs for QoS > 0.
-			// Pass a shallow copy to minimize race conditions on immediate fields (like SequenceId/Result).
+			// Invoke callback in a separate goroutine to avoid blocking the MQTT read loop.
+			// Pass a shallow copy to minimize race conditions on immediate fields (like SequenceID/Result).
 			statusCopy := *m.status
 			go m.OnUpdate(&statusCopy)
 		}
@@ -158,7 +158,7 @@ func (m *MQTTClient) DumpInfo() (string, error) {
 			"sequence_id": seqID,
 			"command":     "pushall",
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -172,7 +172,7 @@ func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 			"sequence_id": seqID,
 			"param":       fmt.Sprintf("%s \n", gcode),
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -230,7 +230,7 @@ func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
 			"loop_times":    0,
 			"interval_time": 0,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -243,7 +243,7 @@ func (m *MQTTClient) PausePrint() (string, error) {
 			"sequence_id": seqID,
 			"command":     "pause",
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -256,7 +256,7 @@ func (m *MQTTClient) ResumePrint() (string, error) {
 			"sequence_id": seqID,
 			"command":     "resume",
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -269,7 +269,7 @@ func (m *MQTTClient) StopPrint() (string, error) {
 			"sequence_id": seqID,
 			"command":     "stop",
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -285,7 +285,7 @@ func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 			"command":     "print_speed",
 			"param":       level,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -304,7 +304,7 @@ func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType strin
 			"tray_id_name": filamentType,
 			"tray_color":   color,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	fmt.Printf("%v\n", cmd)
 	return seqID, m.Publish(cmd)

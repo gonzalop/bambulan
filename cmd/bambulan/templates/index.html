@@ -4,6 +4,7 @@
 <head>
     <title>BambuLAN Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{.CSRFToken}}">
     <link rel="stylesheet" href="/style.css">
 </head>
 
@@ -241,12 +242,16 @@
             const form = document.getElementById('printForm');
             const btn = document.getElementById('startBtn');
             const data = new FormData(form);
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
             btn.disabled = true;
             btn.innerText = "Starting...";
 
             fetch('/api/print', {
                 method: 'POST',
+                headers: {
+                    'X-CSRF-Token': token
+                },
                 body: data
             }).then(resp => {
                 if (!resp.ok) resp.text().then(text => alert("Start failed: " + text));
@@ -478,9 +483,13 @@
         }
 
         function control(cmd) {
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             fetch('/api/control', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: { 
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRF-Token': token
+                },
                 body: 'cmd=' + cmd
             }).then(resp => {
                 if (!resp.ok) alert("Command failed");

@@ -83,6 +83,7 @@ func (c *CameraClient) StopStream() {
 
 func (c *CameraClient) streamLoop(onImage func([]byte)) {
 	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", c.Hostname, c.Port), &tls.Config{
+		// Bambu Lab printers use self-signed certificates for their camera stream.
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
@@ -149,6 +150,7 @@ func (c *CameraClient) streamLoop(onImage func([]byte)) {
 // It returns the JPEG byte slice or an error.
 func (c *CameraClient) CaptureFrame() ([]byte, error) {
 	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", c.Hostname, c.Port), &tls.Config{
+		// Bambu Lab printers use self-signed certificates for their camera stream.
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
