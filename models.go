@@ -1,5 +1,7 @@
 package bambulan
 
+import "fmt"
+
 // bambuMessage represents the top-level JSON structure received from the printer.
 // It is used internally to unwrap the "print" object.
 type bambuMessage struct {
@@ -194,54 +196,152 @@ func (p *PrinterStatus) GetPrintStageName() string {
 	if p.GcodeState == "FINISH" {
 		return "Finished"
 	}
-	switch p.McPrintStage {
-	case "1":
-		// Stage 1 is "Auto Bed Leveling", but also seems to be a default/idle state
-		// when not printing. Check GcodeState to disambiguate.
-		if p.GcodeState == "RUNNING" || p.GcodeState == "PREPARE" {
-			return "Auto Bed Leveling"
+	switch p.StgCur {
+	case 0:
+		return "Printing"
+	case 1:
+		return "Auto bed leveling"
+	case 2:
+		// "2" is Heatbed Preheating, but sometimes sticks during printing.
+		// If we are actively running and past the first layer, just call it Printing.
+		if p.GcodeState == "RUNNING" && p.LayerNum > 0 {
+			return "Printing"
 		}
-		// If not running, return the Gcode state (Idle, Failed, Finish, etc.)
-		// Capitalize first letter if possible, or just return raw.
-		if p.GcodeState == "IDLE" {
-			return "Idle"
-		}
-		// Return state as is (e.g. FAILED, FINISH) if we aren't leveling
-		return p.GcodeState
-	case "2":
-		return "Printing"
-	case "3":
-		return "Sweeping XY Mech Mode"
-	case "4":
-		return "Changing Filament"
-	case "5":
-		return "M400 Pause"
-	case "6":
-		return "Paused"
-	case "7":
-		return "Heating Hotend"
-	case "8":
-		return "Calibrating Extrusion"
-	case "9":
-		return "Printing"
-	case "10":
-		return "Auto Bed Leveling"
-	case "13":
-		return "Homing Toolhead"
-	case "14":
-		return "Cleaning Nozzle Tip"
-	case "15":
-		return "Checking Extruder"
-	case "17":
-		return "Printing"
-	case "23":
-		return "AMS Calibration"
-	case "30":
-		return "Paused"
-	case "":
+		return "Heatbed preheating"
+	case 3:
+		return "Vibration compensation"
+	case 4:
+		return "Changing filament"
+	case 5:
+		return "M400 pause"
+	case 6:
+		return "Paused (filament ran out)"
+	case 7:
+		return "Heating nozzle"
+	case 8:
+		return "Calibrating dynamic flow"
+	case 9:
+		return "Scanning bed surface"
+	case 10:
+		return "Inspecting first layer"
+	case 11:
+		return "Identifying build plate type"
+	case 12:
+		return "Calibrating Micro Lidar"
+	case 13:
+		return "Homing toolhead"
+	case 14:
+		return "Cleaning nozzle tip"
+	case 15:
+		return "Checking extruder temperature"
+	case 16:
+		return "Paused by the user"
+	case 17:
+		return "Pause (front cover fall off)"
+	case 18:
+		return "Calibrating the micro lidar"
+	case 19:
+		return "Calibrating flow ratio"
+	case 20:
+		return "Pause (nozzle temperature malfunction)"
+	case 21:
+		return "Pause (heatbed temperature malfunction)"
+	case 22:
+		return "Filament unloading"
+	case 23:
+		return "Pause (step loss)"
+	case 24:
+		return "Filament loading"
+	case 25:
+		return "Motor noise cancellation"
+	case 26:
+		return "Pause (AMS offline)"
+	case 27:
+		return "Pause (low speed of the heatbreak fan)"
+	case 28:
+		return "Pause (chamber temperature control problem)"
+	case 29:
+		return "Cooling chamber"
+	case 30:
+		return "Pause (Gcode inserted by user)"
+	case 31:
+		return "Motor noise showoff"
+	case 32:
+		return "Pause (nozzle clumping)"
+	case 33:
+		return "Pause (cutter error)"
+	case 34:
+		return "Pause (first layer error)"
+	case 35:
+		return "Pause (nozzle clog)"
+	case 36:
+		return "Measuring motion percision"
+	case 37:
+		return "Enhancing motion percision"
+	case 38:
+		return "Measure motion accuracy"
+	case 39:
+		return "Nozzle offset calibration"
+	case 40:
+		return "high temperature auto bed levelling"
+	case 41:
+		return "Auto Check: Quick Release Lever"
+	case 42:
+		return "Auto Check: Door and Upper Cover"
+	case 43:
+		return "Laser Calibration"
+	case 44:
+		return "Auto Check: Platform"
+	case 45:
+		return "Confirming BirdsEye Camera location"
+	case 46:
+		return "Calibrating BirdsEye Camera"
+	case 47:
+		return "Auto bed leveling -phase 1"
+	case 48:
+		return "Auto bed leveling -phase 2"
+	case 49:
+		return "Heating chamber"
+	case 50:
+		return "Cooling heatbed"
+	case 51:
+		return "Printing calibration lines"
+	case 52:
+		return "Auto Check: Material"
+	case 53:
+		return "Live View Camera Calibration"
+	case 54:
+		return "Waiting for heatbed to reach target temperature"
+	case 55:
+		return "Auto Check: Material Position"
+	case 56:
+		return "Cutting Module Offset Calibration"
+	case 57:
+		return "Measuring Surface"
+	case 58:
+		return "Thermal Preconditioning for first layer optimization"
+	case 59:
+		return "Homing Blade Holder"
+	case 60:
+		return "Calibrating Camera Offset"
+	case 61:
+		return "Calibrating Blade Holder Position"
+	case 62:
+		return "Hotend Pick and Place Test"
+	case 63:
+		return "Waiting for the Chamber temperature to equalize"
+	case 64:
+		return " Preparing Hotend"
+	case 65:
+		return "Calibrating the detection position of nozzle clumping"
+	case 66:
+		return "Purifying the chamber air"
+	case -1:
+		return "Idle"
+	case 255:
 		return "Idle"
 	default:
-		return "Unknown"
+		return fmt.Sprintf("Unknown (%d)", p.StgCur)
 	}
 }
 

@@ -37,6 +37,42 @@
         </div>
     </div>
 
+    <!-- Start Print Modal (Reuse similar structure) -->
+    <div id="printModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 20px;">Start Print</h3>
+            <div style="margin-bottom: 10px; font-weight: bold; color: var(--text-color);" id="printFilename"></div>
+            <form id="printForm" onsubmit="startPrint(event)">
+                <input type="hidden" name="existing_path" id="printExistingPath">
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px;">Bed Type</label>
+                    <select name="bed_type">
+                        <option value="auto">Auto</option>
+                        <option value="textured_plate">Textured Plate</option>
+                        <option value="cool_plate">Cool Plate</option>
+                        <option value="engineering_plate">Engineering Plate</option>
+                        <option value="high_temp_plate">High Temp Plate</option>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <label><input type="checkbox" name="bed_leveling" checked> Bed Leveling</label>
+                    <label><input type="checkbox" name="flow_calibration"> Flow Calibration</label>
+                    <label><input type="checkbox" name="timelapse"> Timelapse</label>
+                    <label><input type="checkbox" name="use_ams" id="chkUseAMS"> Use AMS</label>
+                    <label><input type="checkbox" name="vibration_calibration" checked> Vibration Calibration</label>
+                    <label><input type="checkbox" name="layer_inspection"> Layer Inspect</label>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" onclick="closePrintModal()" class="btn">Cancel</button>
+                    <button id="startBtn" type="submit" class="btn btn-primary">Start Print</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         let currentPath = "/";
 
@@ -45,13 +81,34 @@
             if (input.files.length === 0) return;
 
             const file = input.files[0];
+
+            // Validation for invalid characters: < > [ ] : / \ | ? * "
+            if (/[<>\[\]:/\\|?*"]/.test(file.name)) {
+                alert('Filename contains invalid characters: <>[]:/\\|?*"\nPlease rename the file and try again.');
+                input.value = '';
+                return;
+            }
+
             const formData = new FormData();
             formData.append('file', file);
             formData.append('path', currentPath);
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
             const statusDiv = document.getElementById('file-list');
-            statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + file.name + '...</div>';
+            statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + file.name + '... <span id="uploadDetails"></span></div>';
+
+            // Poller for progress
+            const poller = setInterval(() => {
+                fetch('/api/status').then(r => r.json()).then(d => {
+                    if (d.upload_status && d.upload_status.uploading) {
+                        const u = d.upload_status;
+                        const details = document.getElementById('uploadDetails');
+                        if (details) {
+                            details.innerText = `(${u.percent.toFixed(1)}%)`;
+                        }
+                    }
+                });
+            }, 500);
 
             fetch('/api/upload', {
                 method: 'POST',
@@ -60,11 +117,20 @@
                 },
                 body: formData
             }).then(resp => {
+                clearInterval(poller);
+                if (resp.status === 403) {
+                    alert("Session expired or invalid. Reloading...");
+                    window.location.reload();
+                    return;
+                }
                 if (!resp.ok) resp.text().then(text => alert("Upload failed: " + text));
                 else {
                     loadFiles(currentPath);
                 }
                 input.value = '';
+            }).catch(err => {
+                clearInterval(poller);
+                alert("Upload error: " + err);
             });
         }
 
@@ -91,13 +157,9 @@
                         list.innerHTML = `<div style="text-align: center; padding: 20px;">Empty folder</div>`;
                         // But if it's not root, we need Back button
                         if (path !== "/") {
-                            // Logic below handles parent link
-                            let parent = path.substr(0, path.lastIndexOf('/', path.length - 2) + 1);
-                            if (path.split('/').length <= 2) parent = "/"; // Fix for top level logic
-                            // Actually a simpler way:
                             const parts = path.split('/').filter(p => p);
                             parts.pop();
-                            parent = "/" + parts.join("/");
+                            let parent = "/" + parts.join("/");
                             if (!parent.endsWith("/")) parent += "/";
 
                             list.innerHTML = `
@@ -154,7 +216,11 @@
                                 </div>
                                 <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
                                     <span style="color: #666;">${sizeMB} MB</span>
-                                    <a href="${downloadUrl}" target="_blank" class="btn btn-info" style="padding: 5px 10px; font-size: 0.8em; color: white;">Download</a>
+                                    ${e.Name.endsWith('.gcode.3mf') ?
+                                    `<button onclick="openPrintModal('${escapeHtml(path + e.Name)}')" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🖨️ Print</button>`
+                                    : ''}
+                                    <button onclick="deleteFile('${escapeHtml(path + e.Name)}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🗑️ Delete</button>
+                                    <a href="${downloadUrl}" target="_blank" class="btn btn-info" style="padding: 5px 10px; font-size: 0.8em; color: white;">⬇️ Download</a>
                                 </div>
                             </div>`;
                         }
@@ -168,7 +234,92 @@
                 });
         }
 
+        async function deleteFile(filename) {
+            if (!confirm(`Are you sure you want to delete "${filename}"?`)) {
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", filename);
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            formData.append("_csrf", token);
+
+            try {
+                const response = await fetch('/api/delete', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.status === 403) {
+                    alert("Session expired or invalid. Reloading...");
+                    window.location.reload();
+                    return;
+                }
+
+                if (response.ok) {
+                    // Refresh list
+                    loadFiles(currentPath);
+                } else {
+                    const text = await response.text();
+                    alert("Delete failed: " + text);
+                }
+            } catch (error) {
+                alert("Delete failed: " + error);
+            }
+        }
+
         loadFiles('/');
+
+        function openPrintModal(fullPath) {
+            document.getElementById('printModal').style.display = 'flex';
+            document.getElementById('printFilename').innerText = fullPath.split('/').pop();
+            document.getElementById('printExistingPath').value = fullPath;
+
+            // Fetch status to check for AMS
+            fetch('/api/status').then(r => r.json()).then(d => {
+                if (d.print && d.print.ams && d.print.ams.ams_exist_bits !== "0") {
+                    document.getElementById('chkUseAMS').checked = true;
+                }
+            });
+        }
+
+        function closePrintModal() {
+            document.getElementById('printModal').style.display = 'none';
+        }
+
+        function startPrint(e) {
+            e.preventDefault();
+            const form = document.getElementById('printForm');
+            const btn = document.getElementById('startBtn');
+            const data = new FormData(form);
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            btn.disabled = true;
+            btn.innerText = "Starting...";
+
+            fetch('/api/print', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-Token': token
+                },
+                body: data
+            }).then(resp => {
+                if (resp.status === 403) {
+                    alert("Session expired or invalid. Reloading...");
+                    window.location.reload();
+                    return;
+                }
+                if (!resp.ok) resp.text().then(text => alert("Start failed: " + text));
+                else {
+                    closePrintModal();
+                    alert("Print started!");
+                    window.location.href = "/";
+                }
+            }).finally(() => {
+                btn.disabled = false;
+                btn.innerText = "Start Print";
+            });
+        }
     </script>
 </body>
 
