@@ -63,7 +63,7 @@ Start the web dashboard (default port 8080).
 **Features:**
 - **Dashboard**: Real-time status monitoring.
 - **Login**: Secure access with printer credentials.
-- **File Manager**: Browse and download files.
+- **File Manager**: Browse files, download, and print directly.
 - **Print Start**: Upload and start prints with options.
 
 **Screenshots:**
@@ -110,6 +110,7 @@ Uploads a file and starts printing.
 - `--vibration-calibration` (`-v`): Enable vibration calibration (default: true)
 - `--layer-inspection` (`-i`): Enable layer inspection (default: false)
 - `--use-ams` (`-a`): Use AMS (default: false)
+- `--skip-upload`: Skip upload and use the provided path as an existing file on the printer.
 
 #### Camera
 Capture a single frame from the camera.
@@ -125,4 +126,33 @@ Capture a single frame from the camera.
 # Download file
 ./bambulan download /timelapse/video.mp4 [./local_video.mp4]
 ```
+#### AMS Filament
+Update AMS filament properties (type, color, etc).
 
+**Basic (Manual IDs):**
+```bash
+./bambulan ams filament \
+  --unit 0 --slot 0 \
+  --color FFFFFFFF --type "Bambu PLA Basic" \
+  --filament-id "GFA00" --setting-id "GFA00_1.75_PLA_..." \
+  --min-temp 190 --max-temp 220
+```
+
+**Automated Lookup (Recommended):**
+Point to your Bambu Studio resources directory (containing JSON definitions) to automatically resolve IDs from a friendly name.
+
+```bash
+# Using local resource directory
+./bambulan ams filament -u 0 -S 0 -C FFFFFFFF \
+  --type "Bambu PLA Wood" \
+  --resources ./resources/filament
+```
+
+**Options:**
+- `--unit` (`-u`): AMS Unit ID (0-3) (default: 0)
+- `--slot` (`-S`): Slot ID (0-3) (required)
+- `--color` (`-C`): Color in HEX (RRGGBBAA) (required)
+- `--type` (`-t`): Filament Type (e.g. 'PLA Basic') OR search term for lookup (required)
+- `--filament-id` (`-f`): Filament ID (e.g. 'GFA00'). Optional if lookup finds a match.
+- `--setting-id` (`-i`): Setting ID (e.g. 'GFSA16_00'). Optional if lookup finds a match.
+- `--resources` (`-R`): Path to filament JSON resources (Env: `BAMBULAN_RESOURCES`)

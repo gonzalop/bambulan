@@ -312,30 +312,35 @@ func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 	return seqID, m.Publish(cmd)
 }
 
-// SetAMSFilament updates the filament properties (color and type) for a specific AMS slot.
-//
-// NOTE: This command is tricky and often doesn't work correctly with the printer's current firmware.
+// SetAMSFilament updates the filament properties for a specific AMS slot.
 //
 // Parameters:
-//   - amsID: The ID of the AMS unit (0-indexed, typically 0 for the first AMS).
-//   - trayID: The ID of the tray within the AMS unit (0-indexed, 0-3 for each AMS).
-//   - color: The filament color in RRGGBBAA hex format (e.g., "FF0000FF" for opaque red).
-//   - filamentType: The filament material type identifier (e.g., "PLA Basic", "PETG", "ABS").
-//
-// Returns the sequence ID of the request.
-func (m *MQTTClient) SetAMSFilament(amsID, trayID int, color, filamentType string) (string, error) {
+//   - amsID: AMS unit ID (0-3).
+//   - trayID: Slot ID (0-3).
+//   - filamentID: Filament ID (e.g., "GFA00").
+//   - settingID: Setting ID (e.g., "GFA00_1.75_PLA...").
+//   - color: RGBA hex color (e.g., "FFFFFFFF").
+//   - filamentType: Filament type (e.g., "PLA Basic").
+//   - minTemp: Min nozzle temp (e.g., 190).
+//   - maxTemp: Max nozzle temp (e.g., 220).
+func (m *MQTTClient) SetAMSFilament(amsID, trayID int, filamentID, settingID, color, filamentType string, minTemp, maxTemp int) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
-			"sequence_id":  seqID,
-			"command":      "ams_filament_setting",
-			"ams_id":       amsID,
-			"tray_id":      trayID,
-			"tray_id_name": filamentType,
-			"tray_color":   color,
+			"sequence_id":     seqID,
+			"command":         "ams_filament_setting",
+			"ams_id":          amsID,
+			"slot_id":         trayID,
+			"tray_id":         trayID,
+			"tray_info_idx":   filamentID,
+			"setting_id":      settingID,
+			"tray_color":      color,
+			"tray_type":       filamentType,
+			"nozzle_temp_min": minTemp,
+			"nozzle_temp_max": maxTemp,
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
+
 	}
-	fmt.Printf("%v\n", cmd)
 	return seqID, m.Publish(cmd)
 }

@@ -31,10 +31,19 @@ type WebCmd struct {
 }
 
 type Session struct {
-	Client    *bambulan.Client
-	Status    *bambulan.PrinterStatus
-	CSRFToken string
-	Mu        sync.RWMutex
+	Client       *bambulan.Client
+	Status       *bambulan.PrinterStatus
+	CSRFToken    string
+	UploadStatus UploadStatus
+	Mu           sync.RWMutex
+}
+
+type UploadStatus struct {
+	Uploading bool    `json:"uploading"`
+	Filename  string  `json:"filename"`
+	Current   int64   `json:"current"`
+	Total     int64   `json:"total"`
+	Percent   float64 `json:"percent"`
 }
 
 type WebServer struct {
@@ -90,6 +99,7 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/files", s.handleAPIFiles)
 	http.HandleFunc("/api/download", s.handleAPIDownload)
 	http.HandleFunc("/api/upload", s.handleAPIUpload)
+	http.HandleFunc("/api/delete", s.handleAPIDelete)
 	http.HandleFunc("/api/print", s.handleAPIPrint)
 	http.HandleFunc("/camera", s.handleCamera)
 
@@ -150,8 +160,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 
 	if exists {
 		// Verify host hasn't changed (e.g. DHCP)
-		// Accessing internal MQTT hostname via exposed method would be cleaner,
-		// but we know MQTT.Hostname is public.
+		// Verify host hasn't changed (e.g. DHCP)
 		if client.MQTT.Hostname != host {
 			slog.Info("Host IP changed for serial, reconnecting", "serial", serial, "old_host", client.MQTT.Hostname, "new_host", host)
 			client.Stop()
@@ -161,10 +170,8 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 
 	if !exists {
 		slog.Info("Creating new client connection", "host", host, "serial", serial)
-		// Status pointer is shared, so per-client callback is not strictly needed for data propagation.
-		onUpdate := func(status *bambulan.PrinterStatus) {
-			// Optional: Broadcast or log specific events if needed.
-		}
+
+		onUpdate := func(status *bambulan.PrinterStatus) {}
 
 		client = bambulan.NewClient(host, code, serial, onUpdate)
 		if err := client.Start(); err != nil {
@@ -192,7 +199,6 @@ func (s *WebServer) validateCSRF(r *http.Request, session *Session) bool {
 		return false
 	}
 
-	// Constant time comparison not strictly necessary for random tokens but good practice
 	return token == session.CSRFToken
 }
 
@@ -421,11 +427,47 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"print":         session.Status,
 		"stage_message": session.Status.GetPrintStageName(),
+		"upload_status": session.UploadStatus,
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("JSON encode failed", "error", err)
 	}
+}
+
+func (s *WebServer) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session, ok := s.getSession(w, r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// CSRF Check
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
+		return
+	}
+
+	file := r.FormValue("file")
+	if file == "" {
+		http.Error(w, "Missing file parameter", http.StatusBadRequest)
+		return
+	}
+
+	// 1. Delete file
+	if err := session.Client.File.Delete(file); err != nil {
+		slog.Error("Delete failed", "path", file, "error", err)
+		http.Error(w, "Delete failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("Deleted file", "path", file)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
@@ -572,10 +614,33 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = "/"
 	}
-	// Sanitize path? For now assume trusted user.
 	remotePath := filepath.Join(path, header.Filename)
 
-	if err := session.Client.File.Upload(remotePath, file); err != nil {
+	// Setup progress tracking
+	session.Mu.Lock()
+	session.UploadStatus = UploadStatus{
+		Uploading: true,
+		Filename:  header.Filename,
+	}
+	session.Mu.Unlock()
+
+	defer func() {
+		session.Mu.Lock()
+		session.UploadStatus = UploadStatus{} // Reset
+		session.Mu.Unlock()
+	}()
+
+	progressCb := func(current, total int64) {
+		session.Mu.Lock()
+		defer session.Mu.Unlock()
+		session.UploadStatus.Current = current
+		session.UploadStatus.Total = total
+		if total > 0 {
+			session.UploadStatus.Percent = float64(current) / float64(total) * 100
+		}
+	}
+
+	if err := session.Client.File.Upload(remotePath, file, progressCb); err != nil {
 		slog.Error("Upload failed", "path", remotePath, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -610,18 +675,49 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "Missing file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
+	var remotePath string
 
-	// 1. Upload file
-	remotePath := filepath.Join("/", header.Filename) // Root dir
-	if err := session.Client.File.Upload(remotePath, file); err != nil {
-		slog.Error("Upload failed during print start", "path", remotePath, "error", err)
-		http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
-		return
+	if err == nil {
+		defer file.Close()
+		// 1. Upload file
+		remotePath = filepath.Join("/", header.Filename) // Root dir
+
+		session.Mu.Lock()
+		session.UploadStatus = UploadStatus{
+			Uploading: true,
+			Filename:  header.Filename,
+		}
+		session.Mu.Unlock()
+
+		defer func() {
+			session.Mu.Lock()
+			session.UploadStatus = UploadStatus{} // Reset
+			session.Mu.Unlock()
+		}()
+
+		progressCb := func(current, total int64) {
+			session.Mu.Lock()
+			defer session.Mu.Unlock()
+			session.UploadStatus.Current = current
+			session.UploadStatus.Total = total
+			if total > 0 {
+				session.UploadStatus.Percent = float64(current) / float64(total) * 100
+			}
+		}
+
+		if err := session.Client.File.Upload(remotePath, file, progressCb); err != nil {
+			slog.Error("Upload failed during print start", "path", remotePath, "error", err)
+			http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Check for existing path
+		remotePath = r.FormValue("existing_path")
+		if remotePath == "" {
+			http.Error(w, "Missing file or existing_path", http.StatusBadRequest)
+			return
+		}
+		// No upload needed
 	}
 
 	// 2. Parse options
@@ -665,7 +761,6 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 	onImage := func(frame []byte) {
 		// This callback is executed in a separate goroutine.
 		// TODO: Implement broadcasting to support multiple simultaneous viewers.
-		// Current implementation supports a single viewer.
 
 		select {
 		case <-stopChan:

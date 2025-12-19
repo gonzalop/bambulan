@@ -224,14 +224,40 @@ func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgre
 // Parameters:
 //   - remotePath: The full path where the file should be saved on the printer.
 //   - content: An `io.Reader` providing the content to upload.
-func (f *FileClient) Upload(remotePath string, content io.Reader) error {
+//   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
+//     that reports the current upload progress.
+func (f *FileClient) Upload(remotePath string, content io.Reader, onProgress func(int64, int64)) error {
 	c, err := f.connect()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = c.Quit() }()
 
-	return c.Stor(remotePath, content)
+	var reader io.Reader = content
+	if onProgress != nil {
+		// Try to see if we can get the total size
+		var total int64
+		if seeker, ok := content.(io.Seeker); ok {
+			// Save current pos
+			current, err := seeker.Seek(0, io.SeekCurrent)
+			if err == nil {
+				// Go to end
+				size, err := seeker.Seek(0, io.SeekEnd)
+				if err == nil {
+					total = size
+					_, _ = seeker.Seek(current, io.SeekStart)
+				}
+			}
+		}
+
+		reader = &progressReader{
+			Reader:     content,
+			total:      total,
+			onProgress: onProgress,
+		}
+	}
+
+	return c.Stor(remotePath, reader)
 }
 
 // UploadFile uploads a local file to the printer.
@@ -248,22 +274,13 @@ func (f *FileClient) UploadFile(localPath, remotePath string, onProgress func(in
 	}
 	defer file.Close()
 
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	total := info.Size()
+	// info, err := file.Stat() - not needed
 
 	var reader io.Reader = file
-	if onProgress != nil {
-		reader = &progressReader{
-			Reader:     file,
-			total:      total,
-			onProgress: onProgress,
-		}
-	}
 
-	return f.Upload(remotePath, reader)
+	// We don't wrap with progressReader here anymore because Upload does it.
+
+	return f.Upload(remotePath, reader, onProgress)
 }
 
 type progressReader struct {
@@ -278,4 +295,18 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	pr.current += int64(n)
 	pr.onProgress(pr.current, pr.total)
 	return n, err
+}
+
+// Delete deletes a file from the printer.
+//
+// Parameters:
+//   - remotePath: The full path to the file on the printer.
+func (f *FileClient) Delete(remotePath string) error {
+	c, err := f.connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Quit() }()
+
+	return c.Delete(remotePath)
 }

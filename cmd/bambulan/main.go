@@ -1,18 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/gonzalop/bambulan"
+	"github.com/gonzalop/bambulan/pkg/filament"
 )
 
 var cli struct {
@@ -103,7 +106,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 				} else if hum == "5" {
 					hum = "5 (Wet)"
 				}
-				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i+1, unit.Temp, hum)
+				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i, unit.Temp, hum)
 				for j, tray := range unit.Tray {
 					// Calculate global ID for this slot
 					globalID := fmt.Sprintf("%d", (i*4)+j)
@@ -115,14 +118,21 @@ func (c *StatusCmd) Run(ctx *Context) error {
 					}
 
 					if tray.Id == "" {
-						fmt.Printf(" %sSlot %d: [Empty]\n", marker, j+1)
+						fmt.Printf(" %sSlot %d: [Empty]\n", marker, j)
 						continue
 					}
 					remain := fmt.Sprintf("%d%%", tray.Remain)
 					if tray.Remain < 0 {
 						remain = "Capacity: N/A"
 					}
-					fmt.Printf(" %sSlot %d: %s %s (%s)\n", marker, j+1, tray.TraySubBrands, tray.TrayColor, remain)
+					name := tray.TraySubBrands
+					if name == "" {
+						name = tray.TrayType
+					}
+					if name == "" {
+						name = tray.TrayIdName
+					}
+					fmt.Printf(" %sSlot %d: %s %s (%s)\n", marker, j, name, tray.TrayColor, remain)
 				}
 			}
 		}
@@ -278,6 +288,7 @@ type PrintStartCmd struct {
 	VibrationCalibration bool   `help:"Enable vibration calibration" default:"true" short:"v"`
 	LayerInspection      bool   `help:"Enable layer inspection" short:"i"`
 	UseAMS               *bool  `help:"Use AMS (defaults to true if AMS is present)" short:"a"`
+	SkipUpload           bool   `help:"Skip upload, file must exist on printer" default:"false"`
 }
 
 func (c *PrintStartCmd) Run(ctx *Context) error {
@@ -329,24 +340,31 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 	time.Sleep(1 * time.Second)
 
 	localPath := c.File
-	filename := filepath.Base(localPath)
+	var remotePath string
 
-	// 1. Upload
-	fmt.Printf("Uploading %s to printer...\n", localPath)
-	uProgressFunc := func(current, total int64) {
-		if total > 0 {
-			percent := float64(current) / float64(total) * 100
-			fmt.Printf("\rUpload: %.1f%% (%d/%d bytes)", percent, current, total)
-		} else {
-			fmt.Printf("\rUpload: %d bytes", current)
+	if !c.SkipUpload {
+		// 1. Upload
+		remotePath = filepath.Join("/", filepath.Base(localPath))
+		fmt.Printf("Uploading %s to printer (remote: %s)...\n", localPath, remotePath)
+		uProgressFunc := func(current, total int64) {
+			if total > 0 {
+				percent := float64(current) / float64(total) * 100
+				fmt.Printf("\rUpload: %.1f%% (%d/%d bytes)", percent, current, total)
+			} else {
+				fmt.Printf("\rUpload: %d bytes", current)
+			}
 		}
-	}
 
-	if err := client.File.UploadFile(localPath, fmt.Sprintf("/%s", filename), uProgressFunc); err != nil {
-		fmt.Println()
-		return fmt.Errorf("failed to upload file: %w", err)
+		if err := client.File.UploadFile(localPath, remotePath, uProgressFunc); err != nil {
+			fmt.Println()
+			return fmt.Errorf("failed to upload file: %w", err)
+		}
+		fmt.Printf("\nUpload complete.\n")
+	} else {
+		// If skipping upload, the 'File' argument is treated as the remote path
+		remotePath = c.File
+		fmt.Printf("Skipping upload. Using existing remote file: %s\n", remotePath)
 	}
-	fmt.Printf("\nUpload complete.\n")
 
 	// 2. Start Print
 	opts := bambulan.PrintOptions{
@@ -359,11 +377,11 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		UseAMS:               useAMS,
 	}
 
-	fmt.Printf("Starting print for %s...\n", filename)
+	fmt.Printf("Starting print for %s...\n", remotePath)
 	fmt.Printf("Options: BedType=%s, AMS=%v, Leveling=%v, FlowCalibration=%v, VibrationCalibration=%v\n",
 		opts.BedType, opts.UseAMS, opts.BedLeveling, opts.FlowCalibration, opts.VibrationCalibration)
 
-	if _, err := client.MQTT.StartPrint(filename, opts); err != nil {
+	if _, err := client.MQTT.StartPrint(remotePath, opts); err != nil {
 		return fmt.Errorf("failed to start print: %w", err)
 	}
 	fmt.Println("Print started!")
@@ -546,10 +564,15 @@ type AmsCmd struct {
 }
 
 type AmsFilamentCmd struct {
-	Unit  int    `help:"AMS Unit ID (0-3)" default:"0" short:"u"`
-	Slot  int    `help:"Slot ID (0-3)" required:"" short:"S"`
-	Color string `help:"Color in HEX (RRGGBBAA)" required:"" short:"C"`
-	Type  string `help:"Filament Type (e.g. 'PLA Basic')" required:"" short:"t"`
+	Unit       int    `help:"AMS Unit ID (0-3)" default:"0" short:"u"`
+	Slot       int    `help:"Slot ID (0-3)" required:"" short:"S"`
+	Color      string `help:"Color in HEX (RRGGBBAA). Optional if lookup finds a match." short:"C"`
+	Type       string `help:"Filament Type (e.g. 'PLA Basic') or search term" required:"" short:"t"`
+	FilamentID string `help:"Filament ID (e.g. 'GFA00'). Optional if Type matches a profile." short:"f"`
+	SettingID  string `help:"Setting ID (e.g. 'GFA00_1.75_PLA...'). Optional if Type matches a profile." short:"i"`
+	MinTemp    int    `help:"Minimum nozzle temperature" default:"0" short:"n"`
+	MaxTemp    int    `help:"Maximum nozzle temperature" default:"0" short:"m"`
+	Resources  string `help:"Path to filament JSON resources" type:"path" short:"R" env:"BAMBULAN_RESOURCES"`
 }
 
 func (c *AmsFilamentCmd) Run(ctx *Context) error {
@@ -572,8 +595,134 @@ func (c *AmsFilamentCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	fmt.Printf("Updating AMS Unit %d Slot %d to Type='%s', Color='%s'...\n", c.Unit, c.Slot, c.Type, c.Color)
-	seqID, err := client.MQTT.SetAMSFilament(c.Unit, c.Slot, c.Color, c.Type)
+	// Check if we need to look up the filament
+	if c.FilamentID == "" || c.SettingID == "" {
+		if c.Resources == "" {
+			return fmt.Errorf("resources path required to resolve filament/setting ID, or provide them manually using --filament-id and --setting-id")
+		}
+
+		fmt.Printf("Loading resources from %s...\n", c.Resources)
+		fils, err := filament.LoadAll(c.Resources)
+		if err != nil {
+			return fmt.Errorf("failed to load resources: %w", err)
+		}
+
+		// TODO: Infer printer model from discovery, or user flag.
+		// For now, we search all, or rely on user being specific.
+		matches := filament.Find(fils, c.Type, "")
+
+		if len(matches) == 0 {
+			return fmt.Errorf("no filament found matching '%s'", c.Type)
+		}
+
+		// Filter for valid setting_id (leaf profiles)
+		var validMatches []filament.Filament
+		for _, m := range matches {
+			if m.SettingID != "" {
+				validMatches = append(validMatches, m)
+			}
+		}
+
+		if len(validMatches) == 0 {
+			return fmt.Errorf("no valid profiles (with setting_id) found matching '%s'", c.Type)
+		}
+
+		if len(validMatches) == 0 {
+			return fmt.Errorf("no valid profiles (with setting_id) found matching '%s'", c.Type)
+		}
+
+		// If user provided a specific SettingID or FilamentID, filter by it
+		if c.SettingID != "" {
+			var filtered []filament.Filament
+			for _, m := range validMatches {
+				if strings.EqualFold(m.SettingID, c.SettingID) {
+					filtered = append(filtered, m)
+				}
+			}
+			if len(filtered) == 0 {
+				return fmt.Errorf("provided --setting-id '%s' does not match any profile for type '%s'", c.SettingID, c.Type)
+			}
+			validMatches = filtered
+		}
+
+		if c.FilamentID != "" {
+			var filtered []filament.Filament
+			for _, m := range validMatches {
+				if strings.EqualFold(m.FilamentID, c.FilamentID) {
+					filtered = append(filtered, m)
+				}
+			}
+			if len(filtered) == 0 {
+				return fmt.Errorf("provided --filament-id '%s' does not match any profile for type '%s'", c.FilamentID, c.Type)
+			}
+			validMatches = filtered
+		}
+
+		if len(validMatches) > 1 {
+			fmt.Printf("Multiple matches found for '%s':\n", c.Type)
+			for _, m := range validMatches {
+				fmt.Printf(" - %s (ID: %s, Setting: %s)\n", m.Name, m.FilamentID, m.SettingID)
+			}
+			return fmt.Errorf("please be more specific or provide --filament-id/--setting-id")
+		}
+
+		// Single match found
+		match := validMatches[0]
+		c.FilamentID = match.FilamentID
+		c.SettingID = match.SettingID
+
+		// Use parsed temps if available and override not provided
+		if c.MinTemp == 0 && match.TempMin > 0 {
+			c.MinTemp = match.TempMin
+		} else if c.MinTemp == 0 {
+			c.MinTemp = 190 // Fallback
+		}
+
+		if c.MaxTemp == 0 && match.TempMax > 0 {
+			c.MaxTemp = match.TempMax
+		} else if c.MaxTemp == 0 {
+			c.MaxTemp = 220 // Fallback
+		}
+
+		fmt.Printf("Resolved '%s' to:\n  Name: %s\n  FilamentID: %s\n  SettingID: %s\n", c.Type, match.Name, c.FilamentID, c.SettingID)
+
+		// Attempt to resolve color if missing
+		if c.Color == "" {
+			colorFile := filepath.Join(c.Resources, "filaments_color_codes.json")
+			// We try to load without erroring if file missing, unless color is truly required
+			colors, err := filament.LoadColors(colorFile)
+			if err == nil {
+				if col, ok := colors[c.FilamentID]; ok {
+					c.Color = col
+					fmt.Printf("  Color (auto): %s\n", c.Color)
+				}
+			}
+		}
+
+		if c.Color == "" {
+			return fmt.Errorf("color is required and could not be resolved automatically (filaments_color_codes.json not found or ID not in it)")
+		}
+
+		fmt.Printf("  Nozzle Temp: %d-%d °C\n  Bed Temp: %d °C\n", c.MinTemp, c.MaxTemp, match.BedTemp)
+
+		fmt.Print("Proceed? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read input: %w", err)
+		}
+
+		response = strings.TrimSpace(response)
+		if strings.ToLower(response) != "y" {
+			fmt.Println("Aborted by user.")
+			return nil
+		}
+	}
+
+	fmt.Printf("Updating AMS Unit %d Slot %d...\n  Type: %s\n  Color: %s\n  FilamentID: %s\n  SettingID: %s\n  Temp: %d-%d\n",
+		c.Unit, c.Slot, c.Type, c.Color, c.FilamentID, c.SettingID, c.MinTemp, c.MaxTemp)
+
+	seqID, err := client.MQTT.SetAMSFilament(c.Unit, c.Slot, c.FilamentID, c.SettingID, c.Color, c.Type, c.MinTemp, c.MaxTemp)
 	if err != nil {
 		return err
 	}

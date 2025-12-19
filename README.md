@@ -12,12 +12,14 @@ This library allows you to monitor printer status, control print jobs, view the 
 - **Status Monitoring**: Receive real-time updates on temperatures, fans, print progress, and more.
 - **Commands**:
     - Control prints (`print start <file>`, `print pause`, `print resume`, `print stop`).
+      - Supports printing existing files on printer with `--skip-upload`.
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
     - Control chamber lights.
     - Send raw G-Code (single line).
     - Dump raw printer info (JSON).
 - **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
 - **File Management**: List and download files (timelapses, models) via FTPS (port 990).
+  - Supports upload progress tracking.
 
 A CLI built using this library, `bambulan`, also acts as a web server providing a dashboard to monitor and control the printer.
 
@@ -99,7 +101,13 @@ if err != nil {
 }
 
 // Download a file
-err := client.File.DownloadFile("/timelapse/video.mp4", "./video.mp4")
+err := client.File.DownloadFile("/timelapse/video.mp4", "./video.mp4", nil)
+
+// Upload a file with progress
+onProgress := func(current, total int64) {
+    fmt.Printf("Uploaded %d/%d bytes\n", current, total)
+}
+err := client.File.UploadFile("./model.gcode.3mf", "/model.gcode.3mf", onProgress)
 ```
 
 ## CLI Tool / Web Interface
