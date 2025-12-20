@@ -100,9 +100,14 @@ func (m *MQTTClient) onConnect(client mqtt.Client) {
 	if token := client.Subscribe(topic, BambuQoS, m.onMessage); token.Wait() && token.Error() != nil {
 		slog.Error("Error subscribing to topic", "topic", topic, "error", token.Error())
 	} else {
-		slog.Info("Subscribed to topic", "topic", topic)
-		// Request full status update to ensure we have all fields (like lights_report)
+		slog.Debug("Subscribed to topic", "topic", topic)
+
 		go func() {
+			// Request version info to detect model (for bed limits)
+			if _, err := m.GetVersion(); err != nil {
+				slog.Error("Failed to get version on connect", "error", err)
+			}
+			// Request full status update to ensure we have all fields (like lights_report)
 			if _, err := m.DumpInfo(); err != nil {
 				slog.Error("Failed to dump info on connect", "error", err)
 			}
@@ -118,7 +123,7 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	if partial.Print == nil {
+	if partial.Print == nil && partial.Info == nil {
 		return
 	}
 
@@ -135,10 +140,29 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 			slog.Error("Error updating status", "error", err)
 			return
 		}
+		// Update derived fields
+		m.status.PrintStageDesc = m.status.GetPrintStageName()
+
 		slog.Debug("Message received", "raw", printRaw)
 		if m.OnUpdate != nil {
 			// Invoke callback in a separate goroutine to avoid blocking the MQTT read loop.
 			// Pass a shallow copy to minimize race conditions on immediate fields (like SequenceID/Result).
+			statusCopy := *m.status
+			go m.OnUpdate(&statusCopy)
+		}
+	}
+
+	if infoRaw, ok := rawObj["info"]; ok {
+		var info InfoMessage
+		if err := json.Unmarshal(infoRaw, &info); err != nil {
+			slog.Error("Error parsing info message", "error", err)
+			return
+		}
+		// Process info to extract model and limits
+		m.processInfo(&info)
+
+		// We might want to notify update here too, so the UI gets the new limit immediately
+		if m.OnUpdate != nil {
 			statusCopy := *m.status
 			go m.OnUpdate(&statusCopy)
 		}
@@ -173,6 +197,19 @@ func (m *MQTTClient) DumpInfo() (string, error) {
 			"command":     "pushall",
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// GetVersion requests the printer version info (firmware, model, etc).
+func (m *MQTTClient) GetVersion() (string, error) {
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"info": map[string]any{
+			"sequence_id": seqID,
+			"command":     "get_version",
+		},
+		"user_id": "1234567890",
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -654,8 +691,12 @@ func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
 //   - The sequence ID of the G-code command.
 //   - An error if the command could not be sent.
 func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
-	if temp < 0 || temp > 120 {
-		return "", fmt.Errorf("invalid bed temperature: %d (must be 0-120)", temp)
+	limit := m.status.BedTempLimit
+	if limit == 0 {
+		limit = 100 // Default safe limit if unknown
+	}
+	if temp < 0 || temp > limit {
+		return "", fmt.Errorf("invalid bed temperature: %d (must be 0-%d)", temp, limit)
 	}
 	gcode := fmt.Sprintf("M140 S%d\n", temp)
 	return m.SendGCode(gcode)
@@ -675,4 +716,77 @@ func (m *MQTTClient) SetNozzleTemperature(temp int) (string, error) {
 	}
 	gcode := fmt.Sprintf("M104 S%d\n", temp)
 	return m.SendGCode(gcode)
+}
+func (m *MQTTClient) processInfo(info *InfoMessage) {
+	if info.Command != "get_version" {
+		return
+	}
+
+	var model string
+
+	// Store all modules in status for CLI display
+	m.status.Modules = info.Module
+
+	// Try to find model from OTA module
+	for _, mod := range info.Module {
+		if mod.Name == "ota" && mod.Project != "" {
+			model = mod.Project
+			break
+		}
+	}
+
+	// Fallback: Derive from Serial Number
+	if model == "" && len(m.Serial) >= 3 {
+		prefix := m.Serial[:3]
+		// Map known prefixes to Model IDs used in getBedTempLimit
+		switch prefix {
+		case "00M", "00W":
+			model = "BL-P001" // X1C
+		case "001":
+			model = "BL-P002" // X1
+		case "01S":
+			model = "C11" // P1P
+		case "01P":
+			model = "C12" // P1S
+		case "030", "03N":
+			model = "N1" // A1 Mini
+		case "01N":
+			model = "N2S" // A1
+		default:
+			slog.Info("Unknown serial prefix", "prefix", prefix)
+		}
+	}
+
+	if model != "" {
+		m.status.DeviceModel = model
+		m.status.BedTempLimit = getBedTempLimit(model)
+		m.status.NozzleTempLimit = getNozzleTempLimit(model)
+		slog.Debug("Device detected", "model", model, "bed_limit", m.status.BedTempLimit)
+	}
+}
+
+func getBedTempLimit(model string) int {
+	// X1 Series
+	// BL-P001: X1 Carbon
+	// BL-P002: X1
+	// O1C: X1E
+	switch model {
+	case "BL-P001", "BL-P002", "O1C", "O1C2", "O1D", "O1E", "O1S":
+		return 120
+	case "C11", "C12": // P1P, P1S
+		return 100
+	case "N1": // A1 Mini
+		return 80
+	case "N2S", "N7": // A1
+		return 100
+	default:
+		// Fallback safe limit
+		return 100
+	}
+}
+
+func getNozzleTempLimit(model string) int {
+	// All Bambu printers support up to 300°C nozzle temperature
+	// X1 Series, P1 Series, A1 Series all use the same limit
+	return 300
 }

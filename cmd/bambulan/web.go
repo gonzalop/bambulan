@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -100,11 +101,13 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/download", s.handleAPIDownload)
 	http.HandleFunc("/api/upload", s.handleAPIUpload)
 	http.HandleFunc("/api/delete", s.handleAPIDelete)
+	http.HandleFunc("/api/rename", s.handleAPIRename)
+	http.HandleFunc("/api/mkdir", s.handleAPIMkdir)
 	http.HandleFunc("/api/print", s.handleAPIPrint)
 	http.HandleFunc("/camera", s.handleCamera)
 
-	slog.Info("Starting web server", "addr", s.BindAddr)
-	slog.Info("Web server listening", "url", fmt.Sprintf("http://localhost%s", s.BindAddr))
+	slog.Debug("Starting web server", "addr", s.BindAddr)
+	slog.Debug("Web server listening", "url", fmt.Sprintf("http://localhost%s", s.BindAddr))
 	return http.ListenAndServe(s.BindAddr, nil)
 }
 
@@ -169,7 +172,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 	}
 
 	if !exists {
-		slog.Info("Creating new client connection", "host", host, "serial", serial)
+		slog.Debug("Creating new client connection", "host", host, "serial", serial)
 
 		onUpdate := func(status *bambulan.PrinterStatus) {}
 
@@ -466,7 +469,74 @@ func (s *WebServer) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("Deleted file", "path", file)
+	slog.Debug("Deleted file", "path", file)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *WebServer) handleAPIRename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session, ok := s.getSession(w, r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
+		return
+	}
+
+	oldPath := r.FormValue("oldPath")
+	newPath := r.FormValue("newPath")
+	if oldPath == "" || newPath == "" {
+		http.Error(w, "Missing path parameters", http.StatusBadRequest)
+		return
+	}
+
+	if err := session.Client.File.Rename(oldPath, newPath); err != nil {
+		slog.Error("Rename failed", "old", oldPath, "new", newPath, "error", err)
+		http.Error(w, "Rename failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("Renamed file", "old", oldPath, "new", newPath)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *WebServer) handleAPIMkdir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session, ok := s.getSession(w, r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
+		return
+	}
+
+	path := r.FormValue("path")
+	if path == "" {
+		http.Error(w, "Missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	if err := session.Client.File.MakeDirectory(path); err != nil {
+		slog.Error("Mkdir failed", "path", path, "error", err)
+		http.Error(w, "Mkdir failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("Created directory", "path", path)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -511,6 +581,32 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 		_, err = session.Client.MQTT.ResumePrint()
 	case "stop":
 		_, err = session.Client.MQTT.StopPrint()
+	case "set_fan":
+		fan := r.FormValue("fan")
+		speedStr := r.FormValue("speed")
+		speed, errAtoi := strconv.Atoi(speedStr)
+		if errAtoi != nil {
+			http.Error(w, "Invalid speed", http.StatusBadRequest)
+			return
+		}
+		_, err = session.Client.MQTT.SetFanSpeed(fan, speed)
+	case "set_temp":
+		target := r.FormValue("target") // nozzle or bed
+		tempStr := r.FormValue("temp")
+		temp, errAtoi := strconv.Atoi(tempStr)
+		if errAtoi != nil {
+			http.Error(w, "Invalid temperature", http.StatusBadRequest)
+			return
+		}
+
+		if target == "nozzle" {
+			_, err = session.Client.MQTT.SetNozzleTemperature(temp)
+		} else if target == "bed" {
+			_, err = session.Client.MQTT.SetBedTemperature(temp)
+		} else {
+			http.Error(w, "Invalid target type", http.StatusBadRequest)
+			return
+		}
 	default:
 		http.Error(w, "Unknown command", http.StatusBadRequest)
 		return
