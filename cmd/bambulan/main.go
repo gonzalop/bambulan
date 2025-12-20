@@ -44,8 +44,7 @@ type Context struct {
 // Commands
 
 type StatusCmd struct {
-	ShowAMS *bool `help:"Show AMS status (auto-detected if unset)" short:"a"`
-	Watch   bool  `help:"Watch for updates" short:"w"`
+	Watch bool `help:"Watch for updates" short:"w"`
 }
 
 func (c *StatusCmd) Run(ctx *Context) error {
@@ -83,18 +82,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 			fmt.Println("Light:        N/A")
 		}
 
-		// Determine if we should show AMS
-		showAMS := false
-		if c.ShowAMS != nil {
-			showAMS = *c.ShowAMS
-		} else {
-			// Auto-detect: show if AMS data is present
-			if status.Ams != nil && len(status.Ams.Ams) > 0 {
-				showAMS = true
-			}
-		}
-
-		if showAMS && status.Ams != nil {
+		if status.Ams != nil && len(status.Ams.Ams) > 0 {
 			fmt.Println("\n--- AMS Status ---")
 			// TrayNow is the global slot ID (0-15 across 4 units)
 			activeTray := status.Ams.TrayNow

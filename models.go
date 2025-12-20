@@ -275,15 +275,15 @@ func (p *PrinterStatus) GetPrintStageName() string {
 	case 35:
 		return "Pause (nozzle clog)"
 	case 36:
-		return "Measuring motion percision"
+		return "Measuring motion precision"
 	case 37:
-		return "Enhancing motion percision"
+		return "Enhancing motion precision"
 	case 38:
 		return "Measure motion accuracy"
 	case 39:
 		return "Nozzle offset calibration"
 	case 40:
-		return "high temperature auto bed levelling"
+		return "High temperature auto bed leveling"
 	case 41:
 		return "Auto Check: Quick Release Lever"
 	case 42:
@@ -297,9 +297,9 @@ func (p *PrinterStatus) GetPrintStageName() string {
 	case 46:
 		return "Calibrating BirdsEye Camera"
 	case 47:
-		return "Auto bed leveling -phase 1"
+		return "Auto bed leveling - Phase 1"
 	case 48:
-		return "Auto bed leveling -phase 2"
+		return "Auto bed leveling - Phase 2"
 	case 49:
 		return "Heating chamber"
 	case 50:
@@ -331,7 +331,7 @@ func (p *PrinterStatus) GetPrintStageName() string {
 	case 63:
 		return "Waiting for the Chamber temperature to equalize"
 	case 64:
-		return " Preparing Hotend"
+		return "Preparing Hotend"
 	case 65:
 		return "Calibrating the detection position of nozzle clumping"
 	case 66:

@@ -41,8 +41,6 @@ export BAMBULAN_SERIAL="01S00A..."
 Monitor printer status in real-time.
 ```bash
 ./bambulan status
-# or with AMS details:
-./bambulan status --show-ams (-a)
 # Watch mode:
 ./bambulan status --watch (-w)
 ```
