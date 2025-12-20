@@ -79,7 +79,7 @@ Start the web dashboard (default port 8080).
 ![Start Print](../../assets/start-print.png)
 
 
-#### Controls
+#### Printer Controls
 ```bash
 # Turn chamber light on/off
 ./bambulan chamber-light on
@@ -91,6 +91,32 @@ Start the web dashboard (default port 8080).
 ./bambulan print pause
 ./bambulan print resume
 ./bambulan print stop
+
+# Skip objects (during print)
+./bambulan print skip 1 2
+```
+
+#### Temperature & Fan
+```bash
+# Set temperatures
+./bambulan temp head 220
+./bambulan temp bed 60
+
+# Set fan speeds
+./bambulan fan 50        # Set all fans to 50%
+./bambulan fan aux 80    # Set aux fan to 80%
+./bambulan fan part 100  # Set part cooling fan to 100%
+```
+
+#### Configuration
+```bash
+# Set printer options
+./bambulan config option --name sound_enable --disable
+./bambulan config option --name auto_recovery --enable
+
+# Configure hardware
+./bambulan config nozzle --diameter 0.4 --type hardened_steel
+./bambulan config marker-detector --enable
 ```
 
 #### Start Print
@@ -105,7 +131,7 @@ Uploads a file and starts printing.
 - `--timelapse` (`-t`): Enable timelapse (default: false)
 - `--bed-leveling` (`-e`): Enable bed leveling (default: true)
 - `--flow-calibration` (`-f`): Enable flow calibration (default: false)
-- `--vibration-calibration` (`-v`): Enable vibration calibration (default: true)
+- `--vibration-calibration` (`-V`): Enable vibration calibration (default: true)
 - `--layer-inspection` (`-i`): Enable layer inspection (default: false)
 - `--use-ams` (`-a`): Use AMS (default: false)
 - `--skip-upload`: Skip upload and use the provided path as an existing file on the printer.
@@ -117,32 +143,53 @@ Capture a single frame from the camera.
 ```
 
 #### File Management
+Interact with the printer's SD card via FTPS.
+
 ```bash
 # List files
-./bambulan ls /
+./bambulan file ls /
+./bambulan file ls /timelapse --extension .mp4
 
 # Download file
-./bambulan download /timelapse/video.mp4 [./local_video.mp4]
-```
-#### AMS Filament
-Update AMS filament properties (type, color, etc).
+./bambulan file download /timelapse/video.mp4 [./local_video.mp4]
 
-**Basic (Manual IDs):**
-```bash
-./bambulan ams filament \
-  --unit 0 --slot 0 \
-  --color FFFFFFFF --type "Bambu PLA Basic" \
-  --filament-id "GFA00" --setting-id "GFA00_1.75_PLA_..." \
-  --min-temp 190 --max-temp 220
+# Move/Rename
+./bambulan file mv /old/path /new/path
+
+# Make directory
+./bambulan file mkdir /models/my_project
+
+# Remove (Recursive supported!)
+./bambulan file rm /models/old_project -r
 ```
 
-**Automated Lookup (Recommended):**
-Point to your Bambu Studio resources directory (containing JSON definitions) to automatically resolve IDs from a friendly name.
+#### AMS Management
 
+**Control:**
 ```bash
-# Using local resource directory
+# Load/Unload filament
+./bambulan ams unload
+./bambulan ams load --target 0  # Target: 0-15 (AMS), 254 (External)
+
+# Pause/Resume AMS
+./bambulan ams control pause
+./bambulan ams control resume
+```
+
+**Settings:**
+```bash
+# Set user settings (e.g. read on startup)
+./bambulan ams user-setting -u 0 --startup-read
+
+# Set K-Factor (Linear Advance)
+./bambulan ams k-factor --tray 0 --k 0.020
+```
+
+**Filament Properties:**
+```bash
+# Update filament info
 ./bambulan ams filament -u 0 -S 0 -C FFFFFFFF \
-  --type "Bambu PLA Wood" \
+  --type "Bambu PLA Basic" \
   --resources ./resources/filament
 ```
 

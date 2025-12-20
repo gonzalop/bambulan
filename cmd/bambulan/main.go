@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,21 +19,26 @@ import (
 	"github.com/gonzalop/bambulan/pkg/filament"
 )
 
+var version = "dev"
+
 var cli struct {
-	Host   string `help:"Printer IP or hostname" env:"BAMBULAN_HOST" required:"" short:"H"`
-	Code   string `help:"Access code" env:"BAMBULAN_CODE" required:"" short:"c"`
-	Serial string `help:"Printer serial number" env:"BAMBULAN_SERIAL" required:"" short:"s"`
-	Level  string `help:"Log level" default:"info" enum:"debug,info,warn,error" name:"log-level" short:"l"`
+	Version kong.VersionFlag `short:"v" help:"Print version"`
+	Host    string           `help:"Printer IP or hostname" env:"BAMBULAN_HOST" required:"" short:"H"`
+	Code    string           `help:"Access code" env:"BAMBULAN_CODE" required:"" short:"c"`
+	Serial  string           `help:"Printer serial number" env:"BAMBULAN_SERIAL" required:"" short:"s"`
+	Level   string           `help:"Log level" default:"info" enum:"debug,info,warn,error" name:"log-level" short:"l"`
 
 	Status       StatusCmd       `cmd:"" help:"Monitor printer status"`
 	ChamberLight ChamberLightCmd `cmd:"" help:"Turn chamber light on or off"`
 	Speed        SpeedCmd        `cmd:"" help:"Set speed: silent, standard, sport, ludicrous"`
-	Print        PrintCmd        `cmd:"" help:"Control print: start, pause, resume, stop"`
+	Print        PrintCmd        `cmd:"" help:"Control print: start, pause, resume, stop, skip objects"`
 	SendGCode    SendGCodeCmd    `cmd:"" help:"Send raw G-Code command (single line only)"`
 	Ams          AmsCmd          `cmd:"" help:"AMS controls"`
+	Config       ConfigCmd       `cmd:"" help:"Printer configuration (options, accessories)"`
+	Temp         TempCmd         `cmd:"" help:"Control temperature (head, bed)"`
+	Fan          FanCmd          `cmd:"" help:"Control fan speed"`
+	File         FileCmd         `cmd:"" help:"File management (ls, download, rm, mkdir, mv)"`
 	Capture      CaptureCmd      `cmd:"" help:"Capture camera frame"`
-	Ls           LsCmd           `cmd:"" help:"List .3mf files in directory"`
-	Download     DownloadCmd     `cmd:"" help:"Download file"`
 	DumpInfo     DumpInfoCmd     `cmd:"" help:"Dump full printer status as JSON"`
 	Web          WebCmd          `cmd:"" help:"Start web interface"`
 }
@@ -214,6 +220,103 @@ type PrintCmd struct {
 	Pause  PrintPauseCmd  `cmd:"" help:"Pause current print"`
 	Resume PrintResumeCmd `cmd:"" help:"Resume current print"`
 	Stop   PrintStopCmd   `cmd:"" help:"Stop current print"`
+	Skip   PrintSkipCmd   `cmd:"" help:"Skip objects in current print"`
+}
+
+type PrintSkipCmd struct {
+	Objects []int `arg:"" help:"List of object IDs to skip"`
+}
+
+func (c *PrintSkipCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SkipObjects(c.Objects); err != nil {
+		return err
+	}
+	fmt.Printf("Sent skip objects command for IDs: %v\n", c.Objects)
+	return nil
+}
+
+type ConfigCmd struct {
+	Option         ConfigOptionCmd         `cmd:"" help:"Set print options"`
+	MarkerDetector ConfigMarkerDetectorCmd `cmd:"" help:"Configure marker detector"`
+	Nozzle         ConfigNozzleCmd         `cmd:"" help:"Configure nozzle details"`
+}
+
+type ConfigOptionCmd struct {
+	Name    string `arg:"" enum:"auto_recovery,auto_switch_filament,filament_tangle_detect,sound_enable" help:"Option name"`
+	Enable  bool   `help:"Enable option" xor:"state"`
+	Disable bool   `help:"Disable option" xor:"state"`
+}
+
+func (c *ConfigOptionCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	enabled := c.Enable // Disable is implicit false if Enable is false, but xor ensures one
+	if c.Disable {
+		enabled = false
+	}
+
+	if _, err := client.MQTT.SetPrintOption(c.Name, enabled); err != nil {
+		return err
+	}
+	fmt.Printf("Set print option '%s' to %v\n", c.Name, enabled)
+	return nil
+}
+
+type ConfigMarkerDetectorCmd struct {
+	Enable  bool `help:"Enable detector" xor:"state"`
+	Disable bool `help:"Disable detector" xor:"state"`
+}
+
+func (c *ConfigMarkerDetectorCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	enabled := c.Enable
+	if c.Disable {
+		enabled = false
+	}
+
+	if _, err := client.MQTT.SetBuildPlateMarkerDetector(enabled); err != nil {
+		return err
+	}
+	fmt.Printf("Set marker detector to %v\n", enabled)
+	return nil
+}
+
+type ConfigNozzleCmd struct {
+	Diameter float64 `help:"Nozzle diameter (e.g. 0.4)" required:"" short:"d"`
+	Type     string  `help:"Nozzle type (e.g. hardened_steel)" required:"" short:"t"`
+}
+
+func (c *ConfigNozzleCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetNozzleDetails(c.Diameter, c.Type); err != nil {
+		return err
+	}
+	fmt.Printf("Set nozzle details: diameter=%.1f, type=%s\n", c.Diameter, c.Type)
+	return nil
 }
 
 type PrintPauseCmd struct{}
@@ -273,7 +376,7 @@ type PrintStartCmd struct {
 	Timelapse            bool   `help:"Enable timelapse" short:"t"`
 	BedLeveling          bool   `help:"Enable bed leveling" default:"true" short:"e"`
 	FlowCalibration      bool   `help:"Enable flow calibration" short:"f"`
-	VibrationCalibration bool   `help:"Enable vibration calibration" default:"true" short:"v"`
+	VibrationCalibration bool   `help:"Enable vibration calibration" default:"true" short:"V"`
 	LayerInspection      bool   `help:"Enable layer inspection" short:"i"`
 	UseAMS               *bool  `help:"Use AMS (defaults to true if AMS is present)" short:"a"`
 	SkipUpload           bool   `help:"Skip upload, file must exist on printer" default:"false"`
@@ -443,28 +546,147 @@ func (c *CaptureCmd) Run(ctx *Context) error {
 	return nil
 }
 
-type LsCmd struct {
-	Path string `arg:"" optional:"" default:"/" help:"Directory to list"`
+type TempCmd struct {
+	Head TempHeadCmd `cmd:"" help:"Set nozzle temperature"`
+	Bed  TempBedCmd  `cmd:"" help:"Set bed temperature"`
 }
 
-func (c *LsCmd) Run(ctx *Context) error {
-	fmt.Printf("Listing .3mf files in %s...\n", c.Path)
-	files, err := ctx.Client.File.GetFiles(c.Path, ".3mf")
-	if err != nil {
+type TempHeadCmd struct {
+	Temperature int `arg:"" help:"Temperature in Celsius"`
+}
+
+func (c *TempHeadCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
 		return err
 	}
-	for _, f := range files {
-		fmt.Println(f)
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetNozzleTemperature(c.Temperature); err != nil {
+		return err
+	}
+	fmt.Printf("Set nozzle temperature to %d°C\n", c.Temperature)
+	return nil
+}
+
+type TempBedCmd struct {
+	Temperature int `arg:"" help:"Temperature in Celsius"`
+}
+
+func (c *TempBedCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetBedTemperature(c.Temperature); err != nil {
+		return err
+	}
+	fmt.Printf("Set bed temperature to %d°C\n", c.Temperature)
+	return nil
+}
+
+type FanCmd struct {
+	Arg1  string `arg:"" help:"Fan name (part, aux, chamber, all) OR speed percentage (for all fans)"`
+	Speed *int   `arg:"" optional:"" help:"Fan speed percentage (0-100) if first arg is fan name"`
+}
+
+func (c *FanCmd) Run(ctx *Context) error {
+	var fan string
+	var speed int
+
+	// Parse arguments to determine usage pattern
+	if s, err := strconv.Atoi(c.Arg1); err == nil {
+		// Usage: bambulan fan <speed>
+		// Arg1 is a number, treat as speed for "all" fans
+		if c.Speed != nil {
+			return fmt.Errorf("unexpected second argument '%d' when first argument is speed", *c.Speed)
+		}
+		fan = "all"
+		speed = s
+	} else {
+		// Usage: bambulan fan <name> <speed>
+		// Arg1 is fan name
+		fan = strings.ToLower(c.Arg1)
+		if c.Speed == nil {
+			return fmt.Errorf("missing speed argument")
+		}
+		speed = *c.Speed
+	}
+
+	// Validate fan name
+	validFans := map[string]bool{
+		"part":    true,
+		"aux":     true,
+		"chamber": true,
+		"all":     true,
+	}
+	if !validFans[fan] {
+		return fmt.Errorf("invalid fan name: '%s'. Construct: bambulan fan <part|aux|chamber|all> <speed>", fan)
+	}
+
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetFanSpeed(fan, speed); err != nil {
+		return err
+	}
+	fmt.Printf("Set %s fan speed to %d%%\n", fan, speed)
+	return nil
+}
+
+type FileCmd struct {
+	Ls       FileLsCmd       `cmd:"" help:"List files"`
+	Download FileDownloadCmd `cmd:"" help:"Download file"`
+	Rm       FileRmCmd       `cmd:"" help:"Remove file or directory"`
+	Mkdir    FileMkdirCmd    `cmd:"" help:"Make directory"`
+	Mv       FileMvCmd       `cmd:"" help:"Move/Rename file"`
+}
+
+type FileLsCmd struct {
+	Path      string `arg:"" optional:"" default:"/" help:"Directory to list"`
+	Extension string `help:"Filter by extension (e.g. .3mf)" short:"e"`
+}
+
+func (c *FileLsCmd) Run(ctx *Context) error {
+	fmt.Printf("Listing files in %s...\n", c.Path)
+	if c.Extension != "" {
+		files, err := ctx.Client.File.GetFiles(c.Path, c.Extension)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			fmt.Println(f)
+		}
+	} else {
+		files, err := ctx.Client.File.ListFiles(c.Path)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			t := "FILE"
+			if f.Type == 1 { // EntryTypeFolder
+				t = "DIR "
+			}
+			fmt.Printf("%s %-10d %s\n", t, f.Size, f.Name)
+		}
 	}
 	return nil
 }
 
-type DownloadCmd struct {
+type FileDownloadCmd struct {
 	Remote string `arg:"" help:"Remote file path"`
 	Local  string `arg:"" optional:"" help:"Local destination path"`
 }
 
-func (c *DownloadCmd) Run(ctx *Context) error {
+func (c *FileDownloadCmd) Run(ctx *Context) error {
 	local := c.Local
 	if local == "" {
 		local = filepath.Base(c.Remote)
@@ -487,6 +709,54 @@ func (c *DownloadCmd) Run(ctx *Context) error {
 		return err
 	}
 	fmt.Printf("\nDownloaded in %v\n", time.Since(start))
+	return nil
+}
+
+type FileRmCmd struct {
+	Path      string `arg:"" help:"Path to remove"`
+	Recursive bool   `help:"Recursive delete" short:"r"`
+}
+
+func (c *FileRmCmd) Run(ctx *Context) error {
+	if c.Recursive {
+		fmt.Printf("Recursively removing %s...\n", c.Path)
+		if err := ctx.Client.File.RemoveAll(c.Path); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("Removing file %s...\n", c.Path)
+		if err := ctx.Client.File.Delete(c.Path); err != nil {
+			return err
+		}
+	}
+	fmt.Println("Done.")
+	return nil
+}
+
+type FileMkdirCmd struct {
+	Path string `arg:"" help:"Directory path to create"`
+}
+
+func (c *FileMkdirCmd) Run(ctx *Context) error {
+	fmt.Printf("Creating directory %s...\n", c.Path)
+	if err := ctx.Client.File.MakeDirectory(c.Path); err != nil {
+		return err
+	}
+	fmt.Println("Done.")
+	return nil
+}
+
+type FileMvCmd struct {
+	Source string `arg:"" help:"Source path"`
+	Dest   string `arg:"" help:"Destination path"`
+}
+
+func (c *FileMvCmd) Run(ctx *Context) error {
+	fmt.Printf("Moving %s to %s...\n", c.Source, c.Dest)
+	if err := ctx.Client.File.Rename(c.Source, c.Dest); err != nil {
+		return err
+	}
+	fmt.Println("Done.")
 	return nil
 }
 
@@ -548,7 +818,110 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 }
 
 type AmsCmd struct {
-	Filament AmsFilamentCmd `cmd:"" help:"Update AMS filament properties"`
+	Filament    AmsFilamentCmd    `cmd:"" help:"Update AMS filament properties"`
+	Unload      AmsUnloadCmd      `cmd:"" help:"Unload filament"`
+	Load        AmsLoadCmd        `cmd:"" help:"Load filament from a specific slot"`
+	Control     AmsControlCmd     `cmd:"" help:"Send AMS control command (resume, pause, reset)"`
+	UserSetting AmsUserSettingCmd `cmd:"" help:"Update AMS user settings"`
+	KFactor     AmsKFactorCmd     `cmd:"" help:"Set filament K-factor"`
+}
+
+type AmsUnloadCmd struct{}
+
+func (c *AmsUnloadCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.UnloadFilament(); err != nil {
+		return err
+	}
+	fmt.Println("Sent unload filament command")
+	return nil
+}
+
+type AmsLoadCmd struct {
+	Target int `arg:"" help:"Target slot ID (0-3 for AMS 1, 4-7 for AMS 2, etc, or 254 for external)"`
+}
+
+func (c *AmsLoadCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.LoadFilament(c.Target); err != nil {
+		return err
+	}
+	fmt.Printf("Sent load filament command for slot %d\n", c.Target)
+	return nil
+}
+
+type AmsControlCmd struct {
+	Command string `arg:"" enum:"resume,pause,reset" help:"Control command: resume, pause, reset"`
+}
+
+func (c *AmsControlCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SendAMSControlCommand(c.Command); err != nil {
+		return err
+	}
+	fmt.Printf("Sent AMS control command: %s\n", c.Command)
+	return nil
+}
+
+type AmsUserSettingCmd struct {
+	Unit            int  `help:"AMS Unit ID (0-3)" default:"0" short:"u"`
+	StartupRead     bool `help:"Update on startup"`
+	TrayRead        bool `help:"Update on insert"`
+	CalibrateRemain bool `help:"Calibrate remaining capacity"`
+}
+
+func (c *AmsUserSettingCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetAMSUserSetting(c.Unit, c.StartupRead, c.TrayRead, c.CalibrateRemain); err != nil {
+		return err
+	}
+	fmt.Printf("Sent AMS user settings update for unit %d\n", c.Unit)
+	return nil
+}
+
+type AmsKFactorCmd struct {
+	Tray int     `help:"Tray ID (0-15)" required:"" short:"t"`
+	K    float64 `help:"K Factor" required:"" short:"k"`
+	N    float64 `help:"N Coefficient" default:"1.4" short:"n"`
+}
+
+func (c *AmsKFactorCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetSpoolKFactor(c.Tray, c.K, c.N); err != nil {
+		return err
+	}
+	fmt.Printf("Sent K-factor update for tray %d: K=%f, N=%f\n", c.Tray, c.K, c.N)
+	return nil
 }
 
 type AmsFilamentCmd struct {
@@ -741,6 +1114,9 @@ func main() {
 		kong.ConfigureHelp(kong.HelpOptions{
 			//          Compact: true,
 		}),
+		kong.Vars{
+			"version": version,
+		},
 	)
 
 	// Logging

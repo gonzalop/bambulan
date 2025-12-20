@@ -300,7 +300,10 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 // Delete deletes a file from the printer.
 //
 // Parameters:
-//   - remotePath: The full path to the file on the printer.
+//   - remotePath: The full absolute path to the file on the printer (e.g., "/timelapse/video.mp4").
+//
+// Returns:
+//   - An error if the file could not be deleted (e.g., file not found, permission denied).
 func (f *FileClient) Delete(remotePath string) error {
 	c, err := f.connect()
 	if err != nil {
@@ -309,4 +312,93 @@ func (f *FileClient) Delete(remotePath string) error {
 	defer func() { _ = c.Quit() }()
 
 	return c.Delete(remotePath)
+}
+
+// MakeDirectory creates a new directory on the printer.
+//
+// Parameters:
+//   - path: The full absolute path of the directory to create.
+//
+// Returns:
+//   - An error if the directory could not be created.
+func (f *FileClient) MakeDirectory(path string) error {
+	c, err := f.connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Quit() }()
+
+	return c.MakeDir(path)
+}
+
+// Rename renames or moves a file/directory on the printer.
+//
+// Parameters:
+//   - source: The current full path of the file or directory.
+//   - dest: The new full path (including name) for the file or directory.
+//
+// Returns:
+//   - An error if the operation failed.
+func (f *FileClient) Rename(source, dest string) error {
+	c, err := f.connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Quit() }()
+
+	return c.Rename(source, dest)
+}
+
+// RemoveAll recursively deletes a file or directory.
+// If the path is a directory, it deletes all its contents before deleting the directory itself.
+//
+// Parameters:
+//   - path: The full absolute path to remove.
+//
+// Returns:
+//   - An error if any deletion step failed.
+func (f *FileClient) RemoveAll(path string) error {
+	c, err := f.connect()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Quit() }()
+
+	return f.removeAll(c, path)
+}
+
+func (f *FileClient) removeAll(c *ftp.ServerConn, path string) error {
+	// Try to list the path to see if it's a directory
+	entries, err := c.List(path)
+	if err != nil {
+		// If listing fails, it might be a file or not exist
+		// Try deleting as file
+		if delErr := c.Delete(path); delErr == nil {
+			return nil
+		}
+		// If delete failed, return the original list error or delete error?
+		// Usually if list fails it means it's not a dir (550).
+		return err
+	}
+
+	// It's a directory (or empty), iterate entries
+	for _, entry := range entries {
+		if entry.Name == "." || entry.Name == ".." {
+			continue
+		}
+		fullPath := filepath.Join(path, entry.Name)
+
+		if entry.Type == ftp.EntryTypeFolder {
+			if err := f.removeAll(c, fullPath); err != nil {
+				return err
+			}
+		} else {
+			if err := c.Delete(fullPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	// usage of RemoveDir usually requires empty directory
+	return c.RemoveDir(path)
 }

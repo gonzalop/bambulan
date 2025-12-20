@@ -11,15 +11,21 @@ This library allows you to monitor printer status, control print jobs, view the 
 - **LAN Control**: Connects directly to the printer's MQTT broker (port 8883).
 - **Status Monitoring**: Receive real-time updates on temperatures, fans, print progress, and more.
 - **Commands**:
-    - Control prints (`print start <file>`, `print pause`, `print resume`, `print stop`).
+    - Control prints (`print start`, `pause`, `resume`, `stop`, `skip` objects).
       - Supports printing existing files on printer with `--skip-upload`.
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
+    - **Configuration**: Toggle printer options (camera, sound, etc) and hardware settings (nozzle, detector).
+    - **AMS**: Load/Unload filament, control AMS, set filament types and K-values.
+    - **Temperature/Fan**: Control nozzle/bed temperatures and fan speeds.
     - Control chamber lights.
-    - Send raw G-Code (single line).
+    - Send raw G-Code.
     - Dump raw printer info (JSON).
 - **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
-- **File Management**: List and download files (timelapses, models) via FTPS (port 990).
-  - Supports upload progress tracking.
+- **File Management**: Full FTPS support via `bambulan file` command.
+    - List (`ls`), Download (`download`), Upload.
+    - Create directories (`mkdir`).
+    - Move/Rename files (`mv`).
+    - Remove files or directories recursively (`rm -r`).
 
 A CLI built using this library, `bambulan`, also acts as a web server providing a dashboard to monitor and control the printer.
 

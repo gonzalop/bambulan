@@ -344,3 +344,335 @@ func (m *MQTTClient) SetAMSFilament(amsID, trayID int, filamentID, settingID, co
 	}
 	return seqID, m.Publish(cmd)
 }
+
+// UnloadFilament sends a command to the printer to unload the current filament.
+// This triggers the "unload_filament" printer command.
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) UnloadFilament() (string, error) {
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id": seqID,
+			"command":     "unload_filament",
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// LoadFilament sends a command to load filament from a specific AMS slot.
+//
+// Parameters:
+//   - target: The slot ID to load from. 0-15 correspond to the 4 slots in up to 4 AMS units.
+//     254 typically represents the external spool holder.
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) LoadFilament(target int) (string, error) {
+	if (target < 0 || target > 15) && target != 254 {
+		return "", fmt.Errorf("invalid target: %d (must be 0-15 or 254)", target)
+	}
+
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id": seqID,
+			"command":     "ams_change_filament",
+			"target":      target,
+			"curr_temp":   250,
+			"tar_temp":    250,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SendAMSControlCommand sends an AMS control command.
+//
+// Parameters:
+//   - param: The control parameter, one of "resume", "pause", or "reset".
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SendAMSControlCommand(param string) (string, error) {
+	allowedParams := map[string]bool{
+		"resume": true, "pause": true, "reset": true,
+	}
+	if !allowedParams[param] {
+		return "", fmt.Errorf("invalid param: '%s' (must be resume, pause, or reset)", param)
+	}
+
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id": seqID,
+			"command":     "ams_control",
+			"param":       param,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SetAMSUserSetting updates AMS user settings for a specific unit.
+//
+// Parameters:
+//   - amsID: The ID of the AMS unit (0-3).
+//   - startupReadOption: If true, the AMS will read the RFID on startup.
+//   - trayReadOption: If true, the AMS will read the RFID when a tray is inserted.
+//   - calibrateRemainFlag: If true, the AMS will calibrate the remaining filament on startup.
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SetAMSUserSetting(amsID int, startupReadOption, trayReadOption, calibrateRemainFlag bool) (string, error) {
+	if amsID < 0 || amsID > 3 {
+		return "", fmt.Errorf("invalid amsID: %d (must be 0-3)", amsID)
+	}
+
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id":           seqID,
+			"command":               "ams_user_setting",
+			"ams_id":                amsID,
+			"startup_read_option":   startupReadOption,
+			"tray_read_option":      trayReadOption,
+			"calibrate_remain_flag": calibrateRemainFlag,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SetSpoolKFactor sets the linear advance K-factor for a specific spool (tray).
+//
+// Parameters:
+//   - trayID: The ID of the tray (0-15 or 254).
+//   - kValue: The K-factor value.
+//   - nCoef: The N coefficient (typically 1.4).
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SetSpoolKFactor(trayID int, kValue float64, nCoef float64) (string, error) {
+	if (trayID < 0 || trayID > 15) && trayID != 254 {
+		return "", fmt.Errorf("invalid trayID: %d (must be 0-15 or 254)", trayID)
+	}
+	// Permissive range for K-factor, but block negative
+	if kValue < 0 {
+		return "", fmt.Errorf("invalid kValue: %f (must be >= 0)", kValue)
+	}
+
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id": seqID,
+			"command":     "extrusion_cali_set",
+			"tray_id":     trayID,
+			"k_value":     kValue,
+			"n_coef":      nCoef,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SetPrintOption enables or disables specific printer options.
+//
+// Parameters:
+//   - option: The option name. Common options include:
+//     "auto_recovery", "auto_switch_filament", "filament_tangle_detect", "sound_enable".
+//   - enabled: The desired state of the option.
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SetPrintOption(option string, enabled bool) (string, error) {
+	allowedOptions := map[string]bool{
+		"auto_recovery":          true,
+		"auto_switch_filament":   true,
+		"filament_tangle_detect": true,
+		"sound_enable":           true,
+	}
+	if !allowedOptions[option] {
+		return "", fmt.Errorf("invalid option: '%s' (must be e.g. auto_recovery, sound_enable)", option)
+	}
+
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id": seqID,
+			"command":     "print_option",
+			option:        enabled,
+		},
+		"user_id": "1234567890",
+	}
+
+	// auto_recovery requires an additional "option" field
+	if option == "auto_recovery" {
+		val := 0
+		if enabled {
+			val = 1
+		}
+		// We'll trust the map logic to handle this correctly as a dynamic map
+		cmd["print"].(map[string]any)["option"] = val
+	}
+
+	return seqID, m.Publish(cmd)
+}
+
+// SkipObjects skips specific objects during a multi-object print.
+//
+// Parameters:
+//   - objects: A list of object IDs to skip.
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SkipObjects(objects []int) (string, error) {
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"print": map[string]any{
+			"sequence_id": seqID,
+			"command":     "skip_objects",
+			"obj_list":    objects,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SetBuildPlateMarkerDetector enables or disables the AI build plate marker detector (ArUco).
+//
+// Parameters:
+//   - enabled: If true, enables the detector.
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SetBuildPlateMarkerDetector(enabled bool) (string, error) {
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"xcam": map[string]any{
+			"sequence_id": seqID,
+			"command":     "xcam_control_set",
+			"control":     enabled,
+			"enable":      enabled,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SetNozzleDetails configures the printer's nozzle settings.
+//
+// Parameters:
+//   - diameter: The nozzle diameter in mm (e.g., 0.4).
+//   - typeString: The nozzle type (e.g., "hardened_steel", "stainless_steel").
+//
+// Returns:
+//   - The sequence ID of the command.
+//   - An error if the command could not be published.
+func (m *MQTTClient) SetNozzleDetails(diameter float64, typeString string) (string, error) {
+	allowedDiameters := map[float64]bool{
+		0.2: true, 0.4: true, 0.6: true, 0.8: true,
+	}
+	if !allowedDiameters[diameter] {
+		return "", fmt.Errorf("invalid nozzle diameter: %f (must be 0.2, 0.4, 0.6, or 0.8)", diameter)
+	}
+
+	allowedTypes := map[string]bool{
+		"hardened_steel":  true,
+		"stainless_steel": true,
+	}
+	if !allowedTypes[typeString] {
+		return "", fmt.Errorf("invalid nozzle type: '%s' (must be hardened_steel or stainless_steel)", typeString)
+	}
+
+	seqID := m.getNextSequenceID()
+	cmd := map[string]any{
+		"system": map[string]any{
+			"sequence_id":     seqID,
+			"command":         "set_accessories",
+			"nozzle_diameter": diameter,
+			"nozzle_type":     typeString,
+		},
+		"user_id": "1234567890",
+	}
+	return seqID, m.Publish(cmd)
+}
+
+// SetFanSpeed sets the speed of the specified fan(s).
+// It sends the appropriate M106 G-code command.
+//
+// Parameters:
+//   - fan: The fan to control. One of "part" (P1), "aux" (P2), "chamber" (P3), or "all".
+//   - percent: The target speed percentage (0-100).
+//
+// Returns:
+//   - The sequence ID of the G-code command.
+//   - An error if the command could not be sent or the fan type is invalid.
+func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
+	// Validate percentage
+	if percent < 0 || percent > 100 {
+		return "", fmt.Errorf("invalid fan speed: %d (must be 0-100)", percent)
+	}
+
+	// Calculate S value (0-255)
+	// 255 * (percent / 100)
+	sVal := int(float64(percent) * 2.55)
+
+	var gcode string
+	switch fan {
+	case "part":
+		gcode = fmt.Sprintf("M106 P1 S%d\n", sVal)
+	case "aux":
+		gcode = fmt.Sprintf("M106 P2 S%d\n", sVal)
+	case "chamber":
+		gcode = fmt.Sprintf("M106 P3 S%d\n", sVal)
+	case "all":
+		gcode = fmt.Sprintf("M106 P1 S%d\nM106 P2 S%d\nM106 P3 S%d\n", sVal, sVal, sVal)
+	default:
+		return "", fmt.Errorf("invalid fan type: %s (must be part, aux, chamber, or all)", fan)
+	}
+
+	return m.SendGCode(gcode)
+}
+
+// SetBedTemperature sets the target bed temperature using M140 G-code.
+//
+// Parameters:
+//   - temp: The target temperature in Celsius.
+//
+// Returns:
+//   - The sequence ID of the G-code command.
+//   - An error if the command could not be sent.
+func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
+	if temp < 0 || temp > 120 {
+		return "", fmt.Errorf("invalid bed temperature: %d (must be 0-120)", temp)
+	}
+	gcode := fmt.Sprintf("M140 S%d\n", temp)
+	return m.SendGCode(gcode)
+}
+
+// SetNozzleTemperature sets the target nozzle (tool) temperature using M104 G-code.
+//
+// Parameters:
+//   - temp: The target temperature in Celsius.
+//
+// Returns:
+//   - The sequence ID of the G-code command.
+//   - An error if the command could not be sent.
+func (m *MQTTClient) SetNozzleTemperature(temp int) (string, error) {
+	if temp < 0 || temp > 320 {
+		return "", fmt.Errorf("invalid nozzle temperature: %d (must be 0-320)", temp)
+	}
+	gcode := fmt.Sprintf("M104 S%d\n", temp)
+	return m.SendGCode(gcode)
+}
