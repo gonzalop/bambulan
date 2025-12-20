@@ -73,8 +73,14 @@
                     </div>
                 </div>
 
-                <div class="card" id="cardAMS" style="display: none;">
-                    <h3>AMS</h3>
+
+                <div class="card" id="cardFilament" style="display: none;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">🧵 Filament</h3>
+                        <button onclick="showFilamentControl()"
+                            style="background: none; border: none; padding: 0; cursor: pointer; color: var(--text-light);">⚙️</button>
+                    </div>
                     <div id="amsContainer"></div>
                 </div>
             </div>
@@ -221,6 +227,50 @@
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                 <button onclick="document.getElementById('fanModal').style.display='none'" class="btn">Cancel</button>
                 <button onclick="submitFanControl()" class="btn btn-primary">Set Speed</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filament Control Modal -->
+    <div id="filamentModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>🧵 Filament Control</h3>
+            <div id="filamentModalStatus"
+                style="margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 6px;">
+                <div style="font-size: 0.9em; color: var(--text-light);">Current:</div>
+                <div id="filamentModalCurrent" style="font-weight: 600; margin-top: 5px;">None loaded</div>
+            </div>
+
+            <div style="margin: 20px 0;">
+                <h4 style="margin-bottom: 10px;">Load Filament</h4>
+                <select id="filamentSlotSelect" style="width: 100%; padding: 8px; margin-bottom: 10px;">
+                    <option value="">-- Select Slot --</option>
+                </select>
+                <button id="btnLoadFilament" onclick="loadFilament()" class="btn btn-primary" style="width: 100%;"
+                    disabled>Load Selected Slot</button>
+            </div>
+
+            <div style="margin: 20px 0; padding-top: 20px; border-top: 1px solid #ddd;">
+                <h4 style="margin-bottom: 10px;">Unload Filament</h4>
+                <button id="btnUnloadFilament" onclick="unloadFilament()" class="btn btn-danger" style="width: 100%;"
+                    disabled>Unload Current Filament</button>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button onclick="closeFilamentModal()" class="btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filament Operation Modal -->
+    <div id="filamentOpModal" class="modal-overlay" style="z-index: 2000; display: none;">
+        <div class="modal-content" style="text-align: center;">
+            <h3 style="margin-bottom: 20px;">⏳ Filament Operation</h3>
+            <div id="filamentOpMessage" style="font-size: 1.1em; margin-bottom: 20px;">
+                Waiting for filament to load...
+            </div>
+            <div style="font-size: 0.9em; color: #666;">
+                This may take up to a minute. Please wait...
             </div>
         </div>
     </div>
@@ -527,22 +577,19 @@
                                 btnOff.disabled = true;
                             }
 
-                            // AMS Logic
+                            // Filament/AMS Logic
                             if (p.ams && p.ams.ams && p.ams.ams.length > 0) {
-                                const amsCard = document.getElementById('cardAMS');
+                                const filamentCard = document.getElementById('cardFilament');
                                 const container = document.getElementById('amsContainer');
-                                amsCard.style.display = 'block';
+                                filamentCard.style.display = 'block';
 
                                 // Rebuild AMS content
-                                // Optimization: In a real app we'd diff, but for now wiping is fine
                                 container.innerHTML = "";
 
                                 p.ams.ams.forEach((unit, idx) => {
                                     const unitDiv = document.createElement('div');
                                     unitDiv.style.marginBottom = "10px";
 
-                                    // Clean up humidity display
-                                    // Value is typically 0-5 index, not percentage
                                     let hum = unit.humidity;
                                     if (hum === undefined || hum === null || hum === "") hum = "--";
 
@@ -561,24 +608,19 @@
 
                                     if (unit.tray) {
                                         unit.tray.forEach((tray, trayIdx) => {
-                                            // Skip empty slots if needed, but usually we want to show empty slots too?
-                                            // If tray doesn't exist or is empty, maybe show 'Empty'
-                                            // Bambu sends specific empty-ish objects. Check for valid ID or Type.
-
                                             const color = formatColor(tray.tray_color);
                                             const type = tray.tray_type || "Empty";
                                             const remain = tray.remain !== undefined ? tray.remain + "%" : "--";
-                                            const unknown = (tray.remain < 0); // -1 often means unknown
+                                            const unknown = (tray.remain < 0);
 
                                             const item = document.createElement('div');
                                             item.style.background = '#f8f9fa';
                                             item.style.padding = '8px';
                                             item.style.borderRadius = '6px';
                                             item.style.display = 'flex';
-                                            item.style.flexDirection = 'column'; // Stack vertically
+                                            item.style.flexDirection = 'column';
                                             item.style.gap = '2px';
 
-                                            // Top Row: Circle + Type
                                             const topRow = document.createElement('div');
                                             topRow.style.display = 'flex';
                                             topRow.style.alignItems = 'center';
@@ -590,7 +632,7 @@
                                             circle.style.borderRadius = '50%';
                                             circle.style.backgroundColor = color;
                                             circle.style.border = '1px solid #ddd';
-                                            circle.title = tray.tray_color; // Tooltip with full hex
+                                            circle.title = tray.tray_color;
 
                                             const typeDiv = document.createElement('div');
                                             typeDiv.style.fontWeight = 'bold';
@@ -600,7 +642,6 @@
                                             topRow.appendChild(circle);
                                             topRow.appendChild(typeDiv);
 
-                                            // Bottom Row: Capacity
                                             const capDiv = document.createElement('div');
                                             capDiv.style.fontSize = '0.8em';
                                             capDiv.style.color = '#666';
@@ -610,11 +651,7 @@
                                             item.appendChild(capDiv);
 
                                             // Highlight active slot
-                                            // Global ID: (unitIdx * 4) + slotIdx
                                             const globalID = (idx * 4) + trayIdx;
-                                            // p.ams.tray_now is a hex string "0" for some reason in docs, or decimal string "0"?
-                                            // Usually it's a string index "0", "1", etc.
-                                            // Sometimes it might be 255 (empty).
                                             if (p.ams.tray_now == globalID) {
                                                 item.style.border = '2px solid #4CAF50';
                                             }
@@ -625,8 +662,69 @@
                                     unitDiv.appendChild(grid);
                                     container.appendChild(unitDiv);
                                 });
+
+                                // External Spool Section (VT Tray - slot 254)
+                                if (p.vt_tray && p.vt_tray.tray_type) {
+                                    const extDiv = document.createElement('div');
+                                    extDiv.style.marginTop = "20px";
+                                    extDiv.style.paddingTop = "15px";
+                                    extDiv.style.borderTop = "2px solid #ddd";
+
+                                    extDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 10px; color: var(--text-light);">External Spool</div>`;
+
+                                    const color = formatColor(p.vt_tray.tray_color);
+                                    const type = p.vt_tray.tray_sub_brands || p.vt_tray.tray_type || "Unknown";
+                                    const remain = p.vt_tray.remain !== undefined ? p.vt_tray.remain + "%" : "--";
+                                    const unknown = (p.vt_tray.remain < 0);
+
+                                    const item = document.createElement('div');
+                                    item.style.background = '#f8f9fa';
+                                    item.style.padding = '8px';
+                                    item.style.borderRadius = '6px';
+                                    item.style.display = 'flex';
+                                    item.style.flexDirection = 'column';
+                                    item.style.gap = '2px';
+                                    item.style.maxWidth = '200px';
+
+                                    const topRow = document.createElement('div');
+                                    topRow.style.display = 'flex';
+                                    topRow.style.alignItems = 'center';
+                                    topRow.style.gap = '6px';
+
+                                    const circle = document.createElement('div');
+                                    circle.style.width = '14px';
+                                    circle.style.height = '14px';
+                                    circle.style.borderRadius = '50%';
+                                    circle.style.backgroundColor = color;
+                                    circle.style.border = '1px solid #ddd';
+                                    circle.title = p.vt_tray.tray_color;
+
+                                    const typeDiv = document.createElement('div');
+                                    typeDiv.style.fontWeight = 'bold';
+                                    typeDiv.style.fontSize = '0.9em';
+                                    typeDiv.innerText = type;
+
+                                    topRow.appendChild(circle);
+                                    topRow.appendChild(typeDiv);
+
+                                    const capDiv = document.createElement('div');
+                                    capDiv.style.fontSize = '0.8em';
+                                    capDiv.style.color = '#666';
+                                    capDiv.innerText = unknown ? "Capacity: N/A" : remain;
+
+                                    item.appendChild(topRow);
+                                    item.appendChild(capDiv);
+
+                                    // Highlight if active (tray_now = 254)
+                                    if (p.ams && (p.ams.tray_now === "254" || p.ams.tray_now === 254)) {
+                                        item.style.border = '2px solid #4CAF50';
+                                    }
+
+                                    extDiv.appendChild(item);
+                                    container.appendChild(extDiv);
+                                }
                             } else {
-                                document.getElementById('cardAMS').style.display = 'none';
+                                document.getElementById('cardFilament').style.display = 'none';
                             }
                         }
                     }
@@ -759,6 +857,211 @@
                     document.getElementById('fanModal').style.display = 'none';
                     updateStatus();
                 }
+            });
+        }
+
+        function showFilamentControl() {
+            if (!latestStatus || !latestStatus.print) return;
+
+            const p = latestStatus.print;
+            const modal = document.getElementById('filamentModal');
+            const slotSelect = document.getElementById('filamentSlotSelect');
+            const loadBtn = document.getElementById('btnLoadFilament');
+            const unloadBtn = document.getElementById('btnUnloadFilament');
+            const modalCurrent = document.getElementById('filamentModalCurrent');
+
+            // Check if printer is idle
+            const isIdle = p.gcode_state === "IDLE" || p.gcode_state === "FINISH";
+
+            // Determine current filament
+            let currentFilament = "None loaded";
+            const trayNow = p.ams ? p.ams.tray_now : null;
+            const hasFilament = trayNow !== undefined && trayNow !== null && trayNow !== "255" && trayNow !== 255;
+
+            if (hasFilament) {
+                const unitIdx = Math.floor(parseInt(trayNow) / 4);
+                const slotIdx = parseInt(trayNow) % 4;
+
+                if (p.ams.ams[unitIdx] && p.ams.ams[unitIdx].tray && p.ams.ams[unitIdx].tray[slotIdx]) {
+                    const tray = p.ams.ams[unitIdx].tray[slotIdx];
+                    const type = tray.tray_sub_brands || tray.tray_type || "Unknown";
+                    currentFilament = `Slot ${trayNow}: ${type}`;
+                }
+            } else if (trayNow === "254" || trayNow === 254) {
+                currentFilament = "External Spool";
+                hasFilament = true; // External spool is loaded
+            }
+
+            modalCurrent.innerHTML = currentFilament;
+
+            // Populate slot dropdown
+            slotSelect.innerHTML = '<option value="">-- Select Slot --</option>';
+
+            if (p.ams && p.ams.ams) {
+                p.ams.ams.forEach((unit, unitIdx) => {
+                    if (unit.tray) {
+                        unit.tray.forEach((tray, slotIdx) => {
+                            const globalID = (unitIdx * 4) + slotIdx;
+                            const type = tray.tray_sub_brands || tray.tray_type || "Empty";
+                            const color = tray.tray_color ? tray.tray_color.substring(0, 6) : "------";
+                            const option = document.createElement('option');
+                            option.value = globalID;
+                            option.text = `Slot ${globalID}: ${type} (${color})`;
+                            slotSelect.appendChild(option);
+                        });
+                    }
+                });
+            }
+
+            // Add external spool option
+            const extOption = document.createElement('option');
+            extOption.value = "254";
+            extOption.text = "External Spool (254)";
+            slotSelect.appendChild(extOption);
+
+            // Enable/disable controls based on state
+            // Load: disabled if filament is loaded OR printer is not idle
+            const loadDisabled = hasFilament || !isIdle;
+            loadBtn.disabled = loadDisabled;
+            slotSelect.disabled = loadDisabled;
+
+            // Unload: disabled if no filament is loaded OR printer is not idle
+            unloadBtn.disabled = !hasFilament || !isIdle;
+
+            // Update select change handler
+            slotSelect.onchange = function () {
+                loadBtn.disabled = !this.value || hasFilament || !isIdle;
+            };
+
+            modal.style.display = 'flex';
+        }
+
+        function closeFilamentModal() {
+            document.getElementById('filamentModal').style.display = 'none';
+        }
+
+        function loadFilament() {
+            const target = document.getElementById('filamentSlotSelect').value;
+            if (!target) {
+                alert("Please select a slot");
+                return;
+            }
+
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const loadBtn = document.getElementById('btnLoadFilament');
+            loadBtn.disabled = true;
+            loadBtn.innerText = "Sending...";
+
+            // Determine slot name for display
+            const slotSelect = document.getElementById('filamentSlotSelect');
+            const slotText = slotSelect.options[slotSelect.selectedIndex].text;
+
+            fetch('/api/filament', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRF-Token': token
+                },
+                body: `action=load&target=${target}`
+            }).then(resp => {
+                if (resp.status === 403) {
+                    alert("Session expired or invalid. Reloading...");
+                    window.location.reload();
+                    return;
+                }
+                if (!resp.ok) {
+                    resp.text().then(t => alert("Load failed: " + t));
+                    loadBtn.disabled = false;
+                    loadBtn.innerText = "Load Selected Slot";
+                } else {
+                    // Show operation modal
+                    closeFilamentModal();
+                    document.getElementById('filamentOpMessage').innerText = `Waiting for filament to load from ${slotText}...`;
+                    document.getElementById('filamentOpModal').style.display = 'flex';
+
+                    // Poll for completion (check every 2 seconds for up to 2 minutes)
+                    let pollCount = 0;
+                    const maxPolls = 60;
+                    const pollInterval = setInterval(() => {
+                        updateStatus();
+                        pollCount++;
+
+                        if (pollCount >= maxPolls) {
+                            clearInterval(pollInterval);
+                            document.getElementById('filamentOpModal').style.display = 'none';
+                        }
+
+                        // Check if load completed (tray_now changed to target)
+                        if (latestStatus && latestStatus.print && latestStatus.print.ams) {
+                            if (latestStatus.print.ams.tray_now == target) {
+                                clearInterval(pollInterval);
+                                document.getElementById('filamentOpModal').style.display = 'none';
+                            }
+                        }
+                    }, 2000);
+                }
+            }).catch(err => {
+                alert("Load failed: " + err);
+                loadBtn.disabled = false;
+                loadBtn.innerText = "Load Selected Slot";
+            });
+        }
+
+        function unloadFilament() {
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const unloadBtn = document.getElementById('btnUnloadFilament');
+            unloadBtn.disabled = true;
+            unloadBtn.innerText = "Sending...";
+
+            fetch('/api/filament', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRF-Token': token
+                },
+                body: 'action=unload'
+            }).then(resp => {
+                if (resp.status === 403) {
+                    alert("Session expired or invalid. Reloading...");
+                    window.location.reload();
+                    return;
+                }
+                if (!resp.ok) {
+                    resp.text().then(t => alert("Unload failed: " + t));
+                    unloadBtn.disabled = false;
+                    unloadBtn.innerText = "Unload Current Filament";
+                } else {
+                    // Show operation modal
+                    closeFilamentModal();
+                    document.getElementById('filamentOpMessage').innerText = 'Waiting for filament to unload...';
+                    document.getElementById('filamentOpModal').style.display = 'flex';
+
+                    // Poll for completion (check every 2 seconds for up to 2 minutes)
+                    let pollCount = 0;
+                    const maxPolls = 60;
+                    const pollInterval = setInterval(() => {
+                        updateStatus();
+                        pollCount++;
+
+                        if (pollCount >= maxPolls) {
+                            clearInterval(pollInterval);
+                            document.getElementById('filamentOpModal').style.display = 'none';
+                        }
+
+                        // Check if unload completed (tray_now is 255)
+                        if (latestStatus && latestStatus.print && latestStatus.print.ams) {
+                            const trayNow = latestStatus.print.ams.tray_now;
+                            if (trayNow === "255" || trayNow === 255) {
+                                clearInterval(pollInterval);
+                                document.getElementById('filamentOpModal').style.display = 'none';
+                            }
+                        }
+                    }, 2000);
+                }
+            }).catch(err => {
+                alert("Unload failed: " + err);
+                unloadBtn.disabled = false;
+                unloadBtn.innerText = "Unload Current Filament";
             });
         }
 

@@ -104,6 +104,7 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/rename", s.handleAPIRename)
 	http.HandleFunc("/api/mkdir", s.handleAPIMkdir)
 	http.HandleFunc("/api/print", s.handleAPIPrint)
+	http.HandleFunc("/api/filament", s.handleAPIFilament)
 	http.HandleFunc("/camera", s.handleCamera)
 
 	slog.Debug("Starting web server", "addr", s.BindAddr)
@@ -835,6 +836,66 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 	if _, err := session.Client.MQTT.StartPrint(remotePath, opts); err != nil {
 		slog.Error("Start print failed", "path", remotePath, "error", err)
 		http.Error(w, "Start print failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *WebServer) handleAPIFilament(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.getSession(w, r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate CSRF
+	if !s.validateCSRF(r, session) {
+		http.Error(w, "Invalid CSRF Token", http.StatusForbidden)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	action := r.FormValue("action")
+
+	switch action {
+	case "load":
+		targetStr := r.FormValue("target")
+		if targetStr == "" {
+			http.Error(w, "Missing target parameter", http.StatusBadRequest)
+			return
+		}
+
+		target, err := strconv.Atoi(targetStr)
+		if err != nil {
+			http.Error(w, "Invalid target value", http.StatusBadRequest)
+			return
+		}
+
+		if _, err := session.Client.MQTT.LoadFilament(target); err != nil {
+			slog.Error("Load filament failed", "target", target, "error", err)
+			http.Error(w, "Load filament failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+	case "unload":
+		if _, err := session.Client.MQTT.UnloadFilament(); err != nil {
+			slog.Error("Unload filament failed", "error", err)
+			http.Error(w, "Unload filament failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+	default:
+		http.Error(w, "Invalid action", http.StatusBadRequest)
 		return
 	}
 
