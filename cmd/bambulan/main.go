@@ -678,6 +678,7 @@ func (c *FanCmd) Run(ctx *Context) error {
 type FileCmd struct {
 	Ls       FileLsCmd       `cmd:"" help:"List files"`
 	Download FileDownloadCmd `cmd:"" help:"Download file"`
+	Upload   FileUploadCmd   `cmd:"" help:"Upload file"`
 	Rm       FileRmCmd       `cmd:"" help:"Remove file or directory"`
 	Mkdir    FileMkdirCmd    `cmd:"" help:"Make directory"`
 	Mv       FileMvCmd       `cmd:"" help:"Move/Rename file"`
@@ -705,7 +706,7 @@ func (c *FileLsCmd) Run(ctx *Context) error {
 		}
 		for _, f := range files {
 			t := "FILE"
-			if f.Type == 1 { // EntryTypeFolder
+			if f.Type == "dir" { // Directory
 				t = "DIR "
 			}
 			fmt.Printf("%s %-10d %s\n", t, f.Size, f.Name)
@@ -742,6 +743,37 @@ func (c *FileDownloadCmd) Run(ctx *Context) error {
 		return err
 	}
 	fmt.Printf("\nDownloaded in %v\n", time.Since(start))
+	return nil
+}
+
+type FileUploadCmd struct {
+	Local  string `arg:"" help:"Local file path"`
+	Remote string `arg:"" optional:"" help:"Remote destination path"`
+}
+
+func (c *FileUploadCmd) Run(ctx *Context) error {
+	remote := c.Remote
+	if remote == "" {
+		remote = "/" + filepath.Base(c.Local)
+	}
+
+	fmt.Printf("Uploading %s to %s...\n", c.Local, remote)
+	start := time.Now()
+
+	progressFunc := func(current, total int64) {
+		if total > 0 {
+			percent := float64(current) / float64(total) * 100
+			fmt.Printf("\rUpload: %.1f%% (%d/%d bytes)", percent, current, total)
+		} else {
+			fmt.Printf("\rUpload: %d bytes", current)
+		}
+	}
+
+	if err := ctx.Client.File.UploadFile(c.Local, remote, progressFunc); err != nil {
+		fmt.Println()
+		return err
+	}
+	fmt.Printf("\nUploaded in %v\n", time.Since(start))
 	return nil
 }
 

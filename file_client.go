@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
+
 	"os"
 	"path/filepath"
+
 	"time"
 
-	"github.com/jlaffaye/ftp"
+	"github.com/gonzalop/ftp"
 )
 
 // FileClient handles file operations (listing, uploading, downloading) over FTPS.
@@ -33,7 +34,7 @@ func NewFileClient(hostname, accessCode string) *FileClient {
 	}
 }
 
-func (f *FileClient) connect() (*ftp.ServerConn, error) {
+func (f *FileClient) connect() (*ftp.Client, error) {
 	tlsConfig := &tls.Config{
 		// Bambu Lab printers use self-signed certificates for their FTPS server.
 		InsecureSkipVerify: true,
@@ -41,30 +42,10 @@ func (f *FileClient) connect() (*ftp.ServerConn, error) {
 
 	// Use a custom dialer to intercept 0.0.0.0 addresses from the printer PASV
 	// and replace them with the actual hostname.
-	fixIPDialer := func(network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-
-		// If PASV asks us to connect to 0.0.0.0...
-		if host == "0.0.0.0" || host == "::" {
-			slog.Debug("Replacing 0.0.0.0 for data connection", "old", addr, "new_host", f.Hostname, "port", port)
-			// Reassemble using the known good host and the new port
-			addr = net.JoinHostPort(f.Hostname, port)
-		}
-
-		// Proceed with the standard dial using the fixed address
-		slog.Debug("Dialing FTPS", "address", addr)
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		return tls.DialWithDialer(dialer, network, addr, tlsConfig)
-	}
-
 	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname),
-		// Note: We do NOT use ftp.DialWithTLS here because our custom dialer
-		// already returns a TLS connection. Using both would cause double-wrapping.
-		ftp.DialWithTimeout(5*time.Second),
-		ftp.DialWithDialFunc(fixIPDialer),
+		ftp.WithImplicitTLS(tlsConfig),
+		ftp.WithTimeout(5*time.Second),
+		ftp.WithDebug(slog.Default()),
 	)
 	if err != nil {
 		return nil, err
@@ -117,7 +98,7 @@ func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
 
 	var files []string
 	for _, entry := range entries {
-		if entry.Type == ftp.EntryTypeFile && filepath.Ext(entry.Name) == extension {
+		if entry.Type == "file" && filepath.Ext(entry.Name) == extension {
 			files = append(files, entry.Name)
 		}
 	}
@@ -140,18 +121,22 @@ func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	resp, err := c.Retr(remotePath)
-	if err != nil {
-		_ = c.Quit()
-		return nil, err
-	}
+	// Create a pipe to stream the data
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		err := c.Retrieve(remotePath, pw)
+		if err != nil {
+			pw.CloseWithError(err)
+		}
+	}()
 
-	return &ftpReadCloser{ReadCloser: resp, conn: c}, nil
+	return &ftpReadCloser{ReadCloser: pr, conn: c}, nil
 }
 
 type ftpReadCloser struct {
 	io.ReadCloser
-	conn *ftp.ServerConn
+	conn *ftp.Client
 }
 
 func (f *ftpReadCloser) Close() error {
@@ -168,12 +153,6 @@ func (f *ftpReadCloser) Close() error {
 //   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
 //     that reports the current download progress. `totalBytes` will be 0 if unknown.
 func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(int64, int64)) error {
-	reader, err := f.Download(remotePath)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-
 	return f.downloadFileInternal(remotePath, localPath, onProgress)
 }
 
@@ -186,15 +165,9 @@ func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgre
 
 	// Try to get size first
 	var total int64
-	if size, err := c.FileSize(remotePath); err == nil {
+	if size, err := c.Size(remotePath); err == nil {
 		total = size
 	}
-
-	resp, err := c.Retr(remotePath)
-	if err != nil {
-		return err
-	}
-	defer resp.Close()
 
 	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 		return err
@@ -206,16 +179,17 @@ func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgre
 	}
 	defer outFile.Close()
 
-	var reader io.Reader = resp
 	if onProgress != nil {
-		reader = &progressReader{
-			Reader:     resp,
+		// Wrap the writer with progress tracking
+		pw := &progressWriter{
+			Writer:     outFile,
 			total:      total,
 			onProgress: onProgress,
 		}
+		err = c.Retrieve(remotePath, pw)
+	} else {
+		err = c.Retrieve(remotePath, outFile)
 	}
-
-	_, err = io.Copy(outFile, reader)
 	return err
 }
 
@@ -257,7 +231,7 @@ func (f *FileClient) Upload(remotePath string, content io.Reader, onProgress fun
 		}
 	}
 
-	return c.Stor(remotePath, reader)
+	return c.Store(remotePath, reader)
 }
 
 // UploadFile uploads a local file to the printer.
@@ -294,6 +268,20 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	n, err := pr.Reader.Read(p)
 	pr.current += int64(n)
 	pr.onProgress(pr.current, pr.total)
+	return n, err
+}
+
+type progressWriter struct {
+	io.Writer
+	current    int64
+	total      int64
+	onProgress func(int64, int64)
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.Writer.Write(p)
+	pw.current += int64(n)
+	pw.onProgress(pw.current, pw.total)
 	return n, err
 }
 
@@ -367,7 +355,7 @@ func (f *FileClient) RemoveAll(path string) error {
 	return f.removeAll(c, path)
 }
 
-func (f *FileClient) removeAll(c *ftp.ServerConn, path string) error {
+func (f *FileClient) removeAll(c *ftp.Client, path string) error {
 	// Try to list the path to see if it's a directory
 	entries, err := c.List(path)
 	if err != nil {
@@ -388,7 +376,7 @@ func (f *FileClient) removeAll(c *ftp.ServerConn, path string) error {
 		}
 		fullPath := filepath.Join(path, entry.Name)
 
-		if entry.Type == ftp.EntryTypeFolder {
+		if entry.Type == "dir" {
 			if err := f.removeAll(c, fullPath); err != nil {
 				return err
 			}

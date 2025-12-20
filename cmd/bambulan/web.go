@@ -504,7 +504,7 @@ func (s *WebServer) handleAPIRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("Renamed file", "old", oldPath, "new", newPath)
+	slog.Debug("Renamed file", "old", oldPath, "new", newPath)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -537,7 +537,7 @@ func (s *WebServer) handleAPIMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("Created directory", "path", path)
+	slog.Debug("Created directory", "path", path)
 	w.WriteHeader(http.StatusOK)
 }
 
