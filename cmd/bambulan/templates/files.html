@@ -25,6 +25,7 @@
                 </h3>
                 <div class="button-group">
                     <input type="file" id="uploadInput" style="display: none;" onchange="uploadFile()">
+                    <button onclick="createFolder()" class="btn btn-warning">New Folder</button>
                     <button onclick="document.getElementById('uploadInput').click()" class="btn btn-primary">Upload
                         File</button>
                     <button onclick="loadFiles(currentPath)" class="btn">Refresh</button>
@@ -73,31 +74,110 @@
         </div>
     </div>
 
+    <style>
+        /* Dropdown styles */
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            background-color: #f9f9f9;
+            min-width: 160px;
+            box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+
+        .dropdown-content button,
+        .dropdown-content a {
+            color: black;
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            background: none;
+            border: none;
+            width: 100%;
+            text-align: left;
+            cursor: pointer;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        .dropdown-content button:hover,
+        .dropdown-content a:hover {
+            background-color: #f1f1f1;
+        }
+
+        .dropdown-divider {
+            height: 1px;
+            margin: 4px 0;
+            overflow: hidden;
+            background-color: #e5e5e5;
+        }
+
+        .show {
+            display: block;
+        }
+
+        .menu-btn {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0 10px;
+            color: #666;
+        }
+
+        .menu-btn:hover {
+            color: #333;
+        }
+    </style>
     <script>
         let currentPath = "/";
+
+        // Global click to close menus
+        window.onclick = function (event) {
+            if (!event.target.matches('.menu-btn')) {
+                var dropdowns = document.getElementsByClassName("dropdown-content");
+                for (var i = 0; i < dropdowns.length; i++) {
+                    var openDropdown = dropdowns[i];
+                    if (openDropdown.classList.contains('show')) {
+                        openDropdown.classList.remove('show');
+                    }
+                }
+            }
+        }
+
+        function toggleMenu(id) {
+            var dropdowns = document.getElementsByClassName("dropdown-content");
+            for (var i = 0; i < dropdowns.length; i++) {
+                if (dropdowns[i].id !== id) {
+                    dropdowns[i].classList.remove('show');
+                }
+            }
+            document.getElementById(id).classList.toggle("show");
+        }
 
         function uploadFile() {
             const input = document.getElementById('uploadInput');
             if (input.files.length === 0) return;
-
             const file = input.files[0];
-
-            // Validation for invalid characters: < > [ ] : / \ | ? * "
             if (/[<>\[\]:/\\|?*"]/.test(file.name)) {
                 alert('Filename contains invalid characters: <>[]:/\\|?*"\nPlease rename the file and try again.');
                 input.value = '';
                 return;
             }
-
             const formData = new FormData();
             formData.append('file', file);
             formData.append('path', currentPath);
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-
             const statusDiv = document.getElementById('file-list');
             statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + file.name + '... <span id="uploadDetails"></span></div>';
-
-            // Poller for progress
             const poller = setInterval(() => {
                 fetch('/api/status').then(r => r.json()).then(d => {
                     if (d.upload_status && d.upload_status.uploading) {
@@ -109,12 +189,9 @@
                     }
                 });
             }, 500);
-
             fetch('/api/upload', {
                 method: 'POST',
-                headers: {
-                    'X-CSRF-Token': token
-                },
+                headers: { 'X-CSRF-Token': token },
                 body: formData
             }).then(resp => {
                 clearInterval(poller);
@@ -124,9 +201,7 @@
                     return;
                 }
                 if (!resp.ok) resp.text().then(text => alert("Upload failed: " + text));
-                else {
-                    loadFiles(currentPath);
-                }
+                else { loadFiles(currentPath); }
                 input.value = '';
             }).catch(err => {
                 clearInterval(poller);
@@ -134,14 +209,51 @@
             });
         }
 
+        async function createFolder() {
+            const name = prompt("Enter folder name:");
+            if (!name) return;
+            if (/[<>\[\]:/\\|?*"]/.test(name)) {
+                alert('Folder name contains invalid characters: <>[]:/\\|?*"');
+                return;
+            }
+            const fullPath = currentPath + name;
+            const formData = new FormData();
+            formData.append('path', fullPath);
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            formData.append('_csrf', token);
+            try {
+                const resp = await fetch('/api/mkdir', { method: 'POST', body: formData });
+                if (resp.status === 403) { window.location.reload(); return; }
+                if (!resp.ok) { const txt = await resp.text(); alert("Failed to create folder: " + txt); }
+                else { loadFiles(currentPath); }
+            } catch (e) { alert("Error: " + e); }
+        }
+
+        async function renameItem(name, isDir) {
+            const newName = prompt("Rename " + name + " to:", name);
+            if (!newName || newName === name) return;
+            if (/[<>\[\]:/\\|?*"]/.test(newName)) {
+                alert('Name contains invalid characters: <>[]:/\\|?*"');
+                return;
+            }
+            const oldPath = currentPath + name;
+            let newPath = currentPath + newName;
+            const formData = new FormData();
+            formData.append('oldPath', oldPath);
+            formData.append('newPath', newPath);
+            const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            formData.append('_csrf', token);
+            try {
+                const resp = await fetch('/api/rename', { method: 'POST', body: formData });
+                if (resp.status === 403) { window.location.reload(); return; }
+                if (!resp.ok) { const txt = await resp.text(); alert("Failed to rename: " + txt); }
+                else { loadFiles(currentPath); }
+            } catch (e) { alert("Error: " + e); }
+        }
+
         function escapeHtml(text) {
             if (!text) return text;
-            return text
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
         function loadFiles(path) {
@@ -155,13 +267,11 @@
                 .then(entries => {
                     if (!entries) {
                         list.innerHTML = `<div style="text-align: center; padding: 20px;">Empty folder</div>`;
-                        // But if it's not root, we need Back button
                         if (path !== "/") {
                             const parts = path.split('/').filter(p => p);
                             parts.pop();
                             let parent = "/" + parts.join("/");
                             if (!parent.endsWith("/")) parent += "/";
-
                             list.innerHTML = `
                                 <div style="margin-bottom: 10px;">
                                     <a href="#" onclick="loadFiles('${parent}')" class="btn" style="padding: 5px 10px; font-size: 0.8em;">&larr; Back</a>
@@ -171,7 +281,6 @@
                         return;
                     }
 
-                    // Sort: Directories first, then files
                     entries.sort((a, b) => {
                         if (a.Type === b.Type) return a.Name.localeCompare(b.Name);
                         return a.Type === 1 ? -1 : 1;
@@ -180,12 +289,10 @@
                     let html = '<div style="display: flex; flex-direction: column; gap: 5px;">';
 
                     if (path !== "/") {
-                        // Find parent path
                         const parts = path.split('/').filter(p => p);
                         parts.pop();
                         let parent = "/" + parts.join("/");
                         if (!parent.endsWith("/")) parent += "/";
-
                         html += `
                         <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee;">
                             <a href="#" onclick="loadFiles('${parent}')" style="display: flex; align-items: center; gap: 10px;">
@@ -194,33 +301,52 @@
                         </div>`;
                     }
 
-                    entries.forEach(e => {
+                    entries.forEach((e, index) => {
+                        const uniqueId = 'menu-' + index;
+                        const escapedName = escapeHtml(e.Name);
+                        const fullPath = escapeHtml(path + e.Name);
+
+                        // Menu content
+                        let menuItems = `
+                            ${e.Type !== 1 ? `<a href="/api/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
+                            <button onclick="renameItem('${escapedName}', ${e.Type === 1})">✎ Rename</button>
+                            <button onclick="deleteFile('${fullPath}')" style="color: #d9534f;">🗑️ Delete</button>
+                        `;
+
                         if (e.Type === 1) { // Directory
                             const newPath = path + e.Name + "/";
                             html += `
                             <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
                                 <a href="#" onclick="loadFiles('${newPath}')" style="display: flex; align-items: center; gap: 10px; flex: 1;">
                                     <span style="font-size: 1.2em;">📂</span> 
-                                    <span style="font-weight: 600; color: var(--text-color);">${escapeHtml(e.Name)}</span>
+                                    <span style="font-weight: 600; color: var(--text-color);">${escapedName}</span>
                                 </a>
-                                <span style="font-size: 0.8em; color: #999;">Dir</span>
+                                <div class="dropdown">
+                                    <button onclick="toggleMenu('${uniqueId}')" class="menu-btn">⋮</button>
+                                    <div id="${uniqueId}" class="dropdown-content">
+                                        ${menuItems}
+                                    </div>
+                                </div>
                             </div>`;
                         } else {
-                            const downloadUrl = `/api/download?path=${encodeURIComponent(path + e.Name)}`;
                             const sizeMB = (e.Size / 1024 / 1024).toFixed(2);
                             html += `
                             <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
                                 <div style="display: flex; align-items: center; gap: 10px;">
                                     <span style="font-size: 1.2em;">📄</span>
-                                    <span>${escapeHtml(e.Name)}</span>
+                                    <span>${escapedName}</span>
                                 </div>
                                 <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
                                     <span style="color: #666;">${sizeMB} MB</span>
                                     ${e.Name.endsWith('.gcode.3mf') ?
-                                    `<button onclick="openPrintModal('${escapeHtml(path + e.Name)}')" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🖨️ Print</button>`
+                                    `<button onclick="openPrintModal('${fullPath}')" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🖨️ Print</button>`
                                     : ''}
-                                    <button onclick="deleteFile('${escapeHtml(path + e.Name)}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🗑️ Delete</button>
-                                    <a href="${downloadUrl}" target="_blank" class="btn btn-info" style="padding: 5px 10px; font-size: 0.8em; color: white;">⬇️ Download</a>
+                                    <div class="dropdown">
+                                        <button onclick="toggleMenu('${uniqueId}')" class="menu-btn">⋮</button>
+                                        <div id="${uniqueId}" class="dropdown-content">
+                                            ${menuItems}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>`;
                         }
@@ -257,7 +383,6 @@
                 }
 
                 if (response.ok) {
-                    // Refresh list
                     loadFiles(currentPath);
                 } else {
                     const text = await response.text();
@@ -274,8 +399,6 @@
             document.getElementById('printModal').style.display = 'flex';
             document.getElementById('printFilename').innerText = fullPath.split('/').pop();
             document.getElementById('printExistingPath').value = fullPath;
-
-            // Fetch status to check for AMS
             fetch('/api/status').then(r => r.json()).then(d => {
                 if (d.print && d.print.ams && d.print.ams.ams_exist_bits !== "0") {
                     document.getElementById('chkUseAMS').checked = true;
@@ -293,15 +416,11 @@
             const btn = document.getElementById('startBtn');
             const data = new FormData(form);
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-
             btn.disabled = true;
             btn.innerText = "Starting...";
-
             fetch('/api/print', {
                 method: 'POST',
-                headers: {
-                    'X-CSRF-Token': token
-                },
+                headers: { 'X-CSRF-Token': token },
                 body: data
             }).then(resp => {
                 if (resp.status === 403) {
@@ -320,6 +439,7 @@
                 btn.innerText = "Start Print";
             });
         }
+
     </script>
 </body>
 

@@ -61,81 +61,9 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	// For status, we update the callback to print
 	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
 		if c.Watch {
-			fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
-		}
-		fmt.Println("=== Bambu Printer Status ===")
-		fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.GetPrintStageName())
-		fmt.Printf("Progress:     %d%%\n", status.McPercent)
-		fmt.Printf("Remaining:    %d min\n", status.McRemainingTime)
-		fmt.Printf("Layer:        %d / %d\n", status.LayerNum, status.TotalLayerNum)
-		fmt.Printf("Nozzle Temp:  %.1f / %.1f °C\n", status.NozzleTemp, status.NozzleTargetTemp)
-		fmt.Printf("Bed Temp:     %.1f / %.1f °C\n", status.BedTemp, status.BedTargetTemp)
-		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
-		fmt.Printf("Fan - Part:   %s\n", formatFan(status.CoolingFanSpeed))
-		fmt.Printf("Fan - Aux:    %s\n", formatFan(status.BigFan1Speed))
-		fmt.Printf("Fan - Chamb:  %s\n", formatFan(status.BigFan2Speed))
-		fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
-		if len(status.LightsReport) > 0 {
-			fmt.Print("Light:        ")
-			for i, l := range status.LightsReport {
-				if i > 0 {
-					fmt.Print(", ")
-				}
-				fmt.Printf("%s:%s", l.Node, l.Mode)
-			}
-			fmt.Println()
-		} else {
-			fmt.Println("Light:        N/A")
+			c.printStatus(status)
 		}
 
-		if status.Ams != nil && len(status.Ams.Ams) > 0 {
-			fmt.Println("\n--- AMS Status ---")
-			// TrayNow is the global slot ID (0-15 across 4 units)
-			activeTray := status.Ams.TrayNow
-
-			for i, unit := range status.Ams.Ams {
-				hum := unit.Humidity
-				if hum == "1" {
-					hum = "1 (Dry)"
-				} else if hum == "5" {
-					hum = "5 (Wet)"
-				}
-				fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i, unit.Temp, hum)
-				for j, tray := range unit.Tray {
-					// Calculate global ID for this slot
-					globalID := fmt.Sprintf("%d", (i*4)+j)
-					isActive := (globalID == activeTray)
-
-					marker := " "
-					if isActive {
-						marker = "*"
-					}
-
-					if tray.Id == "" {
-						fmt.Printf(" %sSlot %d: [Empty]\n", marker, j)
-						continue
-					}
-					remain := fmt.Sprintf("%d%%", tray.Remain)
-					if tray.Remain < 0 {
-						remain = "Capacity: N/A"
-					}
-					name := tray.TraySubBrands
-					if name == "" {
-						name = tray.TrayType
-					}
-					if name == "" {
-						name = tray.TrayIdName
-					}
-					fmt.Printf(" %sSlot %d: %s %s (%s)\n", marker, j, name, tray.TrayColor, remain)
-				}
-			}
-		}
-		fmt.Println("----------------------------")
-		if c.Watch {
-			fmt.Println("Press Ctrl+C to exit")
-		}
-
-		// Signal that we got data
 		select {
 		case updateReceived <- struct{}{}:
 		default:
@@ -148,7 +76,6 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	defer client.Stop()
 
 	// If watching, handle interrupts.
-	// If not watching, wait for first update then exit.
 	if c.Watch {
 		// Capture interrupt signal
 		sigChan := make(chan os.Signal, 1)
@@ -158,12 +85,118 @@ func (c *StatusCmd) Run(ctx *Context) error {
 		return nil
 	}
 
-	// Not watching: wait for update or timeout
-	select {
-	case <-updateReceived:
-		return nil
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("timeout waiting for printer status")
+	// Not watching: wait for "complete" update or timeout
+	// "Complete" means we have Print status (e.g. McPrintStage) AND Modules info (from get_version)
+	timeout := time.After(5 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			status := client.GetPrinterStatus() // Need to expose this or use ctx.Client.MQTT.GetPrinterStatus()
+			hasPrint := status.McPrintStage != "" || status.GcodeState != ""
+			hasInfo := len(status.Modules) > 0 || status.DeviceModel != ""
+
+			if hasPrint && hasInfo {
+				c.printStatus(status)
+				return nil
+			}
+		case <-timeout:
+			// Timeout, print what we have
+			c.printStatus(client.MQTT.GetPrinterStatus())
+			return nil
+		}
+	}
+}
+
+func (c *StatusCmd) printStatus(status *bambulan.PrinterStatus) {
+	if c.Watch {
+		fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
+	}
+	fmt.Println("=== Bambu Printer Status ===")
+	fmt.Printf("Device Model: %s\n", status.DeviceModel)
+	fmt.Println("----------------------------")
+	fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.GetPrintStageName())
+	fmt.Printf("Progress:     %d%%\n", status.McPercent)
+	fmt.Printf("Remaining:    %d min\n", status.McRemainingTime)
+	fmt.Printf("Layer:        %d / %d\n", status.LayerNum, status.TotalLayerNum)
+	fmt.Printf("Nozzle Temp:  %.1f / %.1f °C (Limit: %d°C)\n", status.NozzleTemp, status.NozzleTargetTemp, status.NozzleTempLimit)
+	fmt.Printf("Bed Temp:     %.1f / %.1f °C (Limit: %d°C)\n", status.BedTemp, status.BedTargetTemp, status.BedTempLimit)
+	fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
+	fmt.Printf("Fan - Part:   %s\n", formatFan(status.CoolingFanSpeed))
+	fmt.Printf("Fan - Aux:    %s\n", formatFan(status.BigFan1Speed))
+	fmt.Printf("Fan - Chamb:  %s\n", formatFan(status.BigFan2Speed))
+	fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
+	if len(status.LightsReport) > 0 {
+		fmt.Print("Light:        ")
+		for i, l := range status.LightsReport {
+			if i > 0 {
+				fmt.Print(", ")
+			}
+			fmt.Printf("%s:%s", l.Node, l.Mode)
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("Light:        N/A")
+	}
+
+	if status.Ams != nil {
+		fmt.Println("\n--- AMS Status ---")
+		if len(status.Ams.Ams) == 0 {
+			fmt.Println("AMS detected but no units reported.")
+		}
+		// TrayNow is the global slot ID (0-15 across 4 units)
+		activeTray := status.Ams.TrayNow
+
+		for i, unit := range status.Ams.Ams {
+			hum := unit.Humidity
+			if hum == "1" {
+				hum = "1 (Dry)"
+			} else if hum == "5" {
+				hum = "5 (Wet)"
+			}
+			fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i, unit.Temp, hum)
+			for j, tray := range unit.Tray {
+				// Calculate global ID for this slot
+				globalID := fmt.Sprintf("%d", (i*4)+j)
+				isActive := (globalID == activeTray)
+
+				marker := " "
+				if isActive {
+					marker = "*"
+				}
+
+				if tray.Id == "" {
+					fmt.Printf(" %sSlot %d: [Empty]\n", marker, j)
+					continue
+				}
+				remain := fmt.Sprintf("%d%%", tray.Remain)
+				if tray.Remain < 0 {
+					remain = "Capacity: N/A"
+				}
+				name := tray.TraySubBrands
+				if name == "" {
+					name = tray.TrayType
+				}
+				if name == "" {
+					name = tray.TrayIdName
+				}
+				fmt.Printf(" %sSlot %d: %s %s (%s)\n", marker, j, name, tray.TrayColor, remain)
+			}
+		}
+	}
+
+	// Module Information
+	if len(status.Modules) > 0 {
+		fmt.Println("\n--- Module Information ---")
+		for _, m := range status.Modules {
+			fmt.Printf("  %-10s %-15s HW:%-8s SW:%s\n", m.Name, m.Project, m.HwVer, m.SwVer)
+		}
+	}
+	fmt.Println("----------------------------")
+	if c.Watch {
+		fmt.Println("Press Ctrl+C to exit")
 	}
 }
 

@@ -49,7 +49,7 @@ func (f *FileClient) connect() (*ftp.ServerConn, error) {
 
 		// If PASV asks us to connect to 0.0.0.0...
 		if host == "0.0.0.0" || host == "::" {
-			slog.Info("Fixing invalid data address", "old", addr, "new_host", f.Hostname, "port", port)
+			slog.Debug("Replacing 0.0.0.0 for data connection", "old", addr, "new_host", f.Hostname, "port", port)
 			// Reassemble using the known good host and the new port
 			addr = net.JoinHostPort(f.Hostname, port)
 		}
