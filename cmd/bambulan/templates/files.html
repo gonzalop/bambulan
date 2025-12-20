@@ -74,6 +74,33 @@
         </div>
     </div>
 
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 style="margin-bottom: 20px;">Confirm Action</h3>
+            <p id="confirmMessage" style="margin-bottom: 25px; color: var(--text-color);"></p>
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" onclick="closeConfirmModal(false)" class="btn">Cancel</button>
+                <button type="button" onclick="closeConfirmModal(true)" class="btn btn-danger">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prompt Modal -->
+    <div id="promptModal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 style="margin-bottom: 20px;" id="promptTitle">Enter Value</h3>
+            <p id="promptMessage" style="margin-bottom: 15px; color: var(--text-color);"></p>
+            <input type="text" id="promptInput"
+                style="width: 100%; padding: 12px; margin-bottom: 20px; border: 1px solid var(--border-color); border-radius: 8px; box-sizing: border-box; font-size: 1rem;">
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" onclick="closePromptModal(null)" class="btn">Cancel</button>
+                <button type="button" onclick="closePromptModal(document.getElementById('promptInput').value)"
+                    class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
     <style>
         /* Dropdown styles */
         .dropdown {
@@ -139,6 +166,62 @@
     </style>
     <script>
         let currentPath = "/";
+
+        // Custom modal helpers
+        let confirmResolve = null;
+        let promptResolve = null;
+
+        function showConfirm(message) {
+            return new Promise((resolve) => {
+                confirmResolve = resolve;
+                document.getElementById('confirmMessage').innerText = message;
+                document.getElementById('confirmModal').style.display = 'flex';
+            });
+        }
+
+        function closeConfirmModal(result) {
+            document.getElementById('confirmModal').style.display = 'none';
+            if (confirmResolve) {
+                confirmResolve(result);
+                confirmResolve = null;
+            }
+        }
+
+        function showPrompt(title, message, defaultValue = '') {
+            return new Promise((resolve) => {
+                promptResolve = resolve;
+                document.getElementById('promptTitle').innerText = title;
+                document.getElementById('promptMessage').innerText = message;
+                const input = document.getElementById('promptInput');
+                input.value = defaultValue;
+                document.getElementById('promptModal').style.display = 'flex';
+                // Focus and select the input
+                setTimeout(() => {
+                    input.focus();
+                    input.select();
+                }, 100);
+            });
+        }
+
+        function closePromptModal(result) {
+            document.getElementById('promptModal').style.display = 'none';
+            if (promptResolve) {
+                promptResolve(result);
+                promptResolve = null;
+            }
+        }
+
+        // Allow Enter key to submit prompt
+        document.addEventListener('DOMContentLoaded', () => {
+            const promptInput = document.getElementById('promptInput');
+            if (promptInput) {
+                promptInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        closePromptModal(promptInput.value);
+                    }
+                });
+            }
+        });
 
         // Global click to close menus
         window.onclick = function (event) {
@@ -210,7 +293,7 @@
         }
 
         async function createFolder() {
-            const name = prompt("Enter folder name:");
+            const name = await showPrompt("New Folder", "Enter folder name:");
             if (!name) return;
             if (/[<>\[\]:/\\|?*"]/.test(name)) {
                 alert('Folder name contains invalid characters: <>[]:/\\|?*"');
@@ -230,7 +313,7 @@
         }
 
         async function renameItem(name, isDir) {
-            const newName = prompt("Rename " + name + " to:", name);
+            const newName = await showPrompt("Rename", "Rename " + name + " to:", name);
             if (!newName || newName === name) return;
             if (/[<>\[\]:/\\|?*"]/.test(newName)) {
                 alert('Name contains invalid characters: <>[]:/\\|?*"');
@@ -283,7 +366,7 @@
 
                     entries.sort((a, b) => {
                         if (a.Type === b.Type) return a.Name.localeCompare(b.Name);
-                        return a.Type === 1 ? -1 : 1;
+                        return a.Type === "dir" ? -1 : 1;
                     });
 
                     let html = '<div style="display: flex; flex-direction: column; gap: 5px;">';
@@ -308,12 +391,12 @@
 
                         // Menu content
                         let menuItems = `
-                            ${e.Type !== 1 ? `<a href="/api/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
-                            <button onclick="renameItem('${escapedName}', ${e.Type === 1})">✎ Rename</button>
+                            ${e.Type !== "dir" ? `<a href="/api/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
+                            <button onclick="renameItem('${escapedName}', ${e.Type === "dir"})">✎ Rename</button>
                             <button onclick="deleteFile('${fullPath}')" style="color: #d9534f;">🗑️ Delete</button>
                         `;
 
-                        if (e.Type === 1) { // Directory
+                        if (e.Type === "dir") { // Directory
                             const newPath = path + e.Name + "/";
                             html += `
                             <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
@@ -325,6 +408,23 @@
                                     <button onclick="toggleMenu('${uniqueId}')" class="menu-btn">⋮</button>
                                     <div id="${uniqueId}" class="dropdown-content">
                                         ${menuItems}
+                                    </div>
+                                </div>
+                            </div>`;
+                        } else if (e.Type === "link") {
+                            html += `
+                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 1.2em;">🔗</span>
+                                    <span>${escapedName} <span style="color: #666; font-size: 0.9em;">➔ ${e.Target}</span></span>
+                                </div>
+                                <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
+                                    <div class="dropdown">
+                                        <button onclick="toggleMenu('${uniqueId}')" class="menu-btn">⋮</button>
+                                        <div id="${uniqueId}" class="dropdown-content">
+                                            <button onclick="renameItem('${escapedName}', false)">✎ Rename</button>
+                                            <button onclick="deleteFile('${fullPath}')" style="color: #d9534f;">🗑️ Delete</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>`;
@@ -361,7 +461,8 @@
         }
 
         async function deleteFile(filename) {
-            if (!confirm(`Are you sure you want to delete "${filename}"?`)) {
+            const confirmed = await showConfirm(`Are you sure you want to delete "${filename}"?`);
+            if (!confirmed) {
                 return;
             }
 
