@@ -27,8 +27,10 @@ import (
 var templateFS embed.FS
 
 type WebCmd struct {
-	Bind   string `help:"Address to bind to" default:"127.0.0.1:8080"`
-	Secret string `help:"Secret for session encryption (optional, random default)"`
+	Bind     string `help:"Address to bind to" default:"127.0.0.1:8080"`
+	Secret   string `help:"Secret for session encryption (optional, random default)"`
+	CertFile string `help:"TLS certificate file (enables HTTPS)"`
+	KeyFile  string `help:"TLS private key file (enables HTTPS)"`
 }
 
 type Session struct {
@@ -55,6 +57,9 @@ type WebServer struct {
 	ActiveClients map[string]*bambulan.Client
 	ClientsMu     sync.Mutex
 	Key           []byte
+	UseTLS        bool
+	CertFile      string
+	KeyFile       string
 }
 
 func NewWebServer() *WebServer {
@@ -65,6 +70,11 @@ func NewWebServer() *WebServer {
 }
 
 func (c *WebCmd) Run(ctx *Context) error {
+	// Validate TLS configuration
+	if (c.CertFile != "" && c.KeyFile == "") || (c.CertFile == "" && c.KeyFile != "") {
+		return fmt.Errorf("both --cert and --key must be provided together for HTTPS")
+	}
+
 	secret := c.Secret
 	if secret == "" {
 		// Generate 32 bytes of random data
@@ -86,6 +96,9 @@ func (c *WebCmd) Run(ctx *Context) error {
 	s := NewWebServer()
 	s.BindAddr = c.Bind
 	s.Key = key
+	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
+	s.CertFile = c.CertFile
+	s.KeyFile = c.KeyFile
 	return s.Start()
 }
 
@@ -107,8 +120,12 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/filament", s.handleAPIFilament)
 	http.HandleFunc("/camera", s.handleCamera)
 
+	if s.UseTLS {
+		slog.Info("Starting web server with TLS", "addr", s.BindAddr, "cert", s.CertFile)
+		return http.ListenAndServeTLS(s.BindAddr, s.CertFile, s.KeyFile, nil)
+	}
+
 	slog.Debug("Starting web server", "addr", s.BindAddr)
-	slog.Debug("Web server listening", "url", fmt.Sprintf("http://localhost%s", s.BindAddr))
 	return http.ListenAndServe(s.BindAddr, nil)
 }
 
@@ -348,6 +365,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Value:    sessionID,
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   s.UseTLS,
 			SameSite: http.SameSiteStrictMode,
 		})
 
@@ -368,6 +386,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 					Value:    base64.StdEncoding.EncodeToString(encrypted),
 					Path:     "/",
 					HttpOnly: true,
+					Secure:   s.UseTLS,
 					SameSite: http.SameSiteStrictMode,
 				})
 			} else {
@@ -406,10 +425,12 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.Mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:   "bambulan_session",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
+		Name:     "bambulan_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   s.UseTLS,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
@@ -1030,6 +1051,7 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.UseTLS,
 		SameSite: http.SameSiteStrictMode,
 	})
 

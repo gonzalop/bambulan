@@ -58,11 +58,33 @@ Start the web dashboard (default port 8080).
 # Access at http://localhost:8080
 ```
 
+**Options:**
+- `--bind`: Address to bind to (default: `127.0.0.1:8080`)
+- `--secret`: Secret for session encryption (optional, random default)
+- `--cert`: TLS certificate file (enables HTTPS)
+- `--key`: TLS private key file (enables HTTPS)
+
+**HTTPS Support:**
+
+For production deployments or network access, use TLS certificates to enable HTTPS:
+
+```bash
+# Generate self-signed certificate (for testing)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Start with HTTPS
+./bambulan web --bind 0.0.0.0:8443 --cert cert.pem --key key.pem
+# Access at https://localhost:8443
+```
+
+When using HTTPS, cookies are automatically marked with the `Secure` flag for enhanced security.
+
 **Features:**
 - **Dashboard**: Real-time status monitoring.
 - **Login**: Secure access with printer credentials.
 - **File Manager**: Browse files, download, and print directly.
 - **Print Start**: Upload and start prints with options.
+- **Security**: HttpOnly cookies, CSRF protection, and optional TLS/HTTPS support.
 
 **Screenshots:**
 
