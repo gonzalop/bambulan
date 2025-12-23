@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-
 	"os"
 	"path/filepath"
-
 	"time"
 
 	"github.com/gonzalop/ftp"
@@ -40,8 +38,6 @@ func (f *FileClient) connect() (*ftp.Client, error) {
 		InsecureSkipVerify: true,
 	}
 
-	// Use a custom dialer to intercept 0.0.0.0 addresses from the printer PASV
-	// and replace them with the actual hostname.
 	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname),
 		ftp.WithImplicitTLS(tlsConfig),
 		ftp.WithTimeout(5*time.Second),
