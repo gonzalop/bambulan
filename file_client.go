@@ -41,7 +41,7 @@ func (f *FileClient) connect() (*ftp.Client, error) {
 	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname),
 		ftp.WithImplicitTLS(tlsConfig),
 		ftp.WithTimeout(5*time.Second),
-		ftp.WithDebug(slog.Default()),
+		ftp.WithLogger(slog.Default()),
 	)
 	if err != nil {
 		return nil, err
