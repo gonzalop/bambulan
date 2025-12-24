@@ -6,8 +6,8 @@ github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
 github.com/eclipse/paho.mqtt.golang v1.5.1 h1:/VSOv3oDLlpqR2Epjn1Q7b2bSTplJIeV2ISgCl2W7nE=
 github.com/eclipse/paho.mqtt.golang v1.5.1/go.mod h1:1/yJCneuyOoCOzKSsOTUc0AJfpsItBGWvYpBLimhArU=
-github.com/gonzalop/ftp v1.2.0 h1:89UQ/dApSuY5LOexFfuDOsKk+ndWS9Z+FVG/XOcM948=
-github.com/gonzalop/ftp v1.2.0/go.mod h1:uL1pohYEtMa0nXL+GjmlijMZXoi6cVr407t/zuzOLd0=
+github.com/gonzalop/ftp v1.2.1 h1:S+UoZ4ALymprHvng62E50jey8/TFbYcmuKmgLyGc1Co=
+github.com/gonzalop/ftp v1.2.1/go.mod h1:uL1pohYEtMa0nXL+GjmlijMZXoi6cVr407t/zuzOLd0=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
