@@ -16,34 +16,51 @@ var (
 	capabilitiesOnce       sync.Once
 )
 
-// PrinterCapability defines the supported features for a specific printer model.
+// PrinterCapability defines the supported features and limitations for a specific printer model.
+// This structure is populated from the embedded printer_capabilities.json file, which is generated
+// from the official Bambu Lab printer definitions.
 type PrinterCapability struct {
-	DisplayName    string `json:"display_name"`
-	MaxNozzleTemp  int    `json:"max_nozzle_temp"`
-	MaxBedTemp     int    `json:"max_bed_temp"`
-	HasChamberFan  bool   `json:"has_chamber_fan"`
-	HasAuxFan      bool   `json:"has_aux_fan"`
-	HasAMSHumidity bool   `json:"has_ams_humidity"`
-	HasTimelapse   bool   `json:"has_timelapse"`
-	HasBedLeveling bool   `json:"has_bed_leveling"`
+	// DisplayName is the human-readable name of the printer (e.g., "Bambu Lab X1 Carbon").
+	DisplayName string `json:"display_name"`
+
+	// MaxNozzleTemp is the maximum safe temperature for the nozzle in degrees Celsius.
+	MaxNozzleTemp int `json:"max_nozzle_temp"`
+
+	// MaxBedTemp is the maximum safe temperature for the heatbed in degrees Celsius.
+	MaxBedTemp int `json:"max_bed_temp"`
+
+	// HasChamberFan indicates whether the printer model is equipped with a chamber ventilation fan.
+	HasChamberFan bool `json:"has_chamber_fan"`
+
+	// HasAuxFan indicates whether the printer model supports an auxiliary part cooling fan.
+	HasAuxFan bool `json:"has_aux_fan"`
+
+	// HasAMSHumidity indicates whether the printer supports reporting AMS humidity levels.
+	HasAMSHumidity bool `json:"has_ams_humidity"`
+
+	// HasTimelapse indicates whether the printer supports internal timelapse recording.
+	HasTimelapse bool `json:"has_timelapse"`
+
+	// HasBedLeveling indicates whether the printer supports automatic bed leveling.
+	HasBedLeveling bool `json:"has_bed_leveling"`
 }
 
-// GetPrinterCapabilities returns the capabilities for the given model ID (e.g., "BL-P001").
-// If the model is not found, it returns a default capability set with basic features enabled,
-// to be safe, or zero values if preferred.
-// For now, we return zero values if unknown, caller can check DisplayName != "".
+// GetPrinterCapabilities returns the capabilities for the given printer model ID (e.g., "BL-P001", "C11").
+// The model ID is typically reported by the printer in its MQTT status messages.
+//
+// If the model ID is unknown or not found in the embedded database, this function returns an empty
+// PrinterCapability struct. Callers should check if DisplayName is empty to determine if a valid
+// capability set was returned.
 func GetPrinterCapabilities(modelID string) PrinterCapability {
 	ensureCapabilitiesLoaded()
 	if cap, ok := printerCapabilitiesMap[modelID]; ok {
 		return cap
 	}
-	// Return default or empty?
-	// Let's return a "generic" safe default, or just empty.
-	// Users might have unknown newer printers.
-	// For now, returning empty struct.
 	return PrinterCapability{}
 }
 
+// ensureCapabilitiesLoaded lazily unmarshals the embedded JSON data into the global map.
+// This operation is thread-safe and performed only once.
 func ensureCapabilitiesLoaded() {
 	capabilitiesOnce.Do(func() {
 		printerCapabilitiesMap = make(map[string]PrinterCapability)
