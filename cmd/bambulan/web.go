@@ -246,13 +246,15 @@ func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	session.Mu.RLock()
 	defer session.Mu.RUnlock()
 	data := struct {
-		Status    *bambulan.PrinterStatus
-		Host      string
-		CSRFToken string
+		Status       *bambulan.PrinterStatus
+		Host         string
+		CSRFToken    string
+		Capabilities PrinterCapability
 	}{
-		Status:    session.Status,
-		Host:      session.Client.MQTT.Hostname,
-		CSRFToken: session.CSRFToken,
+		Status:       session.Status,
+		Host:         session.Client.MQTT.Hostname,
+		CSRFToken:    session.CSRFToken,
+		Capabilities: GetPrinterCapabilities(session.Status.DeviceModel),
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		slog.Error("Template execution failed", "error", err)
@@ -453,6 +455,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		"print":         session.Status,
 		"stage_message": session.Status.GetPrintStageName(),
 		"upload_status": session.UploadStatus,
+		"capabilities":  GetPrinterCapabilities(session.Status.DeviceModel),
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -611,6 +614,17 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid speed", http.StatusBadRequest)
 			return
 		}
+
+		caps := GetPrinterCapabilities(session.Status.DeviceModel)
+		if fan == "chamber" && !caps.HasChamberFan {
+			http.Error(w, "Chamber fan not supported", http.StatusBadRequest)
+			return
+		}
+		if fan == "aux" && !caps.HasAuxFan {
+			http.Error(w, "Aux fan not supported", http.StatusBadRequest)
+			return
+		}
+
 		_, err = session.Client.MQTT.SetFanSpeed(fan, speed)
 	case "set_temp":
 		target := r.FormValue("target") // nozzle or bed
@@ -621,9 +635,19 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		caps := GetPrinterCapabilities(session.Status.DeviceModel)
+
 		if target == "nozzle" {
+			if temp > caps.MaxNozzleTemp {
+				http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxNozzleTemp), http.StatusBadRequest)
+				return
+			}
 			_, err = session.Client.MQTT.SetNozzleTemperature(temp)
 		} else if target == "bed" {
+			if temp > caps.MaxBedTemp {
+				http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxBedTemp), http.StatusBadRequest)
+				return
+			}
 			_, err = session.Client.MQTT.SetBedTemperature(temp)
 		} else {
 			http.Error(w, "Invalid target type", http.StatusBadRequest)
