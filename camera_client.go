@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,6 +42,42 @@ func NewCameraClient(hostname, accessCode string) *CameraClient {
 	}
 }
 
+// GetRTSPURL returns the authenticated RTSPS URL for the printer's camera stream.
+// It accepts an optional `reportedURL` (e.g., from PrinterStatus.IPCam.RTSPURL).
+//
+// If `reportedURL` is provided (non-empty), it injects the authentication credentials into it.
+// If `reportedURL` is empty, it logs a warning and generates a default URL which might not work on all models.
+//
+// Format: rtsps://bblp:<access_code>@<hostname>:322/streaming/live/1
+//
+// Example:
+//
+//	status := client.GetPrinterStatus()
+//	var url string
+//	if status.IPCam != nil {
+//	    // Use the URL reported by the printer (recommended)
+//	    url = client.Camera.GetRTSPURL(status.IPCam.RTSPURL)
+//	} else {
+//	    // Fallback to default guess (logs a warning)
+//	    url = client.Camera.GetRTSPURL("")
+//	}
+func (c *CameraClient) GetRTSPURL(reportedURL string) string {
+	if reportedURL != "" {
+		// e.g. rtsps://192.168.1.50:322/streaming/live/1
+		// We need to inject "bblp:<code >@" after "rtsps://"
+		if strings.HasPrefix(reportedURL, "rtsps://") {
+			withoutScheme := strings.TrimPrefix(reportedURL, "rtsps://")
+			return fmt.Sprintf("rtsps://bblp:%s@%s", c.AccessCode, withoutScheme)
+		}
+		// Fallback for non-standard schemes or if parsing is unsure, just return it or try to inject?
+		// Safest is to just return it if we can't parse it easily, but let's try to be helpful.
+		return reportedURL
+	}
+
+	slog.Info("RTSP URL not reported by printer; guessing default URL. This might not work if the feature is unsupported.")
+	return fmt.Sprintf("rtsps://bblp:%s@%s:322/streaming/live/1", c.AccessCode, c.Hostname)
+}
+
 func (c *CameraClient) createAuthPacket() []byte {
 	buf := new(bytes.Buffer)
 	_ = binary.Write(buf, binary.LittleEndian, uint32(0x40))   // '@'\0\0\0
@@ -65,7 +102,14 @@ func (c *CameraClient) createAuthPacket() []byte {
 	return buf.Bytes()
 }
 
-// StartStream connects to the camera and continuously sends new JPEG frames to the onImage callback.
+// StartStream connects to the camera via the "Bambu Tunnel" protocol (port 6000)
+// and continuously sends new JPEG frames to the onImage callback.
+//
+// Compatibility:
+//   - P1 / A1 Series: This is the primary method for streaming in LAN mode.
+//   - X1 Series: Supported as a standard fallback. For higher quality (1080p/30fps),
+//     consider using GetRTSPURL() if supported by the network configuration.
+//
 // This method runs in a new goroutine and will continue until StopStream is called or an error occurs.
 //
 // Parameters:
@@ -169,7 +213,13 @@ func (c *CameraClient) streamLoop(onImage func([]byte)) {
 	}
 }
 
-// CaptureFrame connects to the camera, captures a single JPEG frame, and then closes the connection.
+// CaptureFrame connects to the camera via the "Bambu Tunnel" protocol (port 6000),
+// captures a single JPEG frame, and then closes the connection.
+//
+// Compatibility:
+// - P1 / A1 Series: Primary method for fetching snapshots in LAN mode.
+// - X1 Series: Supported (typically lower resolution than RTSP).
+//
 // This is a blocking call that will return once a frame is received or a timeout occurs.
 //
 // Returns:
