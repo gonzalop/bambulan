@@ -40,7 +40,7 @@ type Capabilities struct {
 
 func main() {
 	rootDir := "resources/printers"
-	outputFile := "cmd/bambulan/printer_capabilities.json"
+	outputFile := "printer_capabilities.json"
 
 	capabilitiesMap := make(map[string]Capabilities)
 

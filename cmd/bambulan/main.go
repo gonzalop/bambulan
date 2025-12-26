@@ -115,7 +115,7 @@ func (c *StatusCmd) printStatus(status *bambulan.PrinterStatus) {
 		fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
 	}
 	fmt.Println("=== Bambu Printer Status ===")
-	caps := GetPrinterCapabilities(status.DeviceModel)
+	caps := bambulan.GetPrinterCapabilities(status.DeviceModel)
 	name := caps.DisplayName
 	if name == "" {
 		name = "Unknown Model"

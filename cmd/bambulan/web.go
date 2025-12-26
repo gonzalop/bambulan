@@ -249,12 +249,12 @@ func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		Status       *bambulan.PrinterStatus
 		Host         string
 		CSRFToken    string
-		Capabilities PrinterCapability
+		Capabilities bambulan.PrinterCapability
 	}{
 		Status:       session.Status,
 		Host:         session.Client.MQTT.Hostname,
 		CSRFToken:    session.CSRFToken,
-		Capabilities: GetPrinterCapabilities(session.Status.DeviceModel),
+		Capabilities: bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		slog.Error("Template execution failed", "error", err)
@@ -455,7 +455,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		"print":         session.Status,
 		"stage_message": session.Status.GetPrintStageName(),
 		"upload_status": session.UploadStatus,
-		"capabilities":  GetPrinterCapabilities(session.Status.DeviceModel),
+		"capabilities":  bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -615,7 +615,7 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		caps := GetPrinterCapabilities(session.Status.DeviceModel)
+		caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
 		if fan == "chamber" && !caps.HasChamberFan {
 			http.Error(w, "Chamber fan not supported", http.StatusBadRequest)
 			return
@@ -635,7 +635,7 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		caps := GetPrinterCapabilities(session.Status.DeviceModel)
+		caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
 
 		if target == "nozzle" {
 			if temp > caps.MaxNozzleTemp {

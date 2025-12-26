@@ -1,4 +1,4 @@
-package main
+package bambulan
 
 import (
 	_ "embed"
