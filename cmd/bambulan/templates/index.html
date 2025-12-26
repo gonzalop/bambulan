@@ -45,7 +45,11 @@
                     <h3>Print Progress</h3>
                     <div
                         style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
-                        <span id="stage" style="font-weight: 600; font-size: 1.2em;">Idle</span>
+                        <div style="display: flex; flex-direction: column;">
+                            <span id="stage" style="font-weight: 600; font-size: 1.2em;">Idle</span>
+                            <span id="subtask_name"
+                                style="font-size: 0.85em; color: var(--text-light); display: none; margin-top: 2px;">--</span>
+                        </div>
                         <span style="font-weight: bold; color: var(--primary-color); font-size: 1.2em;">
                             <span id="progress">--</span>%
                         </span>
@@ -128,6 +132,7 @@
                     </div>
                 </div>
 
+
                 <div class="card">
                     <h3>Fans</h3>
                     <div class="metrics-grid">
@@ -139,6 +144,7 @@
                             </div>
                             <div class="metric-value"><span id="fan_part">--</span>%</div>
                         </div>
+                        {{if .Capabilities.HasAuxFan}}
                         <div class="metric-item">
                             <div style="display: flex; justify-content: space-between; align-items: top;">
                                 <span class="metric-label">💨 Aux Fan</span>
@@ -147,6 +153,8 @@
                             </div>
                             <div class="metric-value"><span id="fan_aux">--</span>%</div>
                         </div>
+                        {{end}}
+                        {{if .Capabilities.HasChamberFan}}
                         <div class="metric-item">
                             <div style="display: flex; justify-content: space-between; align-items: top;">
                                 <span class="metric-label">💨 Chamber</span>
@@ -155,6 +163,7 @@
                             </div>
                             <div class="metric-value"><span id="fan_chamber">--</span>%</div>
                         </div>
+                        {{end}}
                     </div>
                 </div>
 
@@ -314,9 +323,13 @@
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    {{if .Capabilities.HasBedLeveling}}
                     <label><input type="checkbox" name="bed_leveling" checked> Bed Leveling</label>
+                    {{end}}
                     <label><input type="checkbox" name="flow_calibration"> Flow Calibration</label>
+                    {{if .Capabilities.HasTimelapse}}
                     <label><input type="checkbox" name="timelapse"> Timelapse</label>
+                    {{end}}
                     <label><input type="checkbox" name="use_ams" id="chkUseAMS"> Use AMS</label>
                     <label><input type="checkbox" name="vibration_calibration" checked> Vibration Calibration</label>
                     <label><input type="checkbox" name="layer_inspection"> Layer Inspect</label>
@@ -360,7 +373,8 @@
                 btn.innerHTML = "⏹️ Stop Video";
             }
         }
-        var bedTempLimit = 100; // Default until updated by status
+        var bedTempLimit = {{.Capabilities.MaxBedTemp }} || 100;
+        var nozzleTempLimit = {{.Capabilities.MaxNozzleTemp }} || 300;
 
         function formatTemp(celsius) {
             if (celsius === undefined || celsius === null) return "--";
@@ -379,6 +393,16 @@
         function formatColor(hex) {
             if (!hex || hex.length < 6) return "#cccccc";
             return "#" + hex.substring(0, 6);
+        }
+
+        function safeSetText(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.innerText = text;
+        }
+
+        function safeSetStyleLocal(id, styleProp, value) {
+            const el = document.getElementById(id);
+            if (el) el.style[styleProp] = value;
         }
 
         function showStartPrint() {
@@ -453,37 +477,34 @@
                     const uploadModal = document.getElementById('uploadModal');
                     if (data.upload_status && data.upload_status.uploading) {
                         const u = data.upload_status;
-                        uploadModal.style.display = 'flex';
-                        document.getElementById('uploadFilename').innerText = u.filename;
-                        document.getElementById('uploadProgressBar').style.width = u.percent + "%";
-                        document.getElementById('uploadPercent').innerText = u.percent.toFixed(1);
+                        if (uploadModal) uploadModal.style.display = 'flex';
+                        safeSetText('uploadFilename', u.filename);
+                        safeSetStyleLocal('uploadProgressBar', 'width', u.percent + "%");
+                        safeSetText('uploadPercent', u.percent.toFixed(1));
 
                         const toMB = (b) => (b / 1024 / 1024).toFixed(2) + " MB";
                         // If total is 0, just show current
                         if (u.total > 0) {
-                            document.getElementById('uploadBytes').innerText = `${toMB(u.current)} / ${toMB(u.total)}`;
+                            safeSetText('uploadBytes', `${toMB(u.current)} / ${toMB(u.total)}`);
                         } else {
-                            document.getElementById('uploadBytes').innerText = `${toMB(u.current)}`;
+                            safeSetText('uploadBytes', `${toMB(u.current)}`);
                         }
                     } else {
                         if (uploadModal) uploadModal.style.display = 'none';
                     }
 
-
-
-
                     if (data.print) {
                         const p = data.print;
                         const stage = data.stage_message || "Idle";
-                        document.getElementById('stage').innerText = stage;
+                        safeSetText('stage', stage);
 
                         // Show progress only if printing/preparing
                         const isActive = (p.gcode_state === "RUNNING" || p.gcode_state === "PAUSE" || p.gcode_state === "PREPARE");
 
                         const percent = isActive ? (p.mc_percent || 0) : 0;
-                        document.getElementById('progress').innerText = isActive ? percent : "--";
-                        document.getElementById('progress_bar').style.width = percent + "%";
-                        document.getElementById('remaining').innerText = isActive ? (p.mc_remaining_time || 0) : "--";
+                        safeSetText('progress', isActive ? percent : "--");
+                        safeSetStyleLocal('progress_bar', 'width', percent + "%");
+                        safeSetText('remaining', isActive ? (p.mc_remaining_time || 0) : "--");
 
                         // Calculate ETA
                         let etaText = "--:--";
@@ -494,57 +515,86 @@
                             const m = etaDate.getMinutes().toString().padStart(2, '0');
                             etaText = `${h}:${m}`;
                         }
-                        document.getElementById('eta').innerText = etaText;
+                        safeSetText('eta', etaText);
 
                         if (p) {
-                            if (p.bed_temp_limit) bedTempLimit = p.bed_temp_limit;
+                            if (data.capabilities) {
+                                if (data.capabilities.MaxBedTemp) bedTempLimit = data.capabilities.MaxBedTemp;
+                                if (data.capabilities.MaxNozzleTemp) nozzleTempLimit = data.capabilities.MaxNozzleTemp;
+                            } else if (p.bed_temp_limit) {
+                                // Fallback
+                                bedTempLimit = p.bed_temp_limit;
+                            }
 
-                            document.getElementById('stage').innerText = p.print_stage_desc || p.mc_print_stage || "--";
+                            safeSetText('stage', p.print_stage_desc || p.mc_print_stage || "--");
 
-                            document.getElementById('layer_num').innerText = isActive ? (p.layer_num || 0) : "--";
-                            document.getElementById('total_layer').innerText = isActive ? (p.total_layer_num || 0) : "--";
+                            // File Name
+                            const subtask = p.subtask_name || p.gcode_file || "";
+                            const subtaskEl = document.getElementById('subtask_name');
+                            if (subtaskEl) {
+                                if (isActive && subtask) {
+                                    // Remove extension for cleaner look
+                                    let cleanName = subtask.replace(/\.(gcode|3mf|gco)$/i, "");
+                                    // Also remove leading slash if present
+                                    if (cleanName.startsWith("/")) cleanName = cleanName.substring(1);
 
-                            document.getElementById('nozzle').innerText = formatTemp(p.nozzle_temper);
-                            document.getElementById('nozzle_target').innerText = formatTemp(p.nozzle_target_temper);
-                            document.getElementById('bed').innerText = formatTemp(p.bed_temper);
-                            document.getElementById('bed_target').innerText = formatTemp(p.bed_target_temper);
+                                    subtaskEl.innerText = cleanName;
+                                    subtaskEl.style.display = 'block';
+                                } else {
+                                    subtaskEl.style.display = 'none';
+                                }
+                            }
+
+                            safeSetText('layer_num', isActive ? (p.layer_num || 0) : "--");
+                            safeSetText('total_layer', isActive ? (p.total_layer_num || 0) : "--");
+
+                            safeSetText('nozzle', formatTemp(p.nozzle_temper));
+                            safeSetText('nozzle_target', formatTemp(p.nozzle_target_temper));
+                            safeSetText('bed', formatTemp(p.bed_temper));
+                            safeSetText('bed_target', formatTemp(p.bed_target_temper));
 
                             // Chamber temp of 5 often means invalid/no sensor
                             if (p.chamber_temper > 5) {
-                                document.getElementById('chamber').innerText = formatTemp(p.chamber_temper);
-                                document.getElementById('chamber_row').style.display = 'block';
+                                safeSetText('chamber', formatTemp(p.chamber_temper));
+                                safeSetStyleLocal('chamber_row', 'display', 'block');
                             } else {
-                                document.getElementById('chamber_row').style.display = 'none';
+                                safeSetStyleLocal('chamber_row', 'display', 'none');
                             }
 
-                            document.getElementById('fan_part').innerText = formatFan(p.cooling_fan_speed);
-                            document.getElementById('fan_aux').innerText = formatFan(p.big_fan1_speed);
-                            document.getElementById('fan_chamber').innerText = formatFan(p.big_fan2_speed);
+                            safeSetText('fan_part', formatFan(p.cooling_fan_speed));
+                            safeSetText('fan_aux', formatFan(p.big_fan1_speed));
+                            safeSetText('fan_chamber', formatFan(p.big_fan2_speed));
 
                             // Map speed level
                             const speeds = ["Unknown", "Silent", "Standard", "Sport", "Ludicrous"];
                             const speedVal = p.spd_lvl || 0;
-                            document.getElementById('speed_lvl').innerText = speeds[speedVal] || speedVal;
+                            safeSetText('speed_lvl', speeds[speedVal] || speedVal);
 
                             // Button logic
                             const isPrinting = (p.gcode_state === "RUNNING" || p.gcode_state === "PAUSE" || p.gcode_state === "PREPARE");
                             const isPaused = (p.gcode_state === "PAUSE");
 
-                            document.getElementById('btnStart').disabled = isPrinting;
-                            document.getElementById('btnPause').disabled = !isPrinting || isPaused;
-                            document.getElementById('btnResume').disabled = !isPaused;
-                            document.getElementById('btnStop').disabled = !isPrinting;
+                            const btnStart = document.getElementById('btnStart');
+                            if (btnStart) btnStart.disabled = isPrinting;
+                            const btnPause = document.getElementById('btnPause');
+                            if (btnPause) btnPause.disabled = !isPrinting || isPaused;
+                            const btnResume = document.getElementById('btnResume');
+                            if (btnResume) btnResume.disabled = !isPaused;
+                            const btnStop = document.getElementById('btnStop');
+                            if (btnStop) btnStop.disabled = !isPrinting;
 
                             // Speed buttons
                             for (let i = 1; i <= 4; i++) {
                                 const btn = document.getElementById('btnSpeed' + i);
-                                // Reset classes
-                                btn.classList.remove('active-speed');
-                                btn.disabled = false;
+                                if (btn) {
+                                    // Reset classes
+                                    btn.classList.remove('active-speed');
+                                    btn.disabled = false;
 
-                                if (p.spd_lvl === i) {
-                                    btn.classList.add('active-speed');
-                                    btn.disabled = true;
+                                    if (p.spd_lvl === i) {
+                                        btn.classList.add('active-speed');
+                                        btn.disabled = true;
+                                    }
                                 }
                             }
 
@@ -559,172 +609,177 @@
                                 }
                             }
 
-                            document.getElementById('light_state').innerText = lightOn ? "On" : "Off";
+                            safeSetText('light_state', lightOn ? "On" : "Off");
                             const btnOn = document.getElementById('btnLightOn');
                             const btnOff = document.getElementById('btnLightOff');
 
-                            // Reset classes
-                            btnOn.classList.remove('active-on');
-                            btnOff.classList.remove('active-off');
-                            btnOn.disabled = false;
-                            btnOff.disabled = false;
+                            if (btnOn && btnOff) {
+                                // Reset classes
+                                btnOn.classList.remove('active-on');
+                                btnOff.classList.remove('active-off');
+                                btnOn.disabled = false;
+                                btnOff.disabled = false;
 
-                            if (lightOn) {
-                                btnOn.classList.add('active-on');
-                                btnOn.disabled = true;
-                            } else {
-                                btnOff.classList.add('active-off');
-                                btnOff.disabled = true;
+                                if (lightOn) {
+                                    btnOn.classList.add('active-on');
+                                    btnOn.disabled = true;
+                                } else {
+                                    btnOff.classList.add('active-off');
+                                    btnOff.disabled = true;
+                                }
                             }
 
                             // Filament/AMS Logic
                             if (p.ams && p.ams.ams && p.ams.ams.length > 0) {
                                 const filamentCard = document.getElementById('cardFilament');
                                 const container = document.getElementById('amsContainer');
-                                filamentCard.style.display = 'block';
+                                if (filamentCard) filamentCard.style.display = 'block';
 
                                 // Rebuild AMS content
-                                container.innerHTML = "";
+                                if (container) {
+                                    container.innerHTML = "";
 
-                                p.ams.ams.forEach((unit, idx) => {
-                                    const unitDiv = document.createElement('div');
-                                    unitDiv.style.marginBottom = "10px";
+                                    p.ams.ams.forEach((unit, idx) => {
+                                        const unitDiv = document.createElement('div');
+                                        unitDiv.style.marginBottom = "10px";
 
-                                    let hum = unit.humidity;
-                                    if (hum === undefined || hum === null || hum === "") hum = "--";
+                                        let hum = unit.humidity;
+                                        if (hum === undefined || hum === null || hum === "") hum = "--";
 
-                                    let humText = hum;
-                                    if (hum === "1") humText = "1 (Dry)";
-                                    else if (hum === "5") humText = "5 (Wet)";
+                                        let humText = hum;
+                                        if (hum === "1") humText = "1 (Dry)";
+                                        else if (hum === "5") humText = "5 (Wet)";
 
-                                    const temp = unit.temp || "--";
+                                        const temp = unit.temp || "--";
 
-                                    unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light);">Unit ${idx} (${temp}°C, Humidity: ${humText})</div>`;
+                                        unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light);">Unit ${idx} (${temp}°C, Humidity: ${humText})</div>`;
 
-                                    const grid = document.createElement('div');
-                                    grid.style.display = 'grid';
-                                    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(120px, 1fr))';
-                                    grid.style.gap = '10px';
+                                        const grid = document.createElement('div');
+                                        grid.style.display = 'grid';
+                                        grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(120px, 1fr))';
+                                        grid.style.gap = '10px';
 
-                                    if (unit.tray) {
-                                        unit.tray.forEach((tray, trayIdx) => {
-                                            const color = formatColor(tray.tray_color);
-                                            const type = tray.tray_type || "Empty";
-                                            const remain = tray.remain !== undefined ? tray.remain + "%" : "--";
-                                            const unknown = (tray.remain < 0);
+                                        if (unit.tray) {
+                                            unit.tray.forEach((tray, trayIdx) => {
+                                                const color = formatColor(tray.tray_color);
+                                                const type = tray.tray_type || "Empty";
+                                                const remain = tray.remain !== undefined ? tray.remain + "%" : "--";
+                                                const unknown = (tray.remain < 0);
 
-                                            const item = document.createElement('div');
-                                            item.style.background = '#f8f9fa';
-                                            item.style.padding = '8px';
-                                            item.style.borderRadius = '6px';
-                                            item.style.display = 'flex';
-                                            item.style.flexDirection = 'column';
-                                            item.style.gap = '2px';
+                                                const item = document.createElement('div');
+                                                item.style.background = '#f8f9fa';
+                                                item.style.padding = '8px';
+                                                item.style.borderRadius = '6px';
+                                                item.style.display = 'flex';
+                                                item.style.flexDirection = 'column';
+                                                item.style.gap = '2px';
 
-                                            const topRow = document.createElement('div');
-                                            topRow.style.display = 'flex';
-                                            topRow.style.alignItems = 'center';
-                                            topRow.style.gap = '6px';
+                                                const topRow = document.createElement('div');
+                                                topRow.style.display = 'flex';
+                                                topRow.style.alignItems = 'center';
+                                                topRow.style.gap = '6px';
 
-                                            const circle = document.createElement('div');
-                                            circle.style.width = '14px';
-                                            circle.style.height = '14px';
-                                            circle.style.borderRadius = '50%';
-                                            circle.style.backgroundColor = color;
-                                            circle.style.border = '1px solid #ddd';
-                                            circle.title = tray.tray_color;
+                                                const circle = document.createElement('div');
+                                                circle.style.width = '14px';
+                                                circle.style.height = '14px';
+                                                circle.style.borderRadius = '50%';
+                                                circle.style.backgroundColor = color;
+                                                circle.style.border = '1px solid #ddd';
+                                                circle.title = tray.tray_color;
 
-                                            const typeDiv = document.createElement('div');
-                                            typeDiv.style.fontWeight = 'bold';
-                                            typeDiv.style.fontSize = '0.9em';
-                                            typeDiv.innerText = type;
+                                                const typeDiv = document.createElement('div');
+                                                typeDiv.style.fontWeight = 'bold';
+                                                typeDiv.style.fontSize = '0.9em';
+                                                typeDiv.innerText = type;
 
-                                            topRow.appendChild(circle);
-                                            topRow.appendChild(typeDiv);
+                                                topRow.appendChild(circle);
+                                                topRow.appendChild(typeDiv);
 
-                                            const capDiv = document.createElement('div');
-                                            capDiv.style.fontSize = '0.8em';
-                                            capDiv.style.color = '#666';
-                                            capDiv.innerText = unknown ? "Capacity: N/A" : remain;
+                                                const capDiv = document.createElement('div');
+                                                capDiv.style.fontSize = '0.8em';
+                                                capDiv.style.color = '#666';
+                                                capDiv.innerText = unknown ? "Capacity: N/A" : remain;
 
-                                            item.appendChild(topRow);
-                                            item.appendChild(capDiv);
+                                                item.appendChild(topRow);
+                                                item.appendChild(capDiv);
 
-                                            // Highlight active slot
-                                            const globalID = (idx * 4) + trayIdx;
-                                            if (p.ams.tray_now == globalID) {
-                                                item.style.border = '2px solid #4CAF50';
-                                            }
+                                                // Highlight active slot
+                                                const globalID = (idx * 4) + trayIdx;
+                                                if (p.ams.tray_now == globalID) {
+                                                    item.style.border = '2px solid #4CAF50';
+                                                }
 
-                                            grid.appendChild(item);
-                                        });
+                                                grid.appendChild(item);
+                                            });
+                                        }
+                                        unitDiv.appendChild(grid);
+                                        container.appendChild(unitDiv);
+                                    });
+
+                                    // External Spool Section (VT Tray - slot 254)
+                                    if (p.vt_tray && p.vt_tray.tray_type) {
+                                        const extDiv = document.createElement('div');
+                                        extDiv.style.marginTop = "20px";
+                                        extDiv.style.paddingTop = "15px";
+                                        extDiv.style.borderTop = "2px solid #ddd";
+
+                                        extDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 10px; color: var(--text-light);">External Spool</div>`;
+
+                                        const color = formatColor(p.vt_tray.tray_color);
+                                        const type = p.vt_tray.tray_sub_brands || p.vt_tray.tray_type || "Unknown";
+                                        const remain = p.vt_tray.remain !== undefined ? p.vt_tray.remain + "%" : "--";
+                                        const unknown = (p.vt_tray.remain < 0);
+
+                                        const item = document.createElement('div');
+                                        item.style.background = '#f8f9fa';
+                                        item.style.padding = '8px';
+                                        item.style.borderRadius = '6px';
+                                        item.style.display = 'flex';
+                                        item.style.flexDirection = 'column';
+                                        item.style.gap = '2px';
+                                        item.style.maxWidth = '200px';
+
+                                        const topRow = document.createElement('div');
+                                        topRow.style.display = 'flex';
+                                        topRow.style.alignItems = 'center';
+                                        topRow.style.gap = '6px';
+
+                                        const circle = document.createElement('div');
+                                        circle.style.width = '14px';
+                                        circle.style.height = '14px';
+                                        circle.style.borderRadius = '50%';
+                                        circle.style.backgroundColor = color;
+                                        circle.style.border = '1px solid #ddd';
+                                        circle.title = p.vt_tray.tray_color;
+
+                                        const typeDiv = document.createElement('div');
+                                        typeDiv.style.fontWeight = 'bold';
+                                        typeDiv.style.fontSize = '0.9em';
+                                        typeDiv.innerText = type;
+
+                                        topRow.appendChild(circle);
+                                        topRow.appendChild(typeDiv);
+
+                                        const capDiv = document.createElement('div');
+                                        capDiv.style.fontSize = '0.8em';
+                                        capDiv.style.color = '#666';
+                                        capDiv.innerText = unknown ? "Capacity: N/A" : remain;
+
+                                        item.appendChild(topRow);
+                                        item.appendChild(capDiv);
+
+                                        // Highlight if active (tray_now = 254)
+                                        if (p.ams && (p.ams.tray_now === "254" || p.ams.tray_now === 254)) {
+                                            item.style.border = '2px solid #4CAF50';
+                                        }
+
+                                        extDiv.appendChild(item);
+                                        container.appendChild(extDiv);
                                     }
-                                    unitDiv.appendChild(grid);
-                                    container.appendChild(unitDiv);
-                                });
-
-                                // External Spool Section (VT Tray - slot 254)
-                                if (p.vt_tray && p.vt_tray.tray_type) {
-                                    const extDiv = document.createElement('div');
-                                    extDiv.style.marginTop = "20px";
-                                    extDiv.style.paddingTop = "15px";
-                                    extDiv.style.borderTop = "2px solid #ddd";
-
-                                    extDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 10px; color: var(--text-light);">External Spool</div>`;
-
-                                    const color = formatColor(p.vt_tray.tray_color);
-                                    const type = p.vt_tray.tray_sub_brands || p.vt_tray.tray_type || "Unknown";
-                                    const remain = p.vt_tray.remain !== undefined ? p.vt_tray.remain + "%" : "--";
-                                    const unknown = (p.vt_tray.remain < 0);
-
-                                    const item = document.createElement('div');
-                                    item.style.background = '#f8f9fa';
-                                    item.style.padding = '8px';
-                                    item.style.borderRadius = '6px';
-                                    item.style.display = 'flex';
-                                    item.style.flexDirection = 'column';
-                                    item.style.gap = '2px';
-                                    item.style.maxWidth = '200px';
-
-                                    const topRow = document.createElement('div');
-                                    topRow.style.display = 'flex';
-                                    topRow.style.alignItems = 'center';
-                                    topRow.style.gap = '6px';
-
-                                    const circle = document.createElement('div');
-                                    circle.style.width = '14px';
-                                    circle.style.height = '14px';
-                                    circle.style.borderRadius = '50%';
-                                    circle.style.backgroundColor = color;
-                                    circle.style.border = '1px solid #ddd';
-                                    circle.title = p.vt_tray.tray_color;
-
-                                    const typeDiv = document.createElement('div');
-                                    typeDiv.style.fontWeight = 'bold';
-                                    typeDiv.style.fontSize = '0.9em';
-                                    typeDiv.innerText = type;
-
-                                    topRow.appendChild(circle);
-                                    topRow.appendChild(typeDiv);
-
-                                    const capDiv = document.createElement('div');
-                                    capDiv.style.fontSize = '0.8em';
-                                    capDiv.style.color = '#666';
-                                    capDiv.innerText = unknown ? "Capacity: N/A" : remain;
-
-                                    item.appendChild(topRow);
-                                    item.appendChild(capDiv);
-
-                                    // Highlight if active (tray_now = 254)
-                                    if (p.ams && (p.ams.tray_now === "254" || p.ams.tray_now === 254)) {
-                                        item.style.border = '2px solid #4CAF50';
-                                    }
-
-                                    extDiv.appendChild(item);
-                                    container.appendChild(extDiv);
                                 }
                             } else {
-                                document.getElementById('cardFilament').style.display = 'none';
+                                const filamentCard = document.getElementById('cardFilament');
+                                if (filamentCard) filamentCard.style.display = 'none';
                             }
                         }
                     }
@@ -741,8 +796,8 @@
             const numInput = document.getElementById('tempNumber');
 
             if (target === "nozzle") {
-                rangeInput.max = 320;
-                numInput.max = 320;
+                rangeInput.max = nozzleTempLimit;
+                numInput.max = nozzleTempLimit;
             } else {
                 rangeInput.max = bedTempLimit;
                 numInput.max = bedTempLimit;
