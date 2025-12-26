@@ -5,7 +5,7 @@ go 1.25.4
 require (
 	github.com/alecthomas/kong v1.13.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
-	github.com/gonzalop/ftp v1.2.1
+	github.com/gonzalop/ftp v1.2.3
 )
 
 require (
