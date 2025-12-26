@@ -115,7 +115,12 @@ func (c *StatusCmd) printStatus(status *bambulan.PrinterStatus) {
 		fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
 	}
 	fmt.Println("=== Bambu Printer Status ===")
-	fmt.Printf("Device Model: %s\n", status.DeviceModel)
+	caps := GetPrinterCapabilities(status.DeviceModel)
+	name := caps.DisplayName
+	if name == "" {
+		name = "Unknown Model"
+	}
+	fmt.Printf("Device Model: %s (%s)\n", status.DeviceModel, name)
 	fmt.Println("----------------------------")
 	fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.GetPrintStageName())
 	fmt.Printf("Progress:     %d%%\n", status.McPercent)
@@ -123,10 +128,16 @@ func (c *StatusCmd) printStatus(status *bambulan.PrinterStatus) {
 	fmt.Printf("Layer:        %d / %d\n", status.LayerNum, status.TotalLayerNum)
 	fmt.Printf("Nozzle Temp:  %.1f / %.1f °C (Limit: %d°C)\n", status.NozzleTemp, status.NozzleTargetTemp, status.NozzleTempLimit)
 	fmt.Printf("Bed Temp:     %.1f / %.1f °C (Limit: %d°C)\n", status.BedTemp, status.BedTargetTemp, status.BedTempLimit)
-	fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
+	if status.ChamberTemp > 5 {
+		fmt.Printf("Chamber Temp: %.1f °C\n", status.ChamberTemp)
+	}
 	fmt.Printf("Fan - Part:   %s\n", formatFan(status.CoolingFanSpeed))
-	fmt.Printf("Fan - Aux:    %s\n", formatFan(status.BigFan1Speed))
-	fmt.Printf("Fan - Chamb:  %s\n", formatFan(status.BigFan2Speed))
+	if caps.HasAuxFan {
+		fmt.Printf("Fan - Aux:    %s\n", formatFan(status.BigFan1Speed))
+	}
+	if caps.HasChamberFan {
+		fmt.Printf("Fan - Chamb:  %s\n", formatFan(status.BigFan2Speed))
+	}
 	fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
 	if len(status.LightsReport) > 0 {
 		fmt.Print("Light:        ")
