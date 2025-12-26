@@ -61,7 +61,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	// For status, we update the callback to print
 	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
 		if c.Watch {
-			c.printStatus(status)
+			c.printStatus(client, status)
 		}
 
 		select {
@@ -99,18 +99,18 @@ func (c *StatusCmd) Run(ctx *Context) error {
 			hasInfo := len(status.Modules) > 0 || status.DeviceModel != ""
 
 			if hasPrint && hasInfo {
-				c.printStatus(status)
+				c.printStatus(client, status)
 				return nil
 			}
 		case <-timeout:
 			// Timeout, print what we have
-			c.printStatus(client.MQTT.GetPrinterStatus())
+			c.printStatus(client, client.MQTT.GetPrinterStatus())
 			return nil
 		}
 	}
 }
 
-func (c *StatusCmd) printStatus(status *bambulan.PrinterStatus) {
+func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.PrinterStatus) {
 	if c.Watch {
 		fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
 	}
@@ -205,6 +205,15 @@ func (c *StatusCmd) printStatus(status *bambulan.PrinterStatus) {
 			fmt.Printf("  %-10s %-15s HW:%-8s SW:%s\n", m.Name, m.Project, m.HwVer, m.SwVer)
 		}
 	}
+
+	// Camera Information
+	if status.IPCam != nil && status.IPCam.RTSPURL != "" {
+		fmt.Println("\n--- Camera ---")
+		// Use the helper to get the authenticated URL
+		rtspURL := client.Camera.GetRTSPURL(status.IPCam.RTSPURL)
+		fmt.Printf("RTSP Stream: %s\n", rtspURL)
+	}
+
 	fmt.Println("----------------------------")
 	if c.Watch {
 		fmt.Println("Press Ctrl+C to exit")
