@@ -77,7 +77,6 @@
                     </div>
                 </div>
 
-
                 <div class="card" id="cardFilament" style="display: none;">
                     <div
                         style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -86,6 +85,20 @@
                             style="background: none; border: none; padding: 0; cursor: pointer; color: var(--text-light);">⚙️</button>
                     </div>
                     <div id="amsContainer"></div>
+                </div>
+
+                <div class="card" id="cardMetadata" style="display: none;">
+                    <h3 style="margin-bottom: 10px;">Print Info</h3>
+                    <div style="display: flex; gap: 15px;">
+                        <img id="printThumbnail" src=""
+                            style="width: 100px; height: 100px; object-fit: contain; border-radius: 5px; background: #eee;">
+                        <div style="flex: 1;">
+                            <div id="metadataPlates" style="font-weight: bold; margin-bottom: 5px;"></div>
+                            <div id="metadataFilaments"
+                                style="font-size: 0.9em; color: var(--text-light); max-height: 100px; overflow-y: auto;">
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -284,8 +297,33 @@
         </div>
     </div>
 
+    <!-- Image Modal -->
+    <div id="imageModal" class="modal-overlay" onclick="closeImageModal()"
+        style="z-index: 3000; background: rgba(0,0,0,0.8);">
+        <div
+            style="position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
+            <img id="modalImage" src=""
+                style="max-width: 90%; max-height: 90%; border-radius: 4px; box-shadow: 0 0 20px rgba(0,0,0,0.5); object-fit: contain;">
+            <div style="position: absolute; top: 20px; right: 20px; color: white; font-size: 30px; cursor: pointer;">
+                &times;</div>
+        </div>
+    </div>
+
     <!-- Start Print Modal -->
     <div id="printModal" class="modal-overlay">
+
+        <!-- Image Modal -->
+        <div id="imageModal" class="modal-overlay" onclick="closeImageModal()"
+            style="z-index: 3000; background: rgba(0,0,0,0.8);">
+            <div
+                style="position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;">
+                <img id="modalImage" src=""
+                    style="max-width: 90%; max-height: 90%; border-radius: 4px; box-shadow: 0 0 20px rgba(0,0,0,0.5); object-fit: contain;">
+                <div
+                    style="position: absolute; top: 20px; right: 20px; color: white; font-size: 30px; cursor: pointer;">
+                    &times;</div>
+            </div>
+        </div>
 
         <!-- Upload Progress Modal -->
         <div id="uploadModal" class="modal-overlay" style="z-index: 2000;">
@@ -373,8 +411,8 @@
                 btn.innerHTML = "⏹️ Stop Video";
             }
         }
-        var bedTempLimit = {{.Capabilities.MaxBedTemp }} || 100;
-        var nozzleTempLimit = {{.Capabilities.MaxNozzleTemp }} || 300;
+        var bedTempLimit = parseInt("{{.Capabilities.MaxBedTemp }}") || 100;
+        var nozzleTempLimit = parseInt("{{.Capabilities.MaxNozzleTemp }}") || 300;
 
         function formatTemp(celsius) {
             if (celsius === undefined || celsius === null) return "--";
@@ -419,6 +457,17 @@
 
         function closeStartPrint() {
             document.getElementById('printModal').style.display = 'none';
+        }
+
+        function showImageModal(src) {
+            const m = document.getElementById('imageModal');
+            const img = document.getElementById('modalImage');
+            img.src = src;
+            m.style.display = 'flex';
+        }
+
+        function closeImageModal() {
+            document.getElementById('imageModal').style.display = 'none';
         }
 
         function startPrint(e) {
@@ -500,6 +549,64 @@
 
                         // Show progress only if printing/preparing
                         const isActive = (p.gcode_state === "RUNNING" || p.gcode_state === "PAUSE" || p.gcode_state === "PREPARE");
+
+                        // Metadata Handling
+                        const cardMeta = document.getElementById('cardMetadata');
+                        if (data.metadata) { // Check if valid metadata
+                            if (cardMeta) cardMeta.style.display = 'block';
+                            const m = data.metadata;
+
+                            // Thumbnail
+                            const thumb = document.getElementById('printThumbnail');
+                            if (thumb && m.plates && m.plates.length > 0) {
+                                // Use filename/plate_id key
+                                // We need the filename. It's in subtask_name usually.
+                                // Prefer normalized filename from backend if available to match cache key
+                                const filename = m.filename || p.subtask_name || p.gcode_file;
+                                if (filename) {
+                                    // Basic dirty check to avoid flickering/reloading src?
+                                    // Browser cache (3600s) should handle it, but we can check src
+                                    const pID = m.plates[0].id;
+                                    // Default to small thumbnail
+                                    const smallSrc = `/api/thumbnail?key=${encodeURIComponent(filename)}/${pID}_small`;
+                                    const largeSrc = `/api/thumbnail?key=${encodeURIComponent(filename)}/${pID}`;
+
+                                    if (!thumb.src.endsWith(smallSrc)) {
+                                        thumb.src = smallSrc;
+                                    }
+                                    thumb.style.cursor = "pointer";
+                                    thumb.onclick = () => showImageModal(largeSrc);
+                                }
+                            }
+
+                            // Plate Name
+                            const plateNameEl = document.getElementById('metadataPlates');
+                            if (plateNameEl && m.plates && m.plates.length > 0) {
+                                plateNameEl.innerText = m.plates[0].name;
+                            }
+
+                            // Filaments
+                            const filDiv = document.getElementById('metadataFilaments');
+                            if (filDiv && m.filaments) {
+                                // Only update if changed? Or simple innerHTML
+                                const html = m.filaments.map(f =>
+                                    `<div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${f.color}; border:1px solid #ccc;"></span>
+                                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.type}</span>
+                                        <span style="font-weight:bold;">${f.used_grams.toFixed(1)}g</span>
+                                      </div>`
+                                ).join("");
+                                if (filDiv.innerHTML !== html) filDiv.innerHTML = html;
+                            }
+                        } else {
+                            // Hide if no metadata available (or maybe keep if we want persistence? No, data.metadata is driven by active print)
+                            // If print is idle, we probably don't have metadata unless last job info persists.
+                            if (cardMeta && !isActive && p.gcode_state !== "FINISH") {
+                                cardMeta.style.display = 'none';
+                            }
+                            // If active but no metadata yet (fetching), maybe show loader?
+                            // leaving as is (hidden)
+                        }
 
                         const percent = isActive ? (p.mc_percent || 0) : 0;
                         safeSetText('progress', isActive ? percent : "--");

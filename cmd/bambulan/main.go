@@ -162,9 +162,10 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 
 		for i, unit := range status.Ams.Ams {
 			hum := unit.Humidity
-			if hum == "1" {
+			switch hum {
+			case "1":
 				hum = "1 (Dry)"
-			} else if hum == "5" {
+			case "5":
 				hum = "5 (Wet)"
 			}
 			fmt.Printf("Unit %d: Temp=%s, Humidity=%s\n", i, unit.Temp, hum)

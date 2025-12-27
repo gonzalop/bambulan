@@ -7,8 +7,10 @@ import (
 )
 
 // Reader provides access to the contents of a Bambu Lab 3MF file.
+// Reader provides access to the contents of a Bambu Lab 3MF file.
 type Reader struct {
-	z *zip.ReadCloser
+	z      *zip.Reader
+	closer io.Closer
 }
 
 // Open opens a Bambu 3MF file for reading.
@@ -19,12 +21,38 @@ func Open(filename string) (*Reader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open 3mf file: %w", err)
 	}
-	return &Reader{z: z}, nil
+	return &Reader{z: &z.Reader, closer: z}, nil
 }
 
-// Close closes the underlying zip file.
+// NewReader opens a Bambu 3MF file from an io.ReaderAt.
+// This is useful for processing in-memory files or uploaded files.
+func NewReader(r io.ReaderAt, size int64) (*Reader, error) {
+	z, err := zip.NewReader(r, size)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open 3mf reader: %w", err)
+	}
+	return &Reader{z: z, closer: nil}, nil
+}
+
+// Close closes the underlying zip file if opened via Open().
 func (r *Reader) Close() error {
-	return r.z.Close()
+	if r.closer != nil {
+		return r.closer.Close()
+	}
+	return nil
+}
+
+func (r *Reader) ReadFile(name string) ([]byte, error) {
+	return r.readFileBytes(name)
+}
+
+func (r *Reader) readFileBytes(name string) ([]byte, error) {
+	rc, err := r.openFile(name)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
 }
 
 func (r *Reader) openFile(name string) (io.ReadCloser, error) {
