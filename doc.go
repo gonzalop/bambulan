@@ -11,7 +11,7 @@ Example usage:
 	import (
 		"fmt"
 		"log"
-		"github.com/gonzalop/bambulan" // Assuming this is how the package is imported
+		"github.com/gonzalop/bambulan"
 	)
 
 	func main() {

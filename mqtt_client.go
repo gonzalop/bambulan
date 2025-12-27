@@ -177,7 +177,7 @@ func (m *MQTTClient) Publish(command any) error {
 	}
 	topic := fmt.Sprintf("device/%s/request", m.Serial)
 
-	// Use QoS 0 for fire-and-forget sending to avoid blocking on handshake.
+	// Use QoS 0 for fire-and-forget sending.
 	// We rely on application-level response (Sequence ID) for confirmation.
 	token := m.client.Publish(topic, BambuQoS, false, payload)
 	token.Wait()
@@ -209,7 +209,7 @@ func (m *MQTTClient) GetVersion() (string, error) {
 			"sequence_id": seqID,
 			"command":     "get_version",
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -234,14 +234,24 @@ func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 }
 
 // StartPrint starts a print job for a file already on the printer (SD card).
-// The filename specifies the path to the file on the printer (e.g., "Metadata/plate_1.gcode" or "model.gcode").
+// The filename specifies the path to the file on the printer (e.g., "model.gcode.3mf").
 // Note: You usually need to upload the file via FTPS first.
 //
 // Returns the sequence ID of the request.
+//
+// Example:
+//
+//	// 1. Upload file first (see FileClient.UploadFile)
+//	// err := client.File.UploadFile("local.3mf", "my-model.gcode.3mf", nil)
+//
+//	// 2. Start Print
+//	opts := bambulan.PrintOptions{
+//	    BedType:         "textured_plate",
+//	    BedLeveling:     true,
+//	    FlowCalibration: true,
+//	}
+//	seqID, err := client.MQTT.StartPrint("my-model.gcode.3mf", opts)
 func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, error) {
-	// TODO: the .g3code.3mf files are just zip files. Perhaps we should get the file name from there.
-	//   And what about multiple plates? Metadata/model_settings.config has the file and supports
-	//   multiple plates.
 	param := "Metadata/plate_1.gcode"
 	if strings.HasSuffix(strings.ToLower(filename), ".gcode") {
 		param = filename
@@ -272,6 +282,11 @@ func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, err
 }
 
 // SetChamberLight turns the chamber light on or off.
+//
+// Example:
+//
+//	// Turn light on
+//	client.MQTT.SetChamberLight(true)
 func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
 	mode := "off"
 	if on {
@@ -377,7 +392,6 @@ func (m *MQTTClient) SetAMSFilament(amsID, trayID int, filamentID, settingID, co
 			"nozzle_temp_max": maxTemp,
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
-
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -395,7 +409,7 @@ func (m *MQTTClient) UnloadFilament() (string, error) {
 			"sequence_id": seqID,
 			"command":     "unload_filament",
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -423,7 +437,7 @@ func (m *MQTTClient) LoadFilament(target int) (string, error) {
 			"curr_temp":   250,
 			"tar_temp":    250,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -451,7 +465,7 @@ func (m *MQTTClient) SendAMSControlCommand(param string) (string, error) {
 			"command":     "ams_control",
 			"param":       param,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -482,7 +496,7 @@ func (m *MQTTClient) SetAMSUserSetting(amsID int, startupReadOption, trayReadOpt
 			"tray_read_option":      trayReadOption,
 			"calibrate_remain_flag": calibrateRemainFlag,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -515,7 +529,7 @@ func (m *MQTTClient) SetSpoolKFactor(trayID int, kValue float64, nCoef float64) 
 			"k_value":     kValue,
 			"n_coef":      nCoef,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -548,7 +562,7 @@ func (m *MQTTClient) SetPrintOption(option string, enabled bool) (string, error)
 			"command":     "print_option",
 			option:        enabled,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 
 	// auto_recovery requires an additional "option" field
@@ -580,7 +594,7 @@ func (m *MQTTClient) SkipObjects(objects []int) (string, error) {
 			"command":     "skip_objects",
 			"obj_list":    objects,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -602,7 +616,7 @@ func (m *MQTTClient) SetBuildPlateMarkerDetector(enabled bool) (string, error) {
 			"control":     enabled,
 			"enable":      enabled,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -640,7 +654,7 @@ func (m *MQTTClient) SetNozzleDetails(diameter float64, typeString string) (stri
 			"nozzle_diameter": diameter,
 			"nozzle_type":     typeString,
 		},
-		"user_id": "1234567890",
+		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
 	return seqID, m.Publish(cmd)
 }
@@ -655,6 +669,10 @@ func (m *MQTTClient) SetNozzleDetails(diameter float64, typeString string) (stri
 // Returns:
 //   - The sequence ID of the G-code command.
 //   - An error if the command could not be sent or the fan type is invalid.
+//
+// Example:
+//
+//	client.MQTT.SetFanSpeed("aux", 100) // Set auxiliary fan to 100%
 func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
 	// Validate percentage
 	if percent < 0 || percent > 100 {
@@ -690,6 +708,10 @@ func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
 // Returns:
 //   - The sequence ID of the G-code command.
 //   - An error if the command could not be sent.
+//
+// Example:
+//
+//	client.MQTT.SetBedTemperature(60) // Set bed to 60°C
 func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
 	limit := m.status.BedTempLimit
 	if limit == 0 {
@@ -710,6 +732,10 @@ func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
 // Returns:
 //   - The sequence ID of the G-code command.
 //   - An error if the command could not be sent.
+//
+// Example:
+//
+//	client.MQTT.SetNozzleTemperature(220) // Set nozzle to 220°C
 func (m *MQTTClient) SetNozzleTemperature(temp int) (string, error) {
 	if temp < 0 || temp > 320 {
 		return "", fmt.Errorf("invalid nozzle temperature: %d (must be 0-320)", temp)
