@@ -69,8 +69,7 @@ func (c *CameraClient) GetRTSPURL(reportedURL string) string {
 			withoutScheme := strings.TrimPrefix(reportedURL, "rtsps://")
 			return fmt.Sprintf("rtsps://bblp:%s@%s", c.AccessCode, withoutScheme)
 		}
-		// Fallback for non-standard schemes or if parsing is unsure, just return it or try to inject?
-		// Safest is to just return it if we can't parse it easily, but let's try to be helpful.
+		// Fallback for non-standard schemes or if parsing fails.
 		return reportedURL
 	}
 
@@ -187,8 +186,6 @@ func (c *CameraClient) streamLoop(onImage func([]byte)) {
 			for {
 				start := bytes.Index(buffer, jpegStart)
 				if start == -1 {
-					// Keep searching, but maybe discard strictly unusable prefix if buffer gets huge?
-					// For now, simple greedy approach as per Python
 					break
 				}
 

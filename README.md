@@ -84,6 +84,19 @@ client.MQTT.SetSpeedProfile("3")
 
 // Pause print
 client.MQTT.PausePrint()
+
+// 1. Upload the file first
+err := client.File.UploadFile("./my-model.gcode.3mf", "/my-model.gcode.3mf", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+// 2. Start the print
+opts := bambulan.PrintOptions{
+    BedType:     "textured_plate",
+    BedLeveling: true,
+}
+client.MQTT.StartPrint("my-model.gcode.3mf", opts)
 ```
 
 ### Camera Capture

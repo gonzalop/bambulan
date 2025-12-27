@@ -19,6 +19,9 @@ type Client struct {
 
 // NewClient creates a new BambuLAN Client instance.
 //
+// It initializes the three sub-clients (MQTT, Camera, File) but does not immediately connect.
+// Call Start() to establish the MQTT connection.
+//
 // Parameters:
 //   - hostname: The IP address or hostname of the printer (e.g., "192.168.1.50").
 //   - accessCode: The printer's access code, found in the Network settings on the printer's screen.

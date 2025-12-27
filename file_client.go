@@ -62,6 +62,16 @@ func (f *FileClient) connect() (*ftp.Client, error) {
 //
 // Returns:
 //   - A slice of `*ftp.Entry`, each containing file/directory information.
+//
+// Example:
+//
+//	entries, err := client.File.ListFiles("/timelapse")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	for _, entry := range entries {
+//	    fmt.Printf("%s: %d bytes\n", entry.Name, entry.Size)
+//	}
 func (f *FileClient) ListFiles(dir string) ([]*ftp.Entry, error) {
 	c, err := f.connect()
 	if err != nil {
@@ -110,8 +120,8 @@ func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
 // Returns:
 //   - An `io.ReadCloser` from which the file content can be read.
 func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
-	// Note: We can't defer c.Quit() here because the caller needs to read from the connection.
-	// We wrap the ReadCloser to close the connection when done.
+	// The caller is responsible for reading the stream, so we wrap the ReadCloser
+	// to ensure the connection is closed when they are done.
 	c, err := f.connect()
 	if err != nil {
 		return nil, err
@@ -148,6 +158,14 @@ func (f *ftpReadCloser) Close() error {
 //   - localPath: The local file system path where the file should be saved.
 //   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
 //     that reports the current download progress. `totalBytes` will be 0 if unknown.
+//
+// Example:
+//
+//	err := client.File.DownloadFile("/timelapse/video.mp4", "./video.mp4", func(current, total int64) {
+//	    if total > 0 {
+//	        fmt.Printf("Downloading: %.1f%%\r", float64(current)/float64(total)*100)
+//	    }
+//	})
 func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(int64, int64)) error {
 	return f.downloadFileInternal(remotePath, localPath, onProgress)
 }
@@ -237,6 +255,10 @@ func (f *FileClient) Upload(remotePath string, content io.Reader, onProgress fun
 //   - remotePath: The full path where the file should be saved on the printer.
 //   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
 //     that reports the current upload progress.
+//
+// Example:
+//
+//	err := client.File.UploadFile("./model.gcode.3mf", "/model.gcode.3mf", nil)
 func (f *FileClient) UploadFile(localPath, remotePath string, onProgress func(int64, int64)) error {
 	file, err := os.Open(localPath)
 	if err != nil {
@@ -244,11 +266,7 @@ func (f *FileClient) UploadFile(localPath, remotePath string, onProgress func(in
 	}
 	defer file.Close()
 
-	// info, err := file.Stat() - not needed
-
 	var reader io.Reader = file
-
-	// We don't wrap with progressReader here anymore because Upload does it.
 
 	return f.Upload(remotePath, reader, onProgress)
 }
