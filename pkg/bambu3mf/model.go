@@ -4,24 +4,24 @@ import "encoding/xml"
 
 // Metadata holds all extracted information from the 3MF file.
 type Metadata struct {
-	Plates    []Plate
-	Filaments []Filament
+	Plates    []Plate    `json:"plates"`
+	Filaments []Filament `json:"filaments"`
 }
 
 // Plate represents a build plate in the 3MF project.
 type Plate struct {
-	ID             int
-	Name           string
-	ThumbnailPath  string // Path within the zip (e.g. Metadata/plate_1.png)
-	ThumbnailSmall string // Path within the zip (e.g. Metadata/plate_1_small.png)
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	ThumbnailPath  string `json:"thumbnail_path"`  // Path within the zip (e.g. Metadata/plate_1.png)
+	ThumbnailSmall string `json:"thumbnail_small"` // Path within the zip (e.g. Metadata/plate_1_small.png)
 }
 
 // Filament represents a filament used in the print.
 type Filament struct {
-	ID        int
-	Type      string  // e.g. "PLA", "PETG"
-	Color     string  // Hex color code (e.g. "#161616")
-	UsedGrams float64 // Estimated usage in grams
+	ID        int     `json:"id"`
+	Type      string  `json:"type"`       // e.g. "PLA", "PETG"
+	Color     string  `json:"color"`      // Hex color code (e.g. "#161616")
+	UsedGrams float64 `json:"used_grams"` // Estimated usage in grams
 }
 
 // Internal structures for parsing

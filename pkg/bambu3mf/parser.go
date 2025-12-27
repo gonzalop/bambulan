@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"strconv"
 )
 
@@ -40,15 +39,27 @@ func (r *Reader) ParseMetadata() (*Metadata, error) {
 			ID: plateID,
 		}
 
+		// Default thumbnail path
+		plate.ThumbnailPath = fmt.Sprintf("Metadata/plate_%d.png", plateID)
+		plate.ThumbnailSmall = fmt.Sprintf("Metadata/plate_%d_small.png", plateID)
+
+		// Check for override in metadata
+		for _, m := range p.Metadata {
+			if m.Key == "thumbnail_file" && m.Value != "" {
+				plate.ThumbnailPath = m.Value
+				// Guess small thumbnail if not explicitly provided (rarely is)
+				// usually convention is name_small.png or similar, but let's stick to default or try to derive?
+				// For now keep default small path or assume it matches extension of main?
+			}
+			if m.Key == "thumbnail_small_file" && m.Value != "" {
+				plate.ThumbnailSmall = m.Value
+			}
+		}
+
 		// Use map to avoid duplicates if filaments are repeated per plate
 		filamentMap := make(map[int]Filament)
 		for _, f := range p.Filaments {
-			filamentMap[f.ID] = Filament{
-				ID:        f.ID,
-				Type:      f.Type,
-				Color:     f.Color,
-				UsedGrams: f.UsedGrams,
-			}
+			filamentMap[f.ID] = Filament(f)
 		}
 		// In a real scenario we might want to aggregate these across plates?
 		// For now let's just append to global list if not exists
@@ -77,10 +88,6 @@ func (r *Reader) ParseMetadata() (*Metadata, error) {
 		} else {
 			plate.Name = fmt.Sprintf("Plate %d", plateID)
 		}
-
-		// Thumbnails
-		plate.ThumbnailPath = fmt.Sprintf("Metadata/plate_%d.png", plateID)
-		plate.ThumbnailSmall = fmt.Sprintf("Metadata/plate_%d_small.png", plateID)
 
 		md.Plates = append(md.Plates, plate)
 	}
@@ -122,13 +129,4 @@ func (r *Reader) GetThumbnail(plateID int) ([]byte, error) {
 
 func (r *Reader) GetThumbnailSmall(plateID int) ([]byte, error) {
 	return r.readFileBytes(fmt.Sprintf("Metadata/plate_%d_small.png", plateID))
-}
-
-func (r *Reader) readFileBytes(name string) ([]byte, error) {
-	rc, err := r.openFile(name)
-	if err != nil {
-		return nil, err
-	}
-	defer rc.Close()
-	return io.ReadAll(rc)
 }
