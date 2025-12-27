@@ -14,6 +14,7 @@ import (
 	"html/template"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -669,53 +670,11 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 	case "stop":
 		_, err = session.Client.MQTT.StopPrint()
 	case "set_fan":
-		fan := r.FormValue("fan")
-		speedStr := r.FormValue("speed")
-		speed, errAtoi := strconv.Atoi(speedStr)
-		if errAtoi != nil {
-			http.Error(w, "Invalid speed", http.StatusBadRequest)
-			return
-		}
-
-		caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
-		if fan == "chamber" && !caps.HasChamberFan {
-			http.Error(w, "Chamber fan not supported", http.StatusBadRequest)
-			return
-		}
-		if fan == "aux" && !caps.HasAuxFan {
-			http.Error(w, "Aux fan not supported", http.StatusBadRequest)
-			return
-		}
-
-		_, err = session.Client.MQTT.SetFanSpeed(fan, speed)
+		s.handleFanControl(w, r, session)
+		return
 	case "set_temp":
-		target := r.FormValue("target") // nozzle or bed
-		tempStr := r.FormValue("temp")
-		temp, errAtoi := strconv.Atoi(tempStr)
-		if errAtoi != nil {
-			http.Error(w, "Invalid temperature", http.StatusBadRequest)
-			return
-		}
-
-		caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
-
-		switch target {
-		case "nozzle":
-			if temp > caps.MaxNozzleTemp {
-				http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxNozzleTemp), http.StatusBadRequest)
-				return
-			}
-			_, err = session.Client.MQTT.SetNozzleTemperature(temp)
-		case "bed":
-			if temp > caps.MaxBedTemp {
-				http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxBedTemp), http.StatusBadRequest)
-				return
-			}
-			_, err = session.Client.MQTT.SetBedTemperature(temp)
-		default:
-			http.Error(w, "Invalid target type", http.StatusBadRequest)
-			return
-		}
+		s.handleTempControl(w, r, session)
+		return
 	default:
 		http.Error(w, "Unknown command", http.StatusBadRequest)
 		return
@@ -886,52 +845,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 		defer file.Close()
 
 		// Attempt to parse 3MF metadata if it's a 3mf file
-		if filepath.Ext(header.Filename) == ".3mf" {
-			// Check if file implements ReaderAt (it should)
-			if ra, ok := file.(io.ReaderAt); ok {
-				if rdr, err := bambu3mf.NewReader(ra, header.Size); err == nil {
-					if md, err := rdr.ParseMetadata(); err == nil {
-						slog.Info("Parsed 3MF metadata", "file", header.Filename, "plates", len(md.Plates))
-
-						session.Mu.Lock()
-						session.CurrentMetadata = md
-						session.CurrentMetadataFilename = header.Filename
-						if session.MetadataCache == nil {
-							session.MetadataCache = make(map[string]*bambu3mf.Metadata)
-						}
-						session.MetadataCache[header.Filename] = md
-
-						// Cache thumbnails
-						if session.ThumbnailCache == nil {
-							session.ThumbnailCache = make(map[string][]byte)
-						}
-						for _, p := range md.Plates {
-							// Cache small thumbnail
-							if p.ThumbnailSmall != "" {
-								if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
-									// Key format: filename/plate_id_small
-									key := fmt.Sprintf("%s/%d_small", header.Filename, p.ID)
-									session.ThumbnailCache[key] = small
-								}
-							}
-							// Cache large thumbnail
-							if p.ThumbnailPath != "" {
-								if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
-									key := fmt.Sprintf("%s/%d", header.Filename, p.ID)
-									session.ThumbnailCache[key] = large
-								}
-							}
-						}
-						session.Mu.Unlock()
-					} else {
-						slog.Warn("Failed to parse 3MF metadata", "error", err)
-					}
-					rdr.Close()
-				} else {
-					slog.Warn("Failed to create 3MF reader", "error", err)
-				}
-			}
-		}
+		s.processUploaded3MF(session, file, header)
 
 		// Reset file position after reading
 		if seeker, ok := file.(io.Seeker); ok {
@@ -1119,7 +1033,6 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 		return
 	}
 	if session.FailedFetches[filename] >= 3 {
-		slog.Debug("Skipping metadata fetch, max retries reached", "file", filename, "count", session.FailedFetches[filename])
 		session.Mu.Unlock()
 		return
 	}
@@ -1133,77 +1046,9 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 			session.Mu.Unlock()
 		}()
 
-		// Avoid re-downloading if already cached (double check)
-		session.Mu.RLock()
-		if _, ok := session.MetadataCache[filename]; ok {
-			session.Mu.RUnlock()
-			return
-		}
-		session.Mu.RUnlock()
-
 		slog.Info("Async fetching metadata for", "file", filename)
 
-		// Helper to download and save to temp file
-		// Returns tempFile, size, error
-		downloadAndSave := func(target string) (*os.File, int64, error) {
-			rc, err := session.Client.File.Download(target)
-			if err != nil {
-				return nil, 0, err
-			}
-			// rc is a pipe, error comes during Read if RETR fails
-			defer rc.Close()
-
-			tFile, err := os.CreateTemp("", "bambulan_meta_*.3mf")
-			if err != nil {
-				return nil, 0, err
-			}
-
-			// If we fail during copy, we must clean up
-			success := false
-			defer func() {
-				if !success {
-					os.Remove(tFile.Name())
-					tFile.Close()
-				}
-			}()
-
-			sz, err := io.Copy(tFile, rc)
-			if err != nil {
-				return nil, 0, err
-			}
-
-			// Rewind
-			if _, err := tFile.Seek(0, 0); err != nil {
-				return nil, 0, err
-			}
-
-			success = true
-			return tFile, sz, nil
-		}
-
-		tryFile := filename
-		var tmpFile *os.File
-		var size int64
-		var err error
-
-		// Attempt 1: Original filename
-		tmpFile, size, err = downloadAndSave(tryFile)
-
-		// Attempt 2: Retry with corrected filename if failed
-		if err != nil {
-			slog.Warn("Failed to download metadata", "file", tryFile, "error", err)
-
-			// Check if we should try correcting the filename
-			if strings.HasPrefix(tryFile, "_") {
-				corrected := strings.TrimPrefix(tryFile, "_")
-				slog.Info("Retrying with corrected filename (removed underscore)", "file", corrected)
-				tmpFile, size, err = downloadAndSave(corrected)
-				if err == nil {
-					tryFile = corrected // Update tryFile so we cache it correctly below
-				}
-			}
-		}
-
+		tmpFile, size, tryFile, err := s.downloadMetadataWithRetry(session, filename)
 		if err != nil {
 			slog.Error("Failed to download metadata after retry", "file", filename, "error", err)
 			session.Mu.Lock()
@@ -1212,64 +1057,29 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 				slog.Debug("Skipping metadata fetch, max retries reached", "file", filename, "count", session.FailedFetches[filename])
 			}
 			session.Mu.Unlock()
-			// Don't leak temp file in error path if one was somehow created
-			if tmpFile != nil {
-				tmpFile.Close()
-				os.Remove(tmpFile.Name())
-			}
 			return
 		}
 
-		// success
-		defer os.Remove(tmpFile.Name())
-		defer tmpFile.Close()
+		// Cleanup logic for successful/parsed file at end of scope
+		defer func() {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+		}()
 
-		// 2. Parse
 		rdr, err := bambu3mf.NewReader(tmpFile, size)
 		if err != nil {
 			slog.Warn("Failed to open 3mf reader", "error", err)
-			// Don't count parse errors as fetch errors, maybe bad file?
 			return
 		}
+		defer rdr.Close()
 
 		md, err := rdr.ParseMetadata()
 		if err != nil {
 			slog.Warn("Failed to parse metadata", "error", err)
 			return
 		}
-		rdr.Close()
 
-		// 3. Update Cache
-		session.Mu.Lock()
-		session.MetadataCache[filename] = md
-		// Also cache under the corrected name if different, to avoid future failures
-		if tryFile != filename {
-			session.MetadataCache[tryFile] = md
-		}
-
-		// If this file is still the active one, update CurrentMetadata
-		if session.Status.GcodeFile == filename || session.Status.SubtaskName == filename {
-			session.CurrentMetadata = md
-			session.CurrentMetadataFilename = filename
-		}
-
-		// Cache thumbnails
-		for _, p := range md.Plates {
-			if p.ThumbnailSmall != "" {
-				if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
-					key := fmt.Sprintf("%s/%d_small", filename, p.ID)
-					session.ThumbnailCache[key] = small
-				}
-			}
-			if p.ThumbnailPath != "" {
-				if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
-					key := fmt.Sprintf("%s/%d", filename, p.ID)
-					session.ThumbnailCache[key] = large
-				}
-			}
-		}
-		session.Mu.Unlock()
-
+		s.updateSessionMetadata(session, filename, tryFile, md, rdr)
 		slog.Info("Successfully fetched metadata", "file", filename)
 	}()
 }
@@ -1397,4 +1207,210 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 	})
 
 	return session, true
+}
+
+func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, header *multipart.FileHeader) {
+	if filepath.Ext(header.Filename) != ".3mf" {
+		return
+	}
+
+	ra, ok := file.(io.ReaderAt)
+	if !ok {
+		return
+	}
+
+	rdr, err := bambu3mf.NewReader(ra, header.Size)
+	if err != nil {
+		slog.Warn("Failed to create 3MF reader", "error", err)
+		return
+	}
+	defer rdr.Close()
+
+	md, err := rdr.ParseMetadata()
+	if err != nil {
+		slog.Warn("Failed to parse 3MF metadata", "error", err)
+		return
+	}
+
+	slog.Info("Parsed 3MF metadata", "file", header.Filename, "plates", len(md.Plates))
+
+	session.Mu.Lock()
+	defer session.Mu.Unlock()
+
+	session.CurrentMetadata = md
+	session.CurrentMetadataFilename = header.Filename
+	if session.MetadataCache == nil {
+		session.MetadataCache = make(map[string]*bambu3mf.Metadata)
+	}
+	session.MetadataCache[header.Filename] = md
+
+	// Cache thumbnails
+	if session.ThumbnailCache == nil {
+		session.ThumbnailCache = make(map[string][]byte)
+	}
+	for _, p := range md.Plates {
+		// Cache small thumbnail
+		if p.ThumbnailSmall != "" {
+			if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
+				// Key format: filename/plate_id_small
+				key := fmt.Sprintf("%s/%d_small", header.Filename, p.ID)
+				session.ThumbnailCache[key] = small
+			}
+		}
+		// Cache large thumbnail
+		if p.ThumbnailPath != "" {
+			if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
+				key := fmt.Sprintf("%s/%d", header.Filename, p.ID)
+				session.ThumbnailCache[key] = large
+			}
+		}
+	}
+}
+
+func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string) (*os.File, int64, string, error) {
+	tryFile := filename
+	tmpFile, size, err := s.downloadToTemp(session, tryFile)
+
+	if err != nil {
+		slog.Warn("Failed to download metadata", "file", tryFile, "error", err)
+		if strings.HasPrefix(tryFile, "_") {
+			corrected := strings.TrimPrefix(tryFile, "_")
+			slog.Info("Retrying with corrected filename (removed underscore)", "file", corrected)
+			t, sz, e := s.downloadToTemp(session, corrected)
+			if e == nil {
+				return t, sz, corrected, nil
+			}
+			return nil, 0, "", e
+		}
+		return nil, 0, "", err
+	}
+	return tmpFile, size, tryFile, nil
+}
+
+func (s *WebServer) downloadToTemp(session *Session, target string) (*os.File, int64, error) {
+	rc, err := session.Client.File.Download(target)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rc.Close()
+
+	tFile, err := os.CreateTemp("", "bambulan_meta_*.3mf")
+	if err != nil {
+		return nil, 0, err
+	}
+
+	success := false
+	defer func() {
+		if !success {
+			os.Remove(tFile.Name())
+			tFile.Close()
+		}
+	}()
+
+	sz, err := io.Copy(tFile, rc)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if _, err := tFile.Seek(0, 0); err != nil {
+		return nil, 0, err
+	}
+
+	success = true
+	return tFile, sz, nil
+}
+
+func (s *WebServer) updateSessionMetadata(session *Session, filename string, tryFile string, md *bambu3mf.Metadata, rdr *bambu3mf.Reader) {
+	session.Mu.Lock()
+	defer session.Mu.Unlock()
+
+	session.MetadataCache[filename] = md
+	if tryFile != filename {
+		session.MetadataCache[tryFile] = md
+	}
+
+	if session.Status.GcodeFile == filename || session.Status.SubtaskName == filename {
+		session.CurrentMetadata = md
+		session.CurrentMetadataFilename = filename
+	}
+
+	for _, p := range md.Plates {
+		if p.ThumbnailSmall != "" {
+			if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
+				key := fmt.Sprintf("%s/%d_small", filename, p.ID)
+				session.ThumbnailCache[key] = small
+			}
+		}
+		if p.ThumbnailPath != "" {
+			if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
+				key := fmt.Sprintf("%s/%d", filename, p.ID)
+				session.ThumbnailCache[key] = large
+			}
+		}
+	}
+}
+
+func (s *WebServer) handleFanControl(w http.ResponseWriter, r *http.Request, session *Session) {
+	fan := r.FormValue("fan")
+	speedStr := r.FormValue("speed")
+	speed, err := strconv.Atoi(speedStr)
+	if err != nil {
+		http.Error(w, "Invalid speed", http.StatusBadRequest)
+		return
+	}
+
+	caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
+	if fan == "chamber" && !caps.HasChamberFan {
+		http.Error(w, "Chamber fan not supported", http.StatusBadRequest)
+		return
+	}
+	if fan == "aux" && !caps.HasAuxFan {
+		http.Error(w, "Aux fan not supported", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := session.Client.MQTT.SetFanSpeed(fan, speed); err != nil {
+		slog.Error("Control command failed", "cmd", "set_fan", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, session *Session) {
+	target := r.FormValue("target") // nozzle or bed
+	tempStr := r.FormValue("temp")
+	temp, errAtoi := strconv.Atoi(tempStr)
+	if errAtoi != nil {
+		http.Error(w, "Invalid temperature", http.StatusBadRequest)
+		return
+	}
+
+	caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
+
+	var err error
+	switch target {
+	case "nozzle":
+		if temp > caps.MaxNozzleTemp {
+			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxNozzleTemp), http.StatusBadRequest)
+			return
+		}
+		_, err = session.Client.MQTT.SetNozzleTemperature(temp)
+	case "bed":
+		if temp > caps.MaxBedTemp {
+			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxBedTemp), http.StatusBadRequest)
+			return
+		}
+		_, err = session.Client.MQTT.SetBedTemperature(temp)
+	default:
+		http.Error(w, "Invalid target type", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		slog.Error("Control command failed", "cmd", "set_temp", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }

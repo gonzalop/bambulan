@@ -287,6 +287,78 @@ type UpgradeState struct {
 	Sn                  string `json:"sn"`
 }
 
+var stgDescriptions = map[int]string{
+	0:   "Printing",
+	1:   "Auto bed leveling",
+	2:   "Heatbed preheating",
+	3:   "Vibration compensation",
+	4:   "Changing filament",
+	5:   "M400 pause",
+	6:   "Paused (filament ran out)",
+	7:   "Heating nozzle",
+	8:   "Calibrating dynamic flow",
+	9:   "Scanning bed surface",
+	10:  "Inspecting first layer",
+	11:  "Identifying build plate type",
+	12:  "Calibrating Micro Lidar",
+	13:  "Homing toolhead",
+	14:  "Cleaning nozzle tip",
+	15:  "Checking extruder temperature",
+	16:  "Paused by the user",
+	17:  "Pause (front cover fall off)",
+	18:  "Calibrating the micro lidar",
+	19:  "Calibrating flow ratio",
+	20:  "Pause (nozzle temperature malfunction)",
+	21:  "Pause (heatbed temperature malfunction)",
+	22:  "Filament unloading",
+	23:  "Pause (step loss)",
+	24:  "Filament loading",
+	25:  "Motor noise cancellation",
+	26:  "Pause (AMS offline)",
+	27:  "Pause (low speed of the heatbreak fan)",
+	28:  "Pause (chamber temperature control problem)",
+	29:  "Cooling chamber",
+	30:  "Pause (Gcode inserted by user)",
+	31:  "Motor noise showoff",
+	32:  "Pause (nozzle clumping)",
+	33:  "Pause (cutter error)",
+	34:  "Pause (first layer error)",
+	35:  "Pause (nozzle clog)",
+	36:  "Measuring motion precision",
+	37:  "Enhancing motion precision",
+	38:  "Measure motion accuracy",
+	39:  "Nozzle offset calibration",
+	40:  "High temperature auto bed leveling",
+	41:  "Auto Check: Quick Release Lever",
+	42:  "Auto Check: Door and Upper Cover",
+	43:  "Laser Calibration",
+	44:  "Auto Check: Platform",
+	45:  "Confirming BirdsEye Camera location",
+	46:  "Calibrating BirdsEye Camera",
+	47:  "Auto bed leveling - Phase 1",
+	48:  "Auto bed leveling - Phase 2",
+	49:  "Heating chamber",
+	50:  "Cooling heatbed",
+	51:  "Printing calibration lines",
+	52:  "Auto Check: Material",
+	53:  "Live View Camera Calibration",
+	54:  "Waiting for heatbed to reach target temperature",
+	55:  "Auto Check: Material Position",
+	56:  "Cutting Module Offset Calibration",
+	57:  "Measuring Surface",
+	58:  "Thermal Preconditioning for first layer optimization",
+	59:  "Homing Blade Holder",
+	60:  "Calibrating Camera Offset",
+	61:  "Calibrating Blade Holder Position",
+	62:  "Hotend Pick and Place Test",
+	63:  "Waiting for the Chamber temperature to equalize",
+	64:  "Preparing Hotend",
+	65:  "Calibrating the detection position of nozzle clumping",
+	66:  "Purifying the chamber air",
+	-1:  "Idle",
+	255: "Idle",
+}
+
 // GetPrintStageName converts the internal `mc_print_stage` code and `gcode_state` into a human-readable string
 // representing the current activity of the printer.
 //
@@ -304,153 +376,19 @@ func (p *PrinterStatus) GetPrintStageName() string {
 	if p.GcodeState == "IDLE" {
 		return "Idle"
 	}
-	switch p.StgCur {
-	case 0:
+
+	// Logic for stage 2 (Heatbed Preheating)
+	// "2" is Heatbed Preheating, but sometimes sticks during printing.
+	// If we are actively running and past the first layer, just call it Printing.
+	if p.StgCur == 2 && p.GcodeState == "RUNNING" && p.LayerNum > 0 {
 		return "Printing"
-	case 1:
-		return "Auto bed leveling"
-	case 2:
-		// "2" is Heatbed Preheating, but sometimes sticks during printing.
-		// If we are actively running and past the first layer, just call it Printing.
-		if p.GcodeState == "RUNNING" && p.LayerNum > 0 {
-			return "Printing"
-		}
-		return "Heatbed preheating"
-	case 3:
-		return "Vibration compensation"
-	case 4:
-		return "Changing filament"
-	case 5:
-		return "M400 pause"
-	case 6:
-		return "Paused (filament ran out)"
-	case 7:
-		return "Heating nozzle"
-	case 8:
-		return "Calibrating dynamic flow"
-	case 9:
-		return "Scanning bed surface"
-	case 10:
-		return "Inspecting first layer"
-	case 11:
-		return "Identifying build plate type"
-	case 12:
-		return "Calibrating Micro Lidar"
-	case 13:
-		return "Homing toolhead"
-	case 14:
-		return "Cleaning nozzle tip"
-	case 15:
-		return "Checking extruder temperature"
-	case 16:
-		return "Paused by the user"
-	case 17:
-		return "Pause (front cover fall off)"
-	case 18:
-		return "Calibrating the micro lidar"
-	case 19:
-		return "Calibrating flow ratio"
-	case 20:
-		return "Pause (nozzle temperature malfunction)"
-	case 21:
-		return "Pause (heatbed temperature malfunction)"
-	case 22:
-		return "Filament unloading"
-	case 23:
-		return "Pause (step loss)"
-	case 24:
-		return "Filament loading"
-	case 25:
-		return "Motor noise cancellation"
-	case 26:
-		return "Pause (AMS offline)"
-	case 27:
-		return "Pause (low speed of the heatbreak fan)"
-	case 28:
-		return "Pause (chamber temperature control problem)"
-	case 29:
-		return "Cooling chamber"
-	case 30:
-		return "Pause (Gcode inserted by user)"
-	case 31:
-		return "Motor noise showoff"
-	case 32:
-		return "Pause (nozzle clumping)"
-	case 33:
-		return "Pause (cutter error)"
-	case 34:
-		return "Pause (first layer error)"
-	case 35:
-		return "Pause (nozzle clog)"
-	case 36:
-		return "Measuring motion precision"
-	case 37:
-		return "Enhancing motion precision"
-	case 38:
-		return "Measure motion accuracy"
-	case 39:
-		return "Nozzle offset calibration"
-	case 40:
-		return "High temperature auto bed leveling"
-	case 41:
-		return "Auto Check: Quick Release Lever"
-	case 42:
-		return "Auto Check: Door and Upper Cover"
-	case 43:
-		return "Laser Calibration"
-	case 44:
-		return "Auto Check: Platform"
-	case 45:
-		return "Confirming BirdsEye Camera location"
-	case 46:
-		return "Calibrating BirdsEye Camera"
-	case 47:
-		return "Auto bed leveling - Phase 1"
-	case 48:
-		return "Auto bed leveling - Phase 2"
-	case 49:
-		return "Heating chamber"
-	case 50:
-		return "Cooling heatbed"
-	case 51:
-		return "Printing calibration lines"
-	case 52:
-		return "Auto Check: Material"
-	case 53:
-		return "Live View Camera Calibration"
-	case 54:
-		return "Waiting for heatbed to reach target temperature"
-	case 55:
-		return "Auto Check: Material Position"
-	case 56:
-		return "Cutting Module Offset Calibration"
-	case 57:
-		return "Measuring Surface"
-	case 58:
-		return "Thermal Preconditioning for first layer optimization"
-	case 59:
-		return "Homing Blade Holder"
-	case 60:
-		return "Calibrating Camera Offset"
-	case 61:
-		return "Calibrating Blade Holder Position"
-	case 62:
-		return "Hotend Pick and Place Test"
-	case 63:
-		return "Waiting for the Chamber temperature to equalize"
-	case 64:
-		return "Preparing Hotend"
-	case 65:
-		return "Calibrating the detection position of nozzle clumping"
-	case 66:
-		return "Purifying the chamber air"
-	case -1:
-		return "Idle"
-	case 255:
-		return "Idle"
-	default:
-		return fmt.Sprintf("Unknown (%d)", p.StgCur)
 	}
+
+	if desc, ok := stgDescriptions[p.StgCur]; ok {
+		return desc
+	}
+
+	return fmt.Sprintf("Unknown (%d)", p.StgCur)
 }
 
 // PrintOptions configures the parameters for starting a print job.
