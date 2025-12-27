@@ -2,7 +2,7 @@
   "BL-P001": {
     "display_name": "Bambu Lab X1 Carbon",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 110,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -12,7 +12,7 @@
   "BL-P002": {
     "display_name": "Bambu Lab X1",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 110,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -22,7 +22,7 @@
   "C11": {
     "display_name": "Bambu Lab P1P",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 100,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -32,7 +32,7 @@
   "C12": {
     "display_name": "Bambu Lab P1S",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 100,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -42,7 +42,7 @@
   "C13": {
     "display_name": "Bambu Lab X1E",
     "max_nozzle_temp": 320,
-    "max_bed_temp": 0,
+    "max_bed_temp": 110,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -52,7 +52,7 @@
   "N1": {
     "display_name": "Bambu Lab A1 mini",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 80,
     "has_chamber_fan": false,
     "has_aux_fan": false,
     "has_ams_humidity": false,
@@ -62,7 +62,7 @@
   "N2S": {
     "display_name": "Bambu Lab A1",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 100,
     "has_chamber_fan": false,
     "has_aux_fan": false,
     "has_ams_humidity": false,
@@ -72,7 +72,7 @@
   "N7": {
     "display_name": "Bambu Lab P2S",
     "max_nozzle_temp": 300,
-    "max_bed_temp": 0,
+    "max_bed_temp": 110,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -82,7 +82,7 @@
   "O1C": {
     "display_name": "Bambu Lab H2C",
     "max_nozzle_temp": 350,
-    "max_bed_temp": 0,
+    "max_bed_temp": 120,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -92,7 +92,7 @@
   "O1C2": {
     "display_name": "Bambu Lab H2C",
     "max_nozzle_temp": 350,
-    "max_bed_temp": 0,
+    "max_bed_temp": 120,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -102,7 +102,7 @@
   "O1D": {
     "display_name": "Bambu Lab H2D",
     "max_nozzle_temp": 350,
-    "max_bed_temp": 0,
+    "max_bed_temp": 120,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -112,7 +112,7 @@
   "O1E": {
     "display_name": "Bambu Lab H2D Pro",
     "max_nozzle_temp": 350,
-    "max_bed_temp": 0,
+    "max_bed_temp": 120,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
@@ -122,7 +122,7 @@
   "O1S": {
     "display_name": "Bambu Lab H2S",
     "max_nozzle_temp": 350,
-    "max_bed_temp": 0,
+    "max_bed_temp": 120,
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,

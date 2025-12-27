@@ -16,13 +16,15 @@ type PrinterDefinition map[string]struct {
 	DisplayName string `json:"display_name"`
 	ModelID     string `json:"model_id"`
 	Print       struct {
-		NozzleTempRange    []int `json:"nozzle_temp_range"` // [min, max]
-		BedTempLimit       int   `json:"bed_temp_limit"`    // Sometimes used instead of range
-		SupportChamberFan  bool  `json:"support_chamber_fan"`
-		SupportAuxFan      bool  `json:"support_aux_fan"`
-		SupportAMSHumidity bool  `json:"support_ams_humidity"`
-		SupportTimelapse   bool  `json:"support_timelapse"`
-		SupportBedLeveling any   `json:"support_bed_leveling"` // Can be bool or int (1) in some files
+		NozzleTempRange     []int `json:"nozzle_temp_range"`
+		BedTempLimit        int   `json:"bed_temp_limit"`
+		BedTemperatureLimit int   `json:"bed_temperature_limit"` // Alternative spelling
+		BedTempRange        []int `json:"bed_temp_range"`        // Range [min, max]
+		SupportChamberFan   bool  `json:"support_chamber_fan"`
+		SupportAuxFan       bool  `json:"support_aux_fan"`
+		SupportAMSHumidity  bool  `json:"support_ams_humidity"`
+		SupportTimelapse    bool  `json:"support_timelapse"`
+		SupportBedLeveling  any   `json:"support_bed_leveling"`
 	} `json:"print"`
 }
 
@@ -95,8 +97,17 @@ func main() {
 					caps.MaxNozzleTemp = p.NozzleTempRange[1]
 				}
 			}
+			// Handle various bed temp fields
 			if p.BedTempLimit > caps.MaxBedTemp {
 				caps.MaxBedTemp = p.BedTempLimit
+			}
+			if p.BedTemperatureLimit > caps.MaxBedTemp {
+				caps.MaxBedTemp = p.BedTemperatureLimit
+			}
+			if len(p.BedTempRange) >= 2 {
+				if p.BedTempRange[1] > caps.MaxBedTemp {
+					caps.MaxBedTemp = p.BedTempRange[1]
+				}
 			}
 
 			// Boolean flags: if ANY version says true, we assume it's supported (hardware capability)
@@ -127,6 +138,11 @@ func main() {
 		}
 
 		if modelID != "" {
+			// Hardcode 110C for X1 series as it is missing in the JSON files.
+			// Ideally this should come from the source, but 110C is a safe default for X1C/X1.
+			if (modelID == "BL-P001" || modelID == "BL-P002") && caps.MaxBedTemp == 0 {
+				caps.MaxBedTemp = 110
+			}
 			capabilitiesMap[modelID] = caps
 		}
 
