@@ -792,27 +792,19 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 }
 
 func getBedTempLimit(model string) int {
-	// X1 Series
-	// BL-P001: X1 Carbon
-	// BL-P002: X1
-	// O1C: X1E
-	switch model {
-	case "BL-P001", "BL-P002", "O1C", "O1C2", "O1D", "O1E", "O1S":
-		return 120
-	case "C11", "C12": // P1P, P1S
-		return 100
-	case "N1": // A1 Mini
-		return 80
-	case "N2S", "N7": // A1
-		return 100
-	default:
-		// Fallback safe limit
-		return 100
+	cap := GetPrinterCapabilities(model)
+	if cap.MaxBedTemp > 0 {
+		return cap.MaxBedTemp
 	}
+	// Fallback safe limit
+	return 100
 }
 
 func getNozzleTempLimit(model string) int {
-	// All Bambu printers support up to 300°C nozzle temperature
-	// X1 Series, P1 Series, A1 Series all use the same limit
+	cap := GetPrinterCapabilities(model)
+	if cap.MaxNozzleTemp > 0 {
+		return cap.MaxNozzleTemp
+	}
+	// Fallback safe limit
 	return 300
 }

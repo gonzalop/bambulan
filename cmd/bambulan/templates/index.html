@@ -843,16 +843,44 @@
                                         const unitDiv = document.createElement('div');
                                         unitDiv.style.marginBottom = "10px";
 
+                                        // Format humidity: 💧 50% (Dry) or just 💧 50%
                                         let hum = unit.humidity;
                                         if (hum === undefined || hum === null || hum === "") hum = "--";
 
-                                        let humText = hum;
-                                        if (hum === "1") humText = "1 (Dry)";
-                                        else if (hum === "5") humText = "5 (Wet)";
+                                        let finalHum = "";
+                                        if (hum !== "--") {
+                                            // Base humidity text (e.g. "1 (Dry)")
+                                            let baseHum = hum;
+                                            if (hum === "1") baseHum = "1 (Dry)";
+                                            else if (hum === "5") baseHum = "5 (Wet)";
+
+                                            // Check raw
+                                            let raw = unit.humidity_raw;
+                                            if (raw && !isNaN(parseInt(raw))) {
+                                                let r = parseInt(raw);
+                                                if (r >= 10 && r <= 100) {
+                                                    // Compact: 50% (Dry)
+                                                    finalHum = `${r}%`;
+                                                    if (hum === "1") finalHum += " (Dry)";
+                                                    else if (hum === "5") finalHum += " (Wet)";
+                                                } else {
+                                                    finalHum = baseHum;
+                                                }
+                                            } else {
+                                                finalHum = baseHum;
+                                            }
+                                        } else {
+                                            finalHum = "--";
+                                        }
 
                                         const temp = unit.temp || "--";
 
-                                        unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light);">Unit ${idx} (${temp}°C, Humidity: ${humText})</div>`;
+                                        // New Compact Format: Unit 0  🌡️ 25.0°C  💧 10% (Dry)
+                                        unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light); display: flex; align-items: center; gap: 15px;">
+                                            <span>Unit ${idx}</span>
+                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">🌡️ ${temp}°C</span>
+                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">💧 ${finalHum}</span>
+                                        </div>`;
 
                                         const grid = document.createElement('div');
                                         grid.style.display = 'grid';
