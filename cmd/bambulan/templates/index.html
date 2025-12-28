@@ -636,7 +636,8 @@
                             safeSetText('stage', p.print_stage_desc || p.mc_print_stage || "--");
 
                             // File Name
-                            const subtask = p.subtask_name || p.gcode_file || "";
+                            // Prefer sanitized filename from metadata if available
+                            const subtask = (data.metadata && data.metadata.filename) ? data.metadata.filename : (p.subtask_name || p.gcode_file || "");
                             const subtaskEl = document.getElementById('subtask_name');
                             if (subtaskEl) {
                                 if (isActive && subtask) {

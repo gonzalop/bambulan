@@ -488,9 +488,29 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		isActive := allowedStates[session.Status.GcodeState]
 
 		if isActive || session.CurrentMetadata == nil {
-			if md, ok := session.MetadataCache[activeFile]; ok {
-				session.CurrentMetadata = md
-				session.CurrentMetadataFilename = activeFile // Cache key is sanitized
+			var foundMD *bambu3mf.Metadata
+			var foundFilename string
+
+			// 1. Try sanitized filename first (if starts with _)
+			if strings.HasPrefix(activeFile, "_") {
+				sanitized := strings.TrimPrefix(activeFile, "_")
+				if md, ok := session.MetadataCache[sanitized]; ok {
+					foundMD = md
+					foundFilename = sanitized
+				}
+			}
+
+			// 2. Try exact filename
+			if foundMD == nil {
+				if md, ok := session.MetadataCache[activeFile]; ok {
+					foundMD = md
+					foundFilename = activeFile
+				}
+			}
+
+			if foundMD != nil {
+				session.CurrentMetadata = foundMD
+				session.CurrentMetadataFilename = foundFilename
 			} else if isActive {
 				// Trigger fetch if not found and looks like a 3mf/gcode file
 				if strings.HasSuffix(strings.ToLower(activeFile), ".3mf") || strings.HasSuffix(strings.ToLower(activeFile), ".gcode.3mf") {
@@ -1080,7 +1100,7 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 		}
 
 		s.updateSessionMetadata(session, filename, tryFile, md, rdr)
-		slog.Info("Successfully fetched metadata", "file", filename)
+		slog.Info("Successfully fetched metadata", "file", tryFile)
 	}()
 }
 
@@ -1268,23 +1288,25 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 }
 
 func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string) (*os.File, int64, string, error) {
-	tryFile := filename
-	tmpFile, size, err := s.downloadToTemp(session, tryFile)
-
-	if err != nil {
-		slog.Warn("Failed to download metadata", "file", tryFile, "error", err)
-		if strings.HasPrefix(tryFile, "_") {
-			corrected := strings.TrimPrefix(tryFile, "_")
-			slog.Info("Retrying with corrected filename (removed underscore)", "file", corrected)
-			t, sz, e := s.downloadToTemp(session, corrected)
-			if e == nil {
-				return t, sz, corrected, nil
-			}
-			return nil, 0, "", e
+	// If the file starts with "_", try the version without it first.
+	// The printer often reports "_foo.3mf" but the actual file we want (with better metadata/names?) might be "foo.3mf".
+	if strings.HasPrefix(filename, "_") {
+		corrected := strings.TrimPrefix(filename, "_")
+		slog.Info("Attempting to download sanitized filename first", "original", filename, "try", corrected)
+		t, sz, err := s.downloadToTemp(session, corrected)
+		if err == nil {
+			return t, sz, corrected, nil
 		}
+		slog.Warn("Sanitized filename not found, falling back to original", "file", corrected, "error", err)
+	}
+
+	// Fallback to original filename
+	tmpFile, size, err := s.downloadToTemp(session, filename)
+	if err != nil {
+		slog.Warn("Failed to download metadata", "file", filename, "error", err)
 		return nil, 0, "", err
 	}
-	return tmpFile, size, tryFile, nil
+	return tmpFile, size, filename, nil
 }
 
 func (s *WebServer) downloadToTemp(session *Session, target string) (*os.File, int64, error) {
@@ -1329,9 +1351,14 @@ func (s *WebServer) updateSessionMetadata(session *Session, filename string, try
 		session.MetadataCache[tryFile] = md
 	}
 
-	if session.Status.GcodeFile == filename || session.Status.SubtaskName == filename {
+	// Helper to strip leading slash for comparison
+	stripSlash := func(s string) string {
+		return strings.TrimPrefix(s, "/")
+	}
+
+	if stripSlash(session.Status.GcodeFile) == filename || stripSlash(session.Status.SubtaskName) == filename {
 		session.CurrentMetadata = md
-		session.CurrentMetadataFilename = filename
+		session.CurrentMetadataFilename = tryFile
 	}
 
 	for _, p := range md.Plates {
