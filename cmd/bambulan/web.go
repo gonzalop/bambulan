@@ -1100,7 +1100,7 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 		}
 
 		s.updateSessionMetadata(session, filename, tryFile, md, rdr)
-		slog.Info("Successfully fetched metadata", "file", tryFile)
+		slog.Debug("Successfully fetched metadata", "file", tryFile)
 	}()
 }
 
@@ -1292,7 +1292,7 @@ func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string)
 	// The printer often reports "_foo.3mf" but the actual file we want is often "foo.3mf".
 	if strings.HasPrefix(filename, "_") {
 		corrected := strings.TrimPrefix(filename, "_")
-		slog.Info("Attempting to download sanitized filename first", "original", filename, "try", corrected)
+		slog.Debug("Attempting to download sanitized filename first", "original", filename, "try", corrected)
 		t, sz, err := s.downloadToTemp(session, corrected)
 		if err == nil {
 			return t, sz, corrected, nil
