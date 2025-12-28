@@ -23,9 +23,9 @@ var version = "dev"
 
 var cli struct {
 	Version kong.VersionFlag `short:"v" help:"Print version"`
-	Host    string           `help:"Printer IP or hostname" env:"BAMBULAN_HOST" required:"" short:"H"`
-	Code    string           `help:"Access code" env:"BAMBULAN_CODE" required:"" short:"c"`
-	Serial  string           `help:"Printer serial number" env:"BAMBULAN_SERIAL" required:"" short:"s"`
+	Host    string           `help:"Printer IP or hostname" env:"BAMBULAN_HOST" short:"H"`
+	Code    string           `help:"Access code" env:"BAMBULAN_CODE" short:"c"`
+	Serial  string           `help:"Printer serial number" env:"BAMBULAN_SERIAL" short:"s"`
 	Level   string           `help:"Log level" default:"info" enum:"debug,info,warn,error" name:"log-level" short:"l"`
 
 	Status       StatusCmd       `cmd:"" help:"Monitor printer status"`
@@ -1204,6 +1204,27 @@ func main() {
 			"version": version,
 		},
 	)
+
+	// Validate required flags for non-web commands
+	// The "web" command manages printer connection via session login, so it doesn't need these global flags.
+	// All other commands (status, print, etc.) require a direct connection.
+	cmdName := ctx.Command()
+	if !strings.HasPrefix(cmdName, "web") {
+		var missing []string
+		if cli.Host == "" {
+			missing = append(missing, "--host")
+		}
+		if cli.Code == "" {
+			missing = append(missing, "--code")
+		}
+		if cli.Serial == "" {
+			missing = append(missing, "--serial")
+		}
+		if len(missing) > 0 {
+			fmt.Fprintf(os.Stderr, "Error: missing required flags for command '%s': %s\n", cmdName, strings.Join(missing, ", "))
+			os.Exit(1)
+		}
+	}
 
 	// Logging
 	var level slog.Level
