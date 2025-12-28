@@ -1289,7 +1289,7 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 
 func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string) (*os.File, int64, string, error) {
 	// If the file starts with "_", try the version without it first.
-	// The printer often reports "_foo.3mf" but the actual file we want (with better metadata/names?) might be "foo.3mf".
+	// The printer often reports "_foo.3mf" but the actual file we want is often "foo.3mf".
 	if strings.HasPrefix(filename, "_") {
 		corrected := strings.TrimPrefix(filename, "_")
 		slog.Info("Attempting to download sanitized filename first", "original", filename, "try", corrected)
@@ -1366,12 +1366,20 @@ func (s *WebServer) updateSessionMetadata(session *Session, filename string, try
 			if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
 				key := fmt.Sprintf("%s/%d_small", filename, p.ID)
 				session.ThumbnailCache[key] = small
+				if tryFile != filename {
+					key2 := fmt.Sprintf("%s/%d_small", tryFile, p.ID)
+					session.ThumbnailCache[key2] = small
+				}
 			}
 		}
 		if p.ThumbnailPath != "" {
 			if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
 				key := fmt.Sprintf("%s/%d", filename, p.ID)
 				session.ThumbnailCache[key] = large
+				if tryFile != filename {
+					key2 := fmt.Sprintf("%s/%d", tryFile, p.ID)
+					session.ThumbnailCache[key2] = large
+				}
 			}
 		}
 	}
