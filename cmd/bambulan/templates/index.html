@@ -9,6 +9,35 @@
 </head>
 
 <body>
+    <!-- Connection Loading Overlay -->
+    <div id="loadingOverlay"
+        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f5f7fa; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s;">
+        <div style="font-size: 3em; margin-bottom: 20px;">🖨️</div>
+        <h2 style="margin-bottom: 10px; color: #333;">Connecting to Printer...</h2>
+        <div style="color: #666; font-size: 1.1em;" id="loadingStatus">Waiting for device info...</div>
+        <div
+            style="margin-top: 20px; width: 200px; height: 4px; background: #e9ecef; border-radius: 2px; overflow: hidden;">
+            <div
+                style="width: 50%; height: 100%; background: #007bff; animation: indeterminate 1.5s infinite linear; border-radius: 2px;">
+            </div>
+        </div>
+        <div style="margin-top: 20px; font-size: 0.9em; color: #999;">
+            Stuck here? <a href="/logout" style="color: #007bff; text-decoration: none;">Log out</a> to reset connection
+            settings.
+        </div>
+        <style>
+            @keyframes indeterminate {
+                0% {
+                    transform: translateX(-100%);
+                }
+
+                100% {
+                    transform: translateX(200%);
+                }
+            }
+        </style>
+    </div>
+
     <div class="container">
         <header>
             <h1>BambuLAN Dashboard <span
@@ -522,6 +551,35 @@
                 .then(data => {
                     latestStatus = data; // Store for other functions
 
+                    // Connection Check & Loading Screen
+                    const overlay = document.getElementById('loadingOverlay');
+                    const statusText = document.getElementById('loadingStatus');
+
+                    // Check if we have a valid device model connection
+                    // We assume if capabilities are returned and differ from default/empty, we are connected.
+                    // Or simply if we have ANY data from printer.
+                    // data.print is usually always present (empty struct), but we want populated data.
+                    // A good check is DeviceModel or gcode_state being present.
+                    // Let's check capabilities.ModelName if accessible or just data.print.devicemodel
+
+                    const isConnected = data.print && (data.print.devicemodel || (data.print.gcode_state && data.print.gcode_state !== ""));
+
+                    if (isConnected) {
+                        if (overlay && overlay.style.opacity !== '0') {
+                            overlay.style.opacity = '0';
+                            setTimeout(() => {
+                                if (overlay) overlay.style.display = 'none';
+                            }, 500);
+                        }
+                    } else {
+                        // Not connected details yet
+                        if (overlay && overlay.style.display !== 'flex') {
+                            // Ideally we don't re-show full loading screen on transient data loss unless we want strict mode
+                            // But for startup, we just stay here.
+                        }
+                        if (statusText) statusText.innerText = "Waiting for printer data...";
+                    }
+
                     // Handle Upload Status
                     const uploadModal = document.getElementById('uploadModal');
                     if (data.upload_status && data.upload_status.uploading) {
@@ -599,13 +657,10 @@
                                 if (filDiv.innerHTML !== html) filDiv.innerHTML = html;
                             }
                         } else {
-                            // Hide if no metadata available (or maybe keep if we want persistence? No, data.metadata is driven by active print)
-                            // If print is idle, we probably don't have metadata unless last job info persists.
-                            if (cardMeta && !isActive && p.gcode_state !== "FINISH") {
+                            // Hide if no metadata available
+                            if (cardMeta && !isActive && p.gcode_state !== "FINISH" && cardMeta.style.display !== 'none') {
                                 cardMeta.style.display = 'none';
                             }
-                            // If active but no metadata yet (fetching), maybe show loader?
-                            // leaving as is (hidden)
                         }
 
                         const percent = isActive ? (p.mc_percent || 0) : 0;
