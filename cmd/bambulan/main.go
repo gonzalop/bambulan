@@ -162,6 +162,15 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 
 		for i, unit := range status.Ams.Ams {
 			hum := unit.Humidity
+			raw := unit.HumidityRaw
+			if raw != "" {
+				if r, err := strconv.Atoi(raw); err == nil {
+					if r >= 10 && r <= 100 {
+						hum = fmt.Sprintf("%s (%d%%)", hum, r)
+					}
+				}
+			}
+
 			switch hum {
 			case "1":
 				hum = "1 (Dry)"

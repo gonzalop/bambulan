@@ -221,10 +221,11 @@ type VTTray struct {
 
 // AMSEntry represents a single AMS unit, which can hold up to 4 trays.
 type AMSEntry struct {
-	Humidity string    `json:"humidity"` // Humidity level (1-5, where 5 is driest)
-	Id       string    `json:"id"`       // AMS Unit ID (0-3)
-	Temp     string    `json:"temp"`     // Temperature inside AMS
-	Tray     []*VTTray `json:"tray"`     // List of up to 4 trays
+	Humidity    string    `json:"humidity"`     // Humidity level (1-5, where 1 is driest)
+	HumidityRaw string    `json:"humidity_raw"` // Raw humidity value (10-100)
+	Id          string    `json:"id"`           // AMS Unit ID (0-3)
+	Temp        string    `json:"temp"`         // Temperature inside AMS
+	Tray        []*VTTray `json:"tray"`         // List of up to 4 trays
 }
 
 // AMS conveys the state of the AMS (Automatic Material System).
