@@ -13,6 +13,9 @@ import (
 func (r *Reader) ParseMetadata() (*Metadata, error) {
 	md := &Metadata{}
 
+	// 0. Parse Standard Metadata
+	_ = r.parseStandardMetadata(md)
+
 	// 1. Parse slice_info.config
 	si, err := r.parseSliceInfo()
 	if err != nil {
@@ -129,4 +132,61 @@ func (r *Reader) GetThumbnail(plateID int) ([]byte, error) {
 
 func (r *Reader) GetThumbnailSmall(plateID int) ([]byte, error) {
 	return r.readFileBytes(fmt.Sprintf("Metadata/plate_%d_small.png", plateID))
+}
+func (r *Reader) parseStandardMetadata(md *Metadata) error {
+	// Standard location for 3D Model part is usually 3D/3dmodel.model
+	// But technically it should be found via _rels/.rels.
+	// For simplicity and speed, we check the default path first.
+	// If needed later we can implement full OPC relationships.
+
+	rc, err := r.openFile("3D/3dmodel.model")
+	if err != nil {
+		return err // Not found or error
+	}
+	defer rc.Close()
+
+	// XML structure for <model> with <metadata> children
+	type metadataXML struct {
+		Name    string `xml:"name,attr"`
+		Content string `xml:",chardata"`
+	}
+
+	type modelXML struct {
+		XMLName  xml.Name      `xml:"model"`
+		Metadata []metadataXML `xml:"metadata"`
+	}
+
+	var m modelXML
+	if err := xml.NewDecoder(rc).Decode(&m); err != nil {
+		return err
+	}
+
+	for _, meta := range m.Metadata {
+		switch meta.Name {
+		case "Title":
+			md.Title = meta.Content
+		case "Designer":
+			md.Designer = meta.Content
+		case "Description":
+			md.Description = meta.Content
+		case "Copyright":
+			md.Copyright = meta.Content
+		case "LicenseTerms":
+			md.LicenseTerms = meta.Content
+		case "CreationDate":
+			md.CreationDate = meta.Content
+		case "ModificationDate":
+			md.ModificationDate = meta.Content
+		case "Application":
+			md.Application = meta.Content
+		}
+	}
+
+	// Check for standard package thumbnail
+	// TODO: Implement relationship-based lookup as per 3MF spec (OPC relationships)
+	if _, err := r.openFile("Metadata/thumbnail.png"); err == nil {
+		md.ThumbnailPath = "Metadata/thumbnail.png"
+	}
+
+	return nil
 }

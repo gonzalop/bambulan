@@ -60,4 +60,14 @@ func TestParseMetadata(t *testing.T) {
 			t.Logf("Warning: Filament %d has 0 usage?", f.ID)
 		}
 	}
+
+	// Standard Metadata checks (may be empty for this specific test file, but should not panic)
+	t.Logf("Standard Metadata: Title=%q Designer=%q Description=%q", md.Title, md.Designer, md.Description)
+	if md.ThumbnailPath != "" {
+		t.Logf("Found Package Thumbnail at %s", md.ThumbnailPath)
+		// Try to read it
+		if _, err := r.GetPackageThumbnail(); err != nil {
+			t.Errorf("Failed to read package thumbnail: %v", err)
+		}
+	}
 }

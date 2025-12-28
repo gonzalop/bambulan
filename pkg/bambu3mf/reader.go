@@ -46,6 +46,12 @@ func (r *Reader) ReadFile(name string) ([]byte, error) {
 	return r.readFileBytes(name)
 }
 
+func (r *Reader) GetPackageThumbnail() ([]byte, error) {
+	// Try standard or common paths
+	// In the future this should use relationships
+	return r.readFileBytes("Metadata/thumbnail.png")
+}
+
 func (r *Reader) readFileBytes(name string) ([]byte, error) {
 	rc, err := r.openFile(name)
 	if err != nil {

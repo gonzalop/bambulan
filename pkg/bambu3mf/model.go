@@ -6,6 +6,17 @@ import "encoding/xml"
 type Metadata struct {
 	Plates    []Plate    `json:"plates"`
 	Filaments []Filament `json:"filaments"`
+
+	// Standard 3MF Metadata
+	Title            string `json:"title,omitempty"`
+	Designer         string `json:"designer,omitempty"`
+	Description      string `json:"description,omitempty"`
+	Copyright        string `json:"copyright,omitempty"`
+	LicenseTerms     string `json:"license_terms,omitempty"`
+	CreationDate     string `json:"creation_date,omitempty"`
+	ModificationDate string `json:"modification_date,omitempty"`
+	Application      string `json:"application,omitempty"`
+	ThumbnailPath    string `json:"thumbnail_path,omitempty"` // Package-level thumbnail
 }
 
 // Plate represents a build plate in the 3MF project.
