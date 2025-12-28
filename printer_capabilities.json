@@ -6,6 +6,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -16,6 +17,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -26,6 +28,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -36,6 +39,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -46,6 +50,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -56,6 +61,7 @@
     "has_chamber_fan": false,
     "has_aux_fan": false,
     "has_ams_humidity": false,
+    "has_ams_capacity_reporting": false,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -66,6 +72,7 @@
     "has_chamber_fan": false,
     "has_aux_fan": false,
     "has_ams_humidity": false,
+    "has_ams_capacity_reporting": false,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -76,6 +83,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -86,6 +94,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -96,6 +105,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -106,6 +116,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -116,6 +127,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   },
@@ -126,6 +138,7 @@
     "has_chamber_fan": true,
     "has_aux_fan": true,
     "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
     "has_timelapse": true,
     "has_bed_leveling": true
   }

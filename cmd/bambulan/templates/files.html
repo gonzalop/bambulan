@@ -260,7 +260,7 @@
             formData.append('path', currentPath);
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             const statusDiv = document.getElementById('file-list');
-            statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + file.name + '... <span id="uploadDetails"></span></div>';
+            statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + escapeHtml(file.name) + '... <span id="uploadDetails"></span></div>';
             const poller = setInterval(() => {
                 fetch('/api/status').then(r => r.json()).then(d => {
                     if (d.upload_status && d.upload_status.uploading) {
@@ -312,7 +312,16 @@
             } catch (e) { alert("Error: " + e); }
         }
 
-        async function renameItem(name, isDir) {
+        async function renameItem(arg, isDirArg) {
+            let name, isDir;
+            if (arg instanceof HTMLElement) {
+                name = arg.dataset.name;
+                isDir = arg.dataset.isdir === 'true';
+            } else {
+                name = arg;
+                isDir = isDirArg;
+            }
+
             const newName = await showPrompt("Rename", "Rename " + name + " to:", name);
             if (!newName || newName === name) return;
             if (/[<>\[\]:/\\|?*"]/.test(newName)) {
@@ -339,7 +348,11 @@
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
-        function loadFiles(path) {
+        function loadFiles(arg) {
+            let path = arg;
+            if (arg instanceof HTMLElement) {
+                path = arg.dataset.path;
+            }
             currentPath = path;
             document.getElementById('currentPathDisplay').innerText = path;
             const list = document.getElementById('file-list');
@@ -355,9 +368,10 @@
                             parts.pop();
                             let parent = "/" + parts.join("/");
                             if (!parent.endsWith("/")) parent += "/";
+                            const safeParent = escapeHtml(parent);
                             list.innerHTML = `
                                 <div style="margin-bottom: 10px;">
-                                    <a href="#" onclick="loadFiles('${parent}')" class="btn" style="padding: 5px 10px; font-size: 0.8em;">&larr; Back</a>
+                                    <a href="#" data-path="${safeParent}" onclick="loadFiles(this)" class="btn" style="padding: 5px 10px; font-size: 0.8em;">&larr; Back</a>
                                 </div>
                                 <div style="text-align: center; padding: 20px;">No files found.</div>`;
                         }
@@ -376,9 +390,10 @@
                         parts.pop();
                         let parent = "/" + parts.join("/");
                         if (!parent.endsWith("/")) parent += "/";
+                        const safeParent = escapeHtml(parent);
                         html += `
                         <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee;">
-                            <a href="#" onclick="loadFiles('${parent}')" style="display: flex; align-items: center; gap: 10px;">
+                            <a href="#" data-path="${safeParent}" onclick="loadFiles(this)" style="display: flex; align-items: center; gap: 10px;">
                                 <span>🔙</span> <strong>.. (Parent Directory)</strong>
                             </a>
                         </div>`;
@@ -387,20 +402,21 @@
                     entries.forEach((e, index) => {
                         const uniqueId = 'menu-' + index;
                         const escapedName = escapeHtml(e.Name);
-                        const fullPath = escapeHtml(path + e.Name);
+                        const fullPath = escapeHtml(path + e.Name); // path ends with /
 
                         // Menu content
                         let menuItems = `
                             ${e.Type !== "dir" ? `<a href="/api/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
-                            <button onclick="renameItem('${escapedName}', ${e.Type === "dir"})">✎ Rename</button>
-                            <button onclick="deleteFile('${fullPath}')" style="color: #d9534f;">🗑️ Delete</button>
+                            <button data-name="${escapedName}" data-isdir="${e.Type === "dir"}" onclick="renameItem(this)">✎ Rename</button>
+                            <button data-path="${fullPath}" onclick="deleteFile(this)" style="color: #d9534f;">🗑️ Delete</button>
                         `;
 
                         if (e.Type === "dir") { // Directory
                             const newPath = path + e.Name + "/";
+                            const safeNewPath = escapeHtml(newPath);
                             html += `
                             <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
-                                <a href="#" onclick="loadFiles('${newPath}')" style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                                <a href="#" data-path="${safeNewPath}" onclick="loadFiles(this)" style="display: flex; align-items: center; gap: 10px; flex: 1;">
                                     <span style="font-size: 1.2em;">📂</span> 
                                     <span style="font-weight: 600; color: var(--text-color);">${escapedName}</span>
                                 </a>
@@ -422,8 +438,8 @@
                                     <div class="dropdown">
                                         <button onclick="toggleMenu('${uniqueId}')" class="menu-btn">⋮</button>
                                         <div id="${uniqueId}" class="dropdown-content">
-                                            <button onclick="renameItem('${escapedName}', false)">✎ Rename</button>
-                                            <button onclick="deleteFile('${fullPath}')" style="color: #d9534f;">🗑️ Delete</button>
+                                            <button data-name="${escapedName}" data-isdir="false" onclick="renameItem(this)">✎ Rename</button>
+                                            <button data-path="${fullPath}" onclick="deleteFile(this)" style="color: #d9534f;">🗑️ Delete</button>
                                         </div>
                                     </div>
                                 </div>
@@ -439,7 +455,7 @@
                                 <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
                                     <span style="color: #666;">${sizeMB} MB</span>
                                     ${e.Name.endsWith('.gcode.3mf') ?
-                                    `<button onclick="openPrintModal('${fullPath}')" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🖨️ Print</button>`
+                                    `<button data-path="${fullPath}" onclick="openPrintModal(this)" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🖨️ Print</button>`
                                     : ''}
                                     <div class="dropdown">
                                         <button onclick="toggleMenu('${uniqueId}')" class="menu-btn">⋮</button>
@@ -460,7 +476,12 @@
                 });
         }
 
-        async function deleteFile(filename) {
+        async function deleteFile(arg) {
+            let filename = arg;
+            if (arg instanceof HTMLElement) {
+                filename = arg.dataset.path;
+            }
+
             const confirmed = await showConfirm(`Are you sure you want to delete "${filename}"?`);
             if (!confirmed) {
                 return;
@@ -496,7 +517,11 @@
 
         loadFiles('/');
 
-        function openPrintModal(fullPath) {
+        function openPrintModal(arg) {
+            let fullPath = arg;
+            if (arg instanceof HTMLElement) {
+                fullPath = arg.dataset.path;
+            }
             document.getElementById('printModal').style.display = 'flex';
             document.getElementById('printFilename').innerText = fullPath.split('/').pop();
             document.getElementById('printExistingPath').value = fullPath;

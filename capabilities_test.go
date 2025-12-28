@@ -14,6 +14,13 @@ func TestCapabilities(t *testing.T) {
 	if !x1c.HasChamberFan {
 		t.Error("X1C should have chamber fan")
 	}
+	if x1c.MaxNozzleTemp != 300 {
+		t.Errorf("expected max nozzle temp 300, got %d", x1c.MaxNozzleTemp)
+	}
+
+	if !x1c.HasAMSCapacityReporting {
+		t.Error("expected X1C to support AMS capacity reporting")
+	}
 
 	// Test A1 Mini
 	a1m := GetPrinterCapabilities("N1")

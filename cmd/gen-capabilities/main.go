@@ -25,19 +25,21 @@ type PrinterDefinition map[string]struct {
 		SupportAMSHumidity  bool  `json:"support_ams_humidity"`
 		SupportTimelapse    bool  `json:"support_timelapse"`
 		SupportBedLeveling  any   `json:"support_bed_leveling"`
+		SupportUpdateRemain bool  `json:"support_update_remain"`
 	} `json:"print"`
 }
 
 // Capabilities is the simplified struct we export
 type Capabilities struct {
-	DisplayName    string `json:"display_name"`
-	MaxNozzleTemp  int    `json:"max_nozzle_temp"`
-	MaxBedTemp     int    `json:"max_bed_temp"`
-	HasChamberFan  bool   `json:"has_chamber_fan"`
-	HasAuxFan      bool   `json:"has_aux_fan"`
-	HasAMSHumidity bool   `json:"has_ams_humidity"`
-	HasTimelapse   bool   `json:"has_timelapse"`
-	HasBedLeveling bool   `json:"has_bed_leveling"`
+	DisplayName             string `json:"display_name"`
+	MaxNozzleTemp           int    `json:"max_nozzle_temp"`
+	MaxBedTemp              int    `json:"max_bed_temp"`
+	HasChamberFan           bool   `json:"has_chamber_fan"`
+	HasAuxFan               bool   `json:"has_aux_fan"`
+	HasAMSHumidity          bool   `json:"has_ams_humidity"`
+	HasAMSCapacityReporting bool   `json:"has_ams_capacity_reporting"`
+	HasTimelapse            bool   `json:"has_timelapse"`
+	HasBedLeveling          bool   `json:"has_bed_leveling"`
 }
 
 func main() {
@@ -119,6 +121,9 @@ func main() {
 			}
 			if p.SupportAMSHumidity {
 				caps.HasAMSHumidity = true
+			}
+			if p.SupportUpdateRemain {
+				caps.HasAMSCapacityReporting = true
 			}
 			if p.SupportTimelapse {
 				caps.HasTimelapse = true

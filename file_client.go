@@ -7,17 +7,24 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gonzalop/ftp"
 )
 
 // FileClient handles file operations (listing, uploading, downloading) over FTPS.
+// It maintains a persistent connection to the printer.
 type FileClient struct {
 	// Hostname is the IP or hostname of the printer's FTPS server.
 	Hostname string
 	// AccessCode is the password for the FTPS connection.
 	AccessCode string
+
+	// client tracks the active FTP connection
+	client *ftp.Client
+	// mu ensures thread-safety for the shared connection
+	mu sync.Mutex
 }
 
 // NewFileClient creates a new FileClient.
@@ -32,7 +39,33 @@ func NewFileClient(hostname, accessCode string) *FileClient {
 	}
 }
 
-func (f *FileClient) connect() (*ftp.Client, error) {
+// Close closes the active FTP connection if it exists.
+func (f *FileClient) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.client != nil {
+		err := f.client.Quit()
+		f.client = nil
+		return err
+	}
+	return nil
+}
+
+// getConn returns a usable FTP connection, reconnecting if necessary.
+// The caller must hold f.mu.
+func (f *FileClient) getConn() (*ftp.Client, error) {
+	// Check existing connection
+	if f.client != nil {
+		if err := f.client.Noop(); err == nil {
+			return f.client, nil
+		}
+		// Connection dead, close and retry
+		slog.Debug("FTP connection lost, reconnecting", "host", f.Hostname)
+		_ = f.client.Quit()
+		f.client = nil
+	}
+
+	// Dial new connection
 	tlsConfig := &tls.Config{
 		// Bambu Lab printers use self-signed certificates for their FTPS server.
 		InsecureSkipVerify: true,
@@ -40,7 +73,7 @@ func (f *FileClient) connect() (*ftp.Client, error) {
 
 	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname),
 		ftp.WithImplicitTLS(tlsConfig),
-		ftp.WithTimeout(5*time.Second),
+		ftp.WithTimeout(10*time.Second), // Increased timeout for stability
 		ftp.WithLogger(slog.Default()),
 	)
 	if err != nil {
@@ -52,6 +85,7 @@ func (f *FileClient) connect() (*ftp.Client, error) {
 		return nil, err
 	}
 
+	f.client = c
 	return c, nil
 }
 
@@ -73,14 +107,19 @@ func (f *FileClient) connect() (*ftp.Client, error) {
 //	    fmt.Printf("%s: %d bytes\n", entry.Name, entry.Size)
 //	}
 func (f *FileClient) ListFiles(dir string) ([]*ftp.Entry, error) {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = c.Quit() }()
 
 	entries, err := c.List(dir)
 	if err != nil {
+		// Invalidate connection on error to force clean slate next time
+		_ = c.Quit()
+		f.client = nil
 		return nil, err
 	}
 	return entries, nil
@@ -120,10 +159,11 @@ func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
 // Returns:
 //   - An `io.ReadCloser` from which the file content can be read.
 func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
-	// The caller is responsible for reading the stream, so we wrap the ReadCloser
-	// to ensure the connection is closed when they are done.
-	c, err := f.connect()
+	f.mu.Lock()
+
+	c, err := f.getConn()
 	if err != nil {
+		f.mu.Unlock() // Unlock if error
 		return nil, err
 	}
 
@@ -131,23 +171,24 @@ func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
-		err := c.Retrieve(remotePath, pw)
-		if err != nil {
+		// If Retrieve fails, the writer is closed with error, reader sees error.
+		if err := c.Retrieve(remotePath, pw); err != nil {
 			pw.CloseWithError(err)
 		}
 	}()
 
-	return &ftpReadCloser{ReadCloser: pr, conn: c}, nil
+	return &ftpReadCloser{ReadCloser: pr, client: f}, nil
 }
 
 type ftpReadCloser struct {
 	io.ReadCloser
-	conn *ftp.Client
+	client *FileClient
 }
 
 func (f *ftpReadCloser) Close() error {
 	err := f.ReadCloser.Close()
-	_ = f.conn.Quit()
+	// Release the lock, allowing other operations to proceed
+	f.client.mu.Unlock()
 	return err
 }
 
@@ -171,11 +212,13 @@ func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(
 }
 
 func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgress func(int64, int64)) error {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Quit() }()
 
 	// Try to get size first
 	var total int64
@@ -200,11 +243,19 @@ func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgre
 			total:      total,
 			onProgress: onProgress,
 		}
-		err = c.Retrieve(remotePath, pw)
+		if err := c.Retrieve(remotePath, pw); err != nil {
+			_ = c.Quit()
+			f.client = nil
+			return err
+		}
 	} else {
-		err = c.Retrieve(remotePath, outFile)
+		if err := c.Retrieve(remotePath, outFile); err != nil {
+			_ = c.Quit()
+			f.client = nil
+			return err
+		}
 	}
-	return err
+	return nil
 }
 
 // Upload streams content to the printer.
@@ -215,11 +266,13 @@ func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgre
 //   - onProgress: An optional callback function `func(currentBytes, totalBytes int64)`
 //     that reports the current upload progress.
 func (f *FileClient) Upload(remotePath string, content io.Reader, onProgress func(int64, int64)) error {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Quit() }()
 
 	var reader io.Reader = content
 	if onProgress != nil {
@@ -245,7 +298,12 @@ func (f *FileClient) Upload(remotePath string, content io.Reader, onProgress fun
 		}
 	}
 
-	return c.Store(remotePath, reader)
+	if err := c.Store(remotePath, reader); err != nil {
+		_ = c.Quit()
+		f.client = nil
+		return err
+	}
+	return nil
 }
 
 // UploadFile uploads a local file to the printer.
@@ -307,13 +365,21 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 // Returns:
 //   - An error if the file could not be deleted (e.g., file not found, permission denied).
 func (f *FileClient) Delete(remotePath string) error {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Quit() }()
 
-	return c.Delete(remotePath)
+	if err := c.Delete(remotePath); err != nil {
+		// Invalidate on error
+		_ = c.Quit()
+		f.client = nil
+		return err
+	}
+	return nil
 }
 
 // MakeDirectory creates a new directory on the printer.
@@ -324,13 +390,20 @@ func (f *FileClient) Delete(remotePath string) error {
 // Returns:
 //   - An error if the directory could not be created.
 func (f *FileClient) MakeDirectory(path string) error {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Quit() }()
 
-	return c.MakeDir(path)
+	if err := c.MakeDir(path); err != nil {
+		_ = c.Quit()
+		f.client = nil
+		return err
+	}
+	return nil
 }
 
 // Rename renames or moves a file/directory on the printer.
@@ -342,13 +415,20 @@ func (f *FileClient) MakeDirectory(path string) error {
 // Returns:
 //   - An error if the operation failed.
 func (f *FileClient) Rename(source, dest string) error {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Quit() }()
 
-	return c.Rename(source, dest)
+	if err := c.Rename(source, dest); err != nil {
+		_ = c.Quit()
+		f.client = nil
+		return err
+	}
+	return nil
 }
 
 // RemoveAll recursively deletes a file or directory.
@@ -360,13 +440,20 @@ func (f *FileClient) Rename(source, dest string) error {
 // Returns:
 //   - An error if any deletion step failed.
 func (f *FileClient) RemoveAll(path string) error {
-	c, err := f.connect()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	c, err := f.getConn()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Quit() }()
 
-	return f.removeAll(c, path)
+	if err := f.removeAll(c, path); err != nil {
+		_ = c.Quit()
+		f.client = nil
+		return err
+	}
+	return nil
 }
 
 func (f *FileClient) removeAll(c *ftp.Client, path string) error {
