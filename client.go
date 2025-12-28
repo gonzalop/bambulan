@@ -60,4 +60,5 @@ func (c *Client) Start() error {
 func (c *Client) Stop() {
 	c.MQTT.Stop()
 	c.Camera.StopStream()
+	_ = c.File.Close()
 }

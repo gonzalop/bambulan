@@ -399,6 +399,16 @@
         let tempUnit = localStorage.getItem("bambulan_temp_unit") || "C";
         let latestStatus = null;
 
+        function escapeHTML(str) {
+            if (!str) return "";
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         function setTempUnit(unit) {
             tempUnit = unit;
             localStorage.setItem("bambulan_temp_unit", unit);
@@ -682,8 +692,8 @@
                                 // Only update if changed? Or simple innerHTML
                                 const html = m.filaments.map(f =>
                                     `<div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
-                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${f.color}; border:1px solid #ccc;"></span>
-                                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${f.type}</span>
+                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escapeHTML(f.color)}; border:1px solid #ccc;"></span>
+                                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHTML(f.type)}</span>
                                         <span style="font-weight:bold;">${f.used_grams.toFixed(1)}g</span>
                                       </div>`
                                 ).join("");
@@ -878,8 +888,8 @@
                                         // New Compact Format: Unit 0  🌡️ 25.0°C  💧 10% (Dry)
                                         unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light); display: flex; align-items: center; gap: 15px;">
                                             <span>Unit ${idx}</span>
-                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">🌡️ ${temp}°C</span>
-                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">💧 ${finalHum}</span>
+                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">🌡️ ${escapeHTML(temp)}°C</span>
+                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">💧 ${escapeHTML(finalHum)}</span>
                                         </div>`;
 
                                         const grid = document.createElement('div');
@@ -891,8 +901,15 @@
                                             unit.tray.forEach((tray, trayIdx) => {
                                                 const color = formatColor(tray.tray_color);
                                                 const type = tray.tray_type || "Empty";
-                                                const remain = tray.remain !== undefined ? tray.remain + "%" : "--";
-                                                const unknown = (tray.remain < 0);
+
+                                                let remainText = "";
+                                                if (data.capabilities && data.capabilities.has_ams_capacity_reporting) {
+                                                    const r = tray.remain;
+                                                    if (r !== undefined) {
+                                                        if (r < 0) remainText = "Capacity: N/A";
+                                                        else remainText = r + "%";
+                                                    }
+                                                }
 
                                                 const item = document.createElement('div');
                                                 item.style.background = '#f8f9fa';
@@ -926,7 +943,7 @@
                                                 const capDiv = document.createElement('div');
                                                 capDiv.style.fontSize = '0.8em';
                                                 capDiv.style.color = '#666';
-                                                capDiv.innerText = unknown ? "Capacity: N/A" : remain;
+                                                capDiv.innerText = remainText;
 
                                                 item.appendChild(topRow);
                                                 item.appendChild(capDiv);
@@ -955,8 +972,15 @@
 
                                         const color = formatColor(p.vt_tray.tray_color);
                                         const type = p.vt_tray.tray_sub_brands || p.vt_tray.tray_type || "Unknown";
-                                        const remain = p.vt_tray.remain !== undefined ? p.vt_tray.remain + "%" : "--";
-                                        const unknown = (p.vt_tray.remain < 0);
+
+                                        let remainText = "";
+                                        if (data.capabilities && data.capabilities.has_ams_capacity_reporting) {
+                                            const r = p.vt_tray.remain;
+                                            if (r !== undefined) {
+                                                if (r < 0) remainText = "Capacity: N/A";
+                                                else remainText = r + "%";
+                                            }
+                                        }
 
                                         const item = document.createElement('div');
                                         item.style.background = '#f8f9fa';
@@ -991,7 +1015,7 @@
                                         const capDiv = document.createElement('div');
                                         capDiv.style.fontSize = '0.8em';
                                         capDiv.style.color = '#666';
-                                        capDiv.innerText = unknown ? "Capacity: N/A" : remain;
+                                        capDiv.innerText = remainText;
 
                                         item.appendChild(topRow);
                                         item.appendChild(capDiv);

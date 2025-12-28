@@ -192,10 +192,14 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 					fmt.Printf(" %sSlot %d: [Empty]\n", marker, j)
 					continue
 				}
-				remain := fmt.Sprintf("%d%%", tray.Remain)
-				if tray.Remain < 0 {
-					remain = "Capacity: N/A"
+				remain := ""
+				if caps.HasAMSCapacityReporting {
+					remain = fmt.Sprintf(" (%d%%)", tray.Remain)
+					if tray.Remain < 0 {
+						remain = " (Capacity: N/A)"
+					}
 				}
+
 				name := tray.TraySubBrands
 				if name == "" {
 					name = tray.TrayType
@@ -203,7 +207,7 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 				if name == "" {
 					name = tray.TrayIdName
 				}
-				fmt.Printf(" %sSlot %d: %s %s (%s)\n", marker, j, name, tray.TrayColor, remain)
+				fmt.Printf(" %sSlot %d: %s %s%s\n", marker, j, name, tray.TrayColor, remain)
 			}
 		}
 	}

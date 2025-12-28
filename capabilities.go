@@ -38,6 +38,9 @@ type PrinterCapability struct {
 	// HasAMSHumidity indicates whether the printer supports reporting AMS humidity levels.
 	HasAMSHumidity bool `json:"has_ams_humidity"`
 
+	// HasAMSCapacityReporting indicates whether the printer supports reporting AMS filament capacity/remaining.
+	HasAMSCapacityReporting bool `json:"has_ams_capacity_reporting"`
+
 	// HasTimelapse indicates whether the printer supports internal timelapse recording.
 	HasTimelapse bool `json:"has_timelapse"`
 
