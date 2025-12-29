@@ -119,7 +119,14 @@
 
                 <div class="card" id="cardMetadata" style="display: none;">
                     <h3 style="margin-bottom: 10px;">Print Info</h3>
-                    <div style="display: flex; gap: 15px;">
+                    <!-- Download Progress Indicator -->
+                    <div id="metadataDownloadProgress"
+                        style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        <div style="font-size: 0.9em; color: var(--text-light); margin-bottom: 5px;">
+                            📥 Downloading metadata... <span id="metadataDownloadBytes">0 KB</span>
+                        </div>
+                    </div>
+                    <div id="metadataContent" style="display: flex; gap: 15px;">
                         <img id="printThumbnail" src=""
                             style="width: 100px; height: 100px; object-fit: contain; border-radius: 5px; background: #eee;">
                         <div style="flex: 1;">
@@ -375,13 +382,9 @@
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-                    {{if .Capabilities.HasBedLeveling}}
-                    <label><input type="checkbox" name="bed_leveling" checked> Bed Leveling</label>
-                    {{end}}
+                    <label id="lblBedLeveling" style="display: none;"><input type="checkbox" name="bed_leveling" checked> Bed Leveling</label>
                     <label><input type="checkbox" name="flow_calibration"> Flow Calibration</label>
-                    {{if .Capabilities.HasTimelapse}}
-                    <label><input type="checkbox" name="timelapse"> Timelapse</label>
-                    {{end}}
+                    <label id="lblTimelapse" style="display: none;"><input type="checkbox" name="timelapse"> Timelapse</label>
                     <label><input type="checkbox" name="use_ams" id="chkUseAMS"> Use AMS</label>
                     <label><input type="checkbox" name="vibration_calibration" checked> Vibration Calibration</label>
                     <label><input type="checkbox" name="layer_inspection"> Layer Inspect</label>
@@ -515,8 +518,28 @@
             if (el) el.style[styleProp] = value;
         }
 
+        function updatePrintDialogFeatures(capabilities) {
+            if (!capabilities) return;
+            
+            // Show/hide Bed Leveling based on printer capability
+            const lblBedLeveling = document.getElementById('lblBedLeveling');
+            if (lblBedLeveling) {
+                lblBedLeveling.style.display = capabilities.has_bed_leveling ? 'block' : 'none';
+            }
+            
+            // Show/hide Timelapse based on printer capability
+            const lblTimelapse = document.getElementById('lblTimelapse');
+            if (lblTimelapse) {
+                lblTimelapse.style.display = capabilities.has_timelapse ? 'block' : 'none';
+            }
+        }
+
         function showStartPrint() {
             document.getElementById('printModal').style.display = 'flex';
+            // Update feature visibility based on current capabilities
+            if (latestStatus && latestStatus.capabilities) {
+                updatePrintDialogFeatures(latestStatus.capabilities);
+            }
             // Defaults logic for AMS
             if (latestStatus && latestStatus.print && latestStatus.print.ams) {
                 const ams = latestStatus.print.ams;
@@ -593,6 +616,11 @@
                 .then(response => response.json())
                 .then(data => {
                     latestStatus = data; // Store for other functions
+                    
+                    // Update print dialog features if capabilities are available
+                    if (data.capabilities) {
+                        updatePrintDialogFeatures(data.capabilities);
+                    }
 
                     // Connection Check & Loading Screen
                     const overlay = document.getElementById('loadingOverlay');
@@ -651,10 +679,39 @@
                         // Show progress only if printing/preparing
                         const isActive = (p.gcode_state === "RUNNING" || p.gcode_state === "PAUSE" || p.gcode_state === "PREPARE");
 
+                        // Handle Metadata Download Progress
+                        const downloadProgress = document.getElementById('metadataDownloadProgress');
+                        const metadataContent = document.getElementById('metadataContent');
+                        if (data.metadata_download_status && data.metadata_download_status.downloading) {
+                            const d = data.metadata_download_status;
+                            if (downloadProgress) {
+                                downloadProgress.style.display = 'block';
+                                const toKB = (b) => (b / 1024).toFixed(1) + " KB";
+                                safeSetText('metadataDownloadBytes', toKB(d.current));
+                            }
+                            if (metadataContent) metadataContent.style.display = 'none';
+                        } else {
+                            if (downloadProgress) downloadProgress.style.display = 'none';
+                            if (metadataContent) metadataContent.style.display = 'flex';
+                        }
+
                         // Metadata Handling
                         const cardMeta = document.getElementById('cardMetadata');
-                        if (data.metadata) { // Check if valid metadata
+
+                        // Show card if we have metadata OR if download is in progress
+                        const hasMetadata = data.metadata;
+                        const isDownloading = data.metadata_download_status && data.metadata_download_status.downloading;
+
+                        if (hasMetadata || isDownloading) {
                             if (cardMeta) cardMeta.style.display = 'block';
+                        } else {
+                            // Hide if no metadata available and not downloading
+                            if (cardMeta && !isActive && p.gcode_state !== "FINISH" && cardMeta.style.display !== 'none') {
+                                cardMeta.style.display = 'none';
+                            }
+                        }
+
+                        if (data.metadata) { // Check if valid metadata
                             const m = data.metadata;
 
                             // Thumbnail
@@ -698,11 +755,6 @@
                                       </div>`
                                 ).join("");
                                 if (filDiv.innerHTML !== html) filDiv.innerHTML = html;
-                            }
-                        } else {
-                            // Hide if no metadata available
-                            if (cardMeta && !isActive && p.gcode_state !== "FINISH" && cardMeta.style.display !== 'none') {
-                                cardMeta.style.display = 'none';
                             }
                         }
 
