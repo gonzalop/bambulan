@@ -557,7 +557,6 @@
                 if (!resp.ok) resp.text().then(text => alert("Start failed: " + text));
                 else {
                     closePrintModal();
-                    alert("Print started!");
                     window.location.href = "/";
                 }
             }).finally(() => {

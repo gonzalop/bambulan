@@ -42,12 +42,14 @@ type Session struct {
 	Status                  *bambulan.PrinterStatus
 	CSRFToken               string
 	UploadStatus            UploadStatus
+	MetadataDownloadStatus  MetadataDownloadStatus
 	CurrentMetadata         *bambu3mf.Metadata
 	CurrentMetadataFilename string // Track which file the metadata belongs to
 	MetadataCache           map[string]*bambu3mf.Metadata
 	ThumbnailCache          map[string][]byte
 	FailedFetches           map[string]int  // Track retry counts
 	Fetching                map[string]bool // Track active fetches to prevent thundering herd // key: filename/plate_id
+	PreviousGcodeState      string          // Track previous state to detect transitions
 	Mu                      sync.RWMutex
 }
 
@@ -57,6 +59,14 @@ type UploadStatus struct {
 	Current   int64   `json:"current"`
 	Total     int64   `json:"total"`
 	Percent   float64 `json:"percent"`
+}
+
+type MetadataDownloadStatus struct {
+	Downloading bool    `json:"downloading"`
+	Filename    string  `json:"filename"`
+	Current     int64   `json:"current"`
+	Total       int64   `json:"total"`
+	Percent     float64 `json:"percent"`
 }
 
 type WebServer struct {
@@ -465,6 +475,34 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	// Create JSON response
 	w.Header().Set("Content-Type", "application/json")
 
+	// Detect state transitions and clear metadata when print finishes/stops
+	currentState := session.Status.GcodeState
+	previousState := session.PreviousGcodeState
+
+	// Active states that can have metadata
+	activeStates := map[string]bool{
+		"RUNNING": true,
+		"PAUSE":   true,
+		"PREPARE": true,
+	}
+
+	// Terminal states that should clear metadata
+	terminalStates := map[string]bool{
+		"FINISH": true,
+		"FAILED": true,
+		"IDLE":   true,
+	}
+
+	// If we transitioned from an active state to a terminal state, clear metadata
+	if activeStates[previousState] && terminalStates[currentState] {
+		slog.Debug("Print state transition detected, clearing metadata", "from", previousState, "to", currentState)
+		session.CurrentMetadata = nil
+		session.CurrentMetadataFilename = ""
+	}
+
+	// Update previous state for next call
+	session.PreviousGcodeState = currentState
+
 	// Determine active file to ensure CurrentMetadata is up to date
 	activeFile := session.Status.SubtaskName
 	if activeFile == "" {
@@ -524,11 +562,12 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Wrap in top-level object as expected by the frontend.
 	resp := map[string]any{
-		"print":         session.Status,
-		"stage_message": session.Status.GetPrintStageName(),
-		"upload_status": session.UploadStatus,
-		"capabilities":  bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
-		"metadata":      nil,
+		"print":                    session.Status,
+		"stage_message":            session.Status.GetPrintStageName(),
+		"upload_status":            session.UploadStatus,
+		"metadata_download_status": session.MetadataDownloadStatus,
+		"capabilities":             bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
+		"metadata":                 nil,
 	}
 
 	if session.CurrentMetadata != nil {
@@ -1063,6 +1102,8 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 		defer func() {
 			session.Mu.Lock()
 			delete(session.Fetching, filename)
+			// Clear download status when done
+			session.MetadataDownloadStatus = MetadataDownloadStatus{}
 			session.Mu.Unlock()
 		}()
 
@@ -1329,10 +1370,43 @@ func (s *WebServer) downloadToTemp(session *Session, target string) (*os.File, i
 		}
 	}()
 
-	sz, err := io.Copy(tFile, rc)
+	// Set initial download status
+	session.Mu.Lock()
+	session.MetadataDownloadStatus = MetadataDownloadStatus{
+		Downloading: true,
+		Filename:    target,
+		Current:     0,
+		Total:       0,
+		Percent:     0,
+	}
+	session.Mu.Unlock()
+
+	// Create a progress tracking writer
+	var written int64
+	progressWriter := &progressWriter{
+		writer: tFile,
+		onProgress: func(n int64) {
+			written += n
+			session.Mu.Lock()
+			session.MetadataDownloadStatus.Current = written
+			// We don't know total size for FTP, so just show bytes downloaded
+			session.Mu.Unlock()
+		},
+	}
+
+	sz, err := io.Copy(progressWriter, rc)
 	if err != nil {
 		return nil, 0, err
 	}
+
+	// Update final size
+	session.Mu.Lock()
+	session.MetadataDownloadStatus.Total = sz
+	session.MetadataDownloadStatus.Current = sz
+	if sz > 0 {
+		session.MetadataDownloadStatus.Percent = 100
+	}
+	session.Mu.Unlock()
 
 	if _, err := tFile.Seek(0, 0); err != nil {
 		return nil, 0, err
@@ -1340,6 +1414,20 @@ func (s *WebServer) downloadToTemp(session *Session, target string) (*os.File, i
 
 	success = true
 	return tFile, sz, nil
+}
+
+// progressWriter wraps an io.Writer and calls a callback on each write
+type progressWriter struct {
+	writer     io.Writer
+	onProgress func(int64)
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.writer.Write(p)
+	if n > 0 && pw.onProgress != nil {
+		pw.onProgress(int64(n))
+	}
+	return n, err
 }
 
 func (s *WebServer) updateSessionMetadata(session *Session, filename string, tryFile string, md *bambu3mf.Metadata, rdr *bambu3mf.Reader) {
