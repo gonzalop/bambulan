@@ -116,27 +116,6 @@
                     </div>
                     <div id="amsContainer"></div>
                 </div>
-
-                <div class="card" id="cardMetadata" style="display: none;">
-                    <h3 style="margin-bottom: 10px;">Print Info</h3>
-                    <!-- Download Progress Indicator -->
-                    <div id="metadataDownloadProgress"
-                        style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
-                        <div style="font-size: 0.9em; color: var(--text-light); margin-bottom: 5px;">
-                            📥 Downloading metadata... <span id="metadataDownloadBytes">0 KB</span>
-                        </div>
-                    </div>
-                    <div id="metadataContent" style="display: flex; gap: 15px;">
-                        <img id="printThumbnail" src=""
-                            style="width: 100px; height: 100px; object-fit: contain; border-radius: 5px; background: #eee;">
-                        <div style="flex: 1;">
-                            <div id="metadataPlates" style="font-weight: bold; margin-bottom: 5px;"></div>
-                            <div id="metadataFilaments"
-                                style="font-size: 0.9em; color: var(--text-light); max-height: 100px; overflow-y: auto;">
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
 
@@ -233,6 +212,27 @@
                             <button id="btnSpeed2" onclick="control('speed_std')" class="btn">▶️ Standard</button>
                             <button id="btnSpeed3" onclick="control('speed_sport')" class="btn">🏎️ Sport</button>
                             <button id="btnSpeed4" onclick="control('speed_ludi')" class="btn">🚀 Ludicrous</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" id="cardMetadata" style="display: none;">
+                    <h3 style="margin-bottom: 10px;">Print Info</h3>
+                    <!-- Download Progress Indicator -->
+                    <div id="metadataDownloadProgress"
+                        style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        <div style="font-size: 0.9em; color: var(--text-light); margin-bottom: 5px;">
+                            📥 Downloading metadata... <span id="metadataDownloadBytes">0 KB</span>
+                        </div>
+                    </div>
+                    <div id="metadataContent" style="display: flex; gap: 15px;">
+                        <img id="printThumbnail" src=""
+                            style="width: 100px; height: 100px; object-fit: contain; border-radius: 5px; background: #eee;">
+                        <div style="flex: 1;">
+                            <div id="metadataPlates" style="font-weight: bold; margin-bottom: 5px;"></div>
+                            <div id="metadataFilaments"
+                                style="font-size: 0.9em; color: var(--text-light); max-height: 100px; overflow-y: auto;">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -382,9 +382,11 @@
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-                    <label id="lblBedLeveling" style="display: none;"><input type="checkbox" name="bed_leveling" checked> Bed Leveling</label>
+                    <label id="lblBedLeveling" style="display: none;"><input type="checkbox" name="bed_leveling"
+                            checked> Bed Leveling</label>
                     <label><input type="checkbox" name="flow_calibration"> Flow Calibration</label>
-                    <label id="lblTimelapse" style="display: none;"><input type="checkbox" name="timelapse"> Timelapse</label>
+                    <label id="lblTimelapse" style="display: none;"><input type="checkbox" name="timelapse">
+                        Timelapse</label>
                     <label><input type="checkbox" name="use_ams" id="chkUseAMS"> Use AMS</label>
                     <label><input type="checkbox" name="vibration_calibration" checked> Vibration Calibration</label>
                     <label><input type="checkbox" name="layer_inspection"> Layer Inspect</label>
@@ -520,13 +522,13 @@
 
         function updatePrintDialogFeatures(capabilities) {
             if (!capabilities) return;
-            
+
             // Show/hide Bed Leveling based on printer capability
             const lblBedLeveling = document.getElementById('lblBedLeveling');
             if (lblBedLeveling) {
                 lblBedLeveling.style.display = capabilities.has_bed_leveling ? 'block' : 'none';
             }
-            
+
             // Show/hide Timelapse based on printer capability
             const lblTimelapse = document.getElementById('lblTimelapse');
             if (lblTimelapse) {
@@ -616,7 +618,7 @@
                 .then(response => response.json())
                 .then(data => {
                     latestStatus = data; // Store for other functions
-                    
+
                     // Update print dialog features if capabilities are available
                     if (data.capabilities) {
                         updatePrintDialogFeatures(data.capabilities);
