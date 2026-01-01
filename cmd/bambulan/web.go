@@ -496,6 +496,13 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	// If we transitioned from an active state to a terminal state, clear metadata
 	if activeStates[previousState] && terminalStates[currentState] {
 		slog.Debug("Print state transition detected, clearing metadata", "from", previousState, "to", currentState)
+
+		// Clear cache entry if we know which file it was
+		if session.CurrentMetadataFilename != "" {
+			delete(session.MetadataCache, session.CurrentMetadataFilename)
+			slog.Debug("Cleared metadata cache entry", "file", session.CurrentMetadataFilename)
+		}
+
 		session.CurrentMetadata = nil
 		session.CurrentMetadataFilename = ""
 	}
@@ -550,8 +557,9 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 				session.CurrentMetadata = foundMD
 				session.CurrentMetadataFilename = foundFilename
 			} else if isActive {
-				// Trigger fetch if not found and looks like a 3mf/gcode file
-				if strings.HasSuffix(strings.ToLower(activeFile), ".3mf") || strings.HasSuffix(strings.ToLower(activeFile), ".gcode.3mf") {
+				// Trigger fetch if not found and looks like a 3mf/gcode file OR has no extension
+				lower := strings.ToLower(activeFile)
+				if strings.HasSuffix(lower, ".3mf") || strings.HasSuffix(lower, ".gcode.3mf") || filepath.Ext(activeFile) == "" {
 					// We don't want to spam fetch, so ideally valid check done inside fetchMetadataAsync
 					// Must run in goroutine to avoid deadlock (fetchMetadataAsync needs Lock, we hold RLock)
 					go s.fetchMetadataAsync(session, activeFile)
@@ -1343,11 +1351,33 @@ func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string)
 
 	// Fallback to original filename
 	tmpFile, size, err := s.downloadToTemp(session, filename)
-	if err != nil {
-		slog.Warn("Failed to download metadata", "file", filename, "error", err)
-		return nil, 0, "", err
+	if err == nil {
+		return tmpFile, size, filename, nil
 	}
-	return tmpFile, size, filename, nil
+	slog.Warn("Failed to download metadata with original filename", "file", filename, "error", err)
+
+	// If original failed and had no extension, try appending extensions
+	if filepath.Ext(filename) == "" {
+		// Try .gcode.3mf first (most likely for print jobs)
+		withGcodeExt := filename + ".gcode.3mf"
+		slog.Debug("Attempting to download with .gcode.3mf appended", "original", filename, "try", withGcodeExt)
+		t, sz, err := s.downloadToTemp(session, withGcodeExt)
+		if err == nil {
+			return t, sz, withGcodeExt, nil
+		}
+		slog.Warn("Failed to download with .gcode.3mf appended", "file", withGcodeExt, "error", err)
+
+		// Try .3mf second
+		withExt := filename + ".3mf"
+		slog.Debug("Attempting to download with .3mf appended", "original", filename, "try", withExt)
+		t, sz, err = s.downloadToTemp(session, withExt)
+		if err == nil {
+			return t, sz, withExt, nil
+		}
+		slog.Warn("Failed to download with .3mf appended", "file", withExt, "error", err)
+	}
+
+	return nil, 0, "", err
 }
 
 func (s *WebServer) downloadToTemp(session *Session, target string) (*os.File, int64, error) {
