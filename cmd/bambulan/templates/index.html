@@ -93,7 +93,7 @@
                         style="display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-light); margin-top: 5px;">
                         <span>Layer: <span id="layer_num">--</span> / <span id="total_layer">--</span></span>
                         <div style="text-align: right;">
-                            <div>Remaining: <span id="remaining">--</span> min</div>
+                            <div>Remaining: <span id="remaining">--</span></div>
                             <div style="font-size: 0.85em; margin-top: 2px;">ETA: <span id="eta">--:--</span></div>
                         </div>
                     </div>
@@ -505,6 +505,17 @@
             return Math.round((v / 15) * 100);
         }
 
+        function formatRemainingTime(minutes) {
+            if (minutes === undefined || minutes === null || minutes <= 0) return "--";
+            const mins = Math.round(minutes);
+            if (mins >= 60) {
+                const hours = Math.floor(mins / 60);
+                const remainingMins = mins % 60;
+                return `${hours} h ${remainingMins} m`;
+            }
+            return `${mins} m`;
+        }
+
         function formatColor(hex) {
             if (!hex || hex.length < 6) return "#cccccc";
             return "#" + hex.substring(0, 6);
@@ -708,9 +719,7 @@
                             if (cardMeta) cardMeta.style.display = 'block';
                         } else {
                             // Hide if no metadata available and not downloading
-                            if (cardMeta && !isActive && p.gcode_state !== "FINISH" && cardMeta.style.display !== 'none') {
-                                cardMeta.style.display = 'none';
-                            }
+                            if (cardMeta) cardMeta.style.display = 'none';
                         }
 
                         if (data.metadata) { // Check if valid metadata
@@ -763,7 +772,7 @@
                         const percent = isActive ? (p.mc_percent || 0) : 0;
                         safeSetText('progress', isActive ? percent : "--");
                         safeSetStyleLocal('progress_bar', 'width', percent + "%");
-                        safeSetText('remaining', isActive ? (p.mc_remaining_time || 0) : "--");
+                        safeSetText('remaining', isActive ? formatRemainingTime(p.mc_remaining_time) : "--");
 
                         // Calculate ETA
                         let etaText = "--:--";
