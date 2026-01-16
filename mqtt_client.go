@@ -1,6 +1,7 @@
 package bambulan
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+	mq "github.com/gonzalop/mq"
 )
 
 const (
@@ -29,7 +30,7 @@ type MQTTClient struct {
 	// OnUpdate is called whenever a new status report is received from the printer.
 	OnUpdate func(*PrinterStatus)
 
-	client mqtt.Client
+	client *mq.Client
 	status *PrinterStatus
 	seq    atomic.Int64
 }
@@ -65,24 +66,27 @@ func (m *MQTTClient) getNextSequenceID() string {
 
 // Start connects to the MQTT broker and subscribes to report topics.
 func (m *MQTTClient) Start() error {
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(fmt.Sprintf("tcps://%s:8883", m.Hostname))
-	opts.SetUsername("bblp")
-	opts.SetPassword(m.AccessCode)
-	opts.SetClientID(fmt.Sprintf("bambu-go-%s", m.Serial))
-	opts.SetTLSConfig(&tls.Config{
-		// Bambu Lab printers use self-signed certificates for their MQTT broker.
-		InsecureSkipVerify: true,
-	})
-	opts.SetAutoReconnect(true)
-	opts.SetKeepAlive(10 * time.Second)
-	opts.SetPingTimeout(5 * time.Second)
-	opts.SetOnConnectHandler(m.onConnect)
-	opts.SetDefaultPublishHandler(m.onMessage)
+	server := fmt.Sprintf("tcps://%s:8883", m.Hostname)
+	opts := []mq.Option{
+		mq.WithProtocolVersion(mq.ProtocolV311),
+		mq.WithClientID(fmt.Sprintf("bambu-go-%s", m.Serial)),
+		mq.WithCredentials("bblp", m.AccessCode),
+		mq.WithTLS(&tls.Config{
+			// Bambu Lab printers use self-signed certificates for their MQTT broker.
+			InsecureSkipVerify: true,
+		}),
+		mq.WithAutoReconnect(true),
+		mq.WithKeepAlive(10 * time.Second),
+		mq.WithConnectTimeout(5 * time.Second),
+		mq.WithOnConnect(m.onConnect),
+		mq.WithLogger(slog.Default()),
+		mq.WithOnConnectionLost(m.onConnectionLost),
+	}
 
-	m.client = mqtt.NewClient(opts)
-	if token := m.client.Connect(); token.Wait() && token.Error() != nil {
-		return token.Error()
+	var err error
+	m.client, err = mq.Dial(server, opts...)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -91,13 +95,21 @@ func (m *MQTTClient) Start() error {
 // Stop disconnects from the MQTT broker.
 func (m *MQTTClient) Stop() {
 	if m.client != nil && m.client.IsConnected() {
-		m.client.Disconnect(250)
+		_ = m.client.Disconnect(context.Background())
 	}
 }
 
-func (m *MQTTClient) onConnect(client mqtt.Client) {
+func (m *MQTTClient) onConnectionLost(client *mq.Client, err error) {
+	slog.Warn("Connection lost", "error", err)
+}
+
+func (m *MQTTClient) onConnect(client *mq.Client) {
+	slog.Warn("Connection established")
 	topic := fmt.Sprintf("device/%s/report", m.Serial)
-	if token := client.Subscribe(topic, BambuQoS, m.onMessage); token.Wait() && token.Error() != nil {
+	token := client.Subscribe(topic, BambuQoS, m.onMessage)
+	if err := token.Wait(context.Background()); err != nil {
+		slog.Error("Error subscribing to topic", "topic", topic, "error", err)
+	} else if token.Error() != nil {
 		slog.Error("Error subscribing to topic", "topic", topic, "error", token.Error())
 	} else {
 		slog.Debug("Subscribed to topic", "topic", topic)
@@ -115,10 +127,10 @@ func (m *MQTTClient) onConnect(client mqtt.Client) {
 	}
 }
 
-func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
+func (m *MQTTClient) onMessage(client *mq.Client, msg mq.Message) {
 	var partial bambuMessage
 	// Unmarshal wrapper first
-	if err := json.Unmarshal(msg.Payload(), &partial); err != nil {
+	if err := json.Unmarshal(msg.Payload, &partial); err != nil {
 		slog.Error("Error unmarshalling message wrapper", "error", err)
 		return
 	}
@@ -131,7 +143,7 @@ func (m *MQTTClient) onMessage(client mqtt.Client, msg mqtt.Message) {
 	// 2. Unmarshal that raw JSON into m.status
 
 	var rawObj map[string]json.RawMessage
-	if err := json.Unmarshal(msg.Payload(), &rawObj); err != nil {
+	if err := json.Unmarshal(msg.Payload, &rawObj); err != nil {
 		return
 	}
 
@@ -179,8 +191,11 @@ func (m *MQTTClient) Publish(command any) error {
 
 	// Use QoS 0 for fire-and-forget sending.
 	// We rely on application-level response (Sequence ID) for confirmation.
-	token := m.client.Publish(topic, BambuQoS, false, payload)
-	token.Wait()
+	token := m.client.Publish(topic, payload, mq.WithQoS(BambuQoS))
+	// Fire and forget usually doesn't need wait, but for consistency and error checking:
+	if err := token.Wait(context.Background()); err != nil {
+		return err
+	}
 	return token.Error()
 }
 
