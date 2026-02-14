@@ -65,8 +65,8 @@ func (c *CameraClient) GetRTSPURL(reportedURL string) string {
 	if reportedURL != "" {
 		// e.g. rtsps://192.168.1.50:322/streaming/live/1
 		// We need to inject "bblp:<code >@" after "rtsps://"
-		if strings.HasPrefix(reportedURL, "rtsps://") {
-			withoutScheme := strings.TrimPrefix(reportedURL, "rtsps://")
+		if after, ok := strings.CutPrefix(reportedURL, "rtsps://"); ok {
+			withoutScheme := after
 			return fmt.Sprintf("rtsps://bblp:%s@%s", c.AccessCode, withoutScheme)
 		}
 		// Fallback for non-standard schemes or if parsing fails.
