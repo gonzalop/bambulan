@@ -14,6 +14,7 @@ import (
 	mq "github.com/gonzalop/mq"
 )
 
+// BambuQoS is the Quality of Service level used for Bambu Lab MQTT communication.
 const (
 	BambuQoS = 0 // Anything else either blocks (for subscriptions) or is ignored (for publications).
 )
@@ -99,7 +100,7 @@ func (m *MQTTClient) Stop() {
 	}
 }
 
-func (m *MQTTClient) onConnectionLost(client *mq.Client, err error) {
+func (m *MQTTClient) onConnectionLost(_ *mq.Client, err error) {
 	slog.Warn("Connection lost", "error", err)
 }
 
@@ -127,7 +128,7 @@ func (m *MQTTClient) onConnect(client *mq.Client) {
 	}
 }
 
-func (m *MQTTClient) onMessage(client *mq.Client, msg mq.Message) {
+func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 	var partial bambuMessage
 	// Unmarshal wrapper first
 	if err := json.Unmarshal(msg.Payload, &partial); err != nil {
@@ -807,18 +808,18 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 }
 
 func getBedTempLimit(model string) int {
-	cap := GetPrinterCapabilities(model)
-	if cap.MaxBedTemp > 0 {
-		return cap.MaxBedTemp
+	printerCap := GetPrinterCapabilities(model)
+	if printerCap.MaxBedTemp > 0 {
+		return printerCap.MaxBedTemp
 	}
 	// Fallback safe limit
 	return 100
 }
 
 func getNozzleTempLimit(model string) int {
-	cap := GetPrinterCapabilities(model)
-	if cap.MaxNozzleTemp > 0 {
-		return cap.MaxNozzleTemp
+	printerCap := GetPrinterCapabilities(model)
+	if printerCap.MaxNozzleTemp > 0 {
+		return printerCap.MaxNozzleTemp
 	}
 	// Fallback safe limit
 	return 300

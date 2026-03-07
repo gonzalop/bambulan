@@ -188,7 +188,7 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 					marker = "*"
 				}
 
-				if tray.Id == "" {
+				if tray.ID == "" {
 					fmt.Printf(" %sSlot %d: [Empty]\n", marker, j)
 					continue
 				}
@@ -205,7 +205,7 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 					name = tray.TrayType
 				}
 				if name == "" {
-					name = tray.TrayIdName
+					name = tray.TrayIDName
 				}
 				fmt.Printf(" %sSlot %d: %s %s%s\n", marker, j, name, tray.TrayColor, remain)
 			}

@@ -56,8 +56,8 @@ type PrinterCapability struct {
 // capability set was returned.
 func GetPrinterCapabilities(modelID string) PrinterCapability {
 	ensureCapabilitiesLoaded()
-	if cap, ok := printerCapabilitiesMap[modelID]; ok {
-		return cap
+	if capabilities, ok := printerCapabilitiesMap[modelID]; ok {
+		return capabilities
 	}
 	return PrinterCapability{}
 }
