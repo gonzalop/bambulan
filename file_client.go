@@ -274,7 +274,7 @@ func (f *FileClient) Upload(remotePath string, content io.Reader, onProgress fun
 		return err
 	}
 
-	var reader io.Reader = content
+	reader := content
 	if onProgress != nil {
 		// Try to see if we can get the total size
 		var total int64

@@ -9,6 +9,7 @@ type bambuMessage struct {
 	Info  *InfoMessage   `json:"info,omitempty"`
 }
 
+// InfoMessage represents a message containing system information or responses from the printer.
 type InfoMessage struct {
 	Command    string       `json:"command"`
 	SequenceID string       `json:"sequence_id"`
@@ -17,6 +18,7 @@ type InfoMessage struct {
 	Reason     string       `json:"reason"`
 }
 
+// ModuleInfo contains identification and version information for printer components.
 type ModuleInfo struct {
 	Name    string `json:"name"`
 	Project string `json:"project_name"` // e.g. "C11", "C12" (This is often the model!)
@@ -192,9 +194,9 @@ type Online struct {
 
 // VTTray represents a single filament tray in the AMS.
 type VTTray struct {
-	Id            string   `json:"id"`            // Tray ID (0-3)
-	TagUid        string   `json:"tag_uid"`       // RFID Tag UID
-	TrayIdName    string   `json:"tray_id_name"`  // User-assigned name
+	ID            string   `json:"id"`            // Tray ID (0-3)
+	TagUID        string   `json:"tag_uid"`       // RFID Tag UID
+	TrayIDName    string   `json:"tray_id_name"`  // User-assigned name
 	TrayInfoIdx   string   `json:"tray_info_idx"` // Filament profile ID (e.g. "GFA00")
 	TrayType      string   `json:"tray_type"`     // Filament type (e.g. "PLA Basic")
 	TraySubBrands string   `json:"tray_sub_brands"`
@@ -208,7 +210,7 @@ type VTTray struct {
 	NozzleTempMax string   `json:"nozzle_temp_max"`
 	NozzleTempMin string   `json:"nozzle_temp_min"`
 	XcamInfo      string   `json:"xcam_info"`
-	TrayUuid      string   `json:"tray_uuid"`
+	TrayUUID      string   `json:"tray_uuid"`
 	Remain        int      `json:"remain"` // Remaining percentage estimate
 	K             float64  `json:"k"`      // Flow calibration K-factor
 	N             int      `json:"n"`      // Flow calibration N-coefficient
@@ -223,7 +225,7 @@ type VTTray struct {
 type AMSEntry struct {
 	Humidity    string    `json:"humidity"`     // Humidity level (1-5, where 1 is driest)
 	HumidityRaw string    `json:"humidity_raw"` // Raw humidity value (10-100)
-	Id          string    `json:"id"`           // AMS Unit ID (0-3)
+	ID          string    `json:"id"`           // AMS Unit ID (0-3)
 	Temp        string    `json:"temp"`         // Temperature inside AMS
 	Tray        []*VTTray `json:"tray"`         // List of up to 4 trays
 }
