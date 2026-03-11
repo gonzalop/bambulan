@@ -6,7 +6,7 @@ github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
 github.com/gonzalop/ftp v1.5.0 h1:GiAtfuTZQV0BOs7RJq7AJtwwftQewQi4uGcLMZw+tdA=
 github.com/gonzalop/ftp v1.5.0/go.mod h1:izBQtKKPgdMCIKmaa+dnqWEYThHRME8rowu+Bcq3GW8=
-github.com/gonzalop/mq v0.9.4 h1:j01qED/6shLmgtBKL3cLDyfxLtQbciVV/933BxG5oOk=
-github.com/gonzalop/mq v0.9.4/go.mod h1:chaGtxnueekistsTKhDnLOoNdJPKEI6vadlUBRQS2ok=
+github.com/gonzalop/mq v0.9.5 h1:GtEc/D8/D7RM0zzE9bEtNfb1Y/GjM0w9T6VNkfgPj94=
+github.com/gonzalop/mq v0.9.5/go.mod h1:chaGtxnueekistsTKhDnLOoNdJPKEI6vadlUBRQS2ok=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
