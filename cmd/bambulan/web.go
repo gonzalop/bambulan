@@ -129,6 +129,7 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/logout", s.handleLogout)
 	http.HandleFunc("/style.css", s.handleStyle)
 	http.HandleFunc("/api/status", s.handleAPIStatus)
+	http.HandleFunc("/api/events", s.handleAPIEvents)
 	http.HandleFunc("/api/control", s.handleAPIControl)
 	http.HandleFunc("/api/files", s.handleAPIFiles)
 	http.HandleFunc("/api/download", s.handleAPIDownload)
@@ -462,73 +463,52 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
-func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getSession(w, r)
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	session.Mu.RLock()
-	defer session.Mu.RUnlock()
-
-	// Create JSON response
-	w.Header().Set("Content-Type", "application/json")
+func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
+	session.Mu.Lock()
 
 	// Detect state transitions and clear metadata when print finishes/stops
 	currentState := session.Status.GcodeState
 	previousState := session.PreviousGcodeState
 
-	// Active states that can have metadata
 	activeStates := map[string]bool{
 		"RUNNING": true,
 		"PAUSE":   true,
 		"PREPARE": true,
 	}
 
-	// Terminal states that should clear metadata
 	terminalStates := map[string]bool{
 		"FINISH": true,
 		"FAILED": true,
 		"IDLE":   true,
 	}
 
-	// If we transitioned from an active state to a terminal state, clear metadata
 	if activeStates[previousState] && terminalStates[currentState] {
 		slog.Debug("Print state transition detected, clearing metadata", "from", previousState, "to", currentState)
-
-		// Clear cache entry if we know which file it was
 		if session.CurrentMetadataFilename != "" {
 			delete(session.MetadataCache, session.CurrentMetadataFilename)
 			slog.Debug("Cleared metadata cache entry", "file", session.CurrentMetadataFilename)
 		}
-
 		session.CurrentMetadata = nil
 		session.CurrentMetadataFilename = ""
 	}
 
-	// Update previous state for next call
 	session.PreviousGcodeState = currentState
 
-	// Determine active file to ensure CurrentMetadata is up to date
 	activeFile := session.Status.SubtaskName
 	if activeFile == "" {
 		activeFile = session.Status.GcodeFile
 	}
-	// Sanitize path (sometimes comes with /)
 	if len(activeFile) > 0 && activeFile[0] == '/' {
 		activeFile = activeFile[1:]
 	}
 
-	// Update CurrentMetadata from cache if needed
+	var fetchFile string
+
 	if activeFile != "" && activeFile != "???" {
-		// Only fetch/update if printer is actually printing/paused OR if we have nothing shown yet.
-		// This prevents overwriting the "Upload Preview" metadata (set during upload) with the old file's metadata
-		// when the printer is still IDLE.
 		allowedStates := map[string]bool{
 			"RUNNING": true,
 			"PAUSE":   true,
-			"PREPARE": true, // Just in case
+			"PREPARE": true,
 		}
 		isActive := allowedStates[session.Status.GcodeState]
 
@@ -560,9 +540,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 				// Trigger fetch if not found and looks like a 3mf/gcode file OR has no extension
 				lower := strings.ToLower(activeFile)
 				if strings.HasSuffix(lower, ".3mf") || strings.HasSuffix(lower, ".gcode.3mf") || filepath.Ext(activeFile) == "" {
-					// We don't want to spam fetch, so ideally valid check done inside fetchMetadataAsync
-					// Must run in goroutine to avoid deadlock (fetchMetadataAsync needs Lock, we hold RLock)
-					go s.fetchMetadataAsync(session, activeFile)
+					fetchFile = activeFile
 				}
 			}
 		}
@@ -588,8 +566,86 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		resp["metadata"] = mdMap
 	}
 
+	session.Mu.Unlock()
+
+	// Must run in goroutine to avoid deadlock, outside of lock
+	if fetchFile != "" {
+		go s.fetchMetadataAsync(session, fetchFile)
+	}
+
+	return resp
+}
+
+func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.getSession(w, r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	resp := s.buildStatusPayload(session)
+
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("JSON encode failed", "error", err)
+	}
+}
+
+func (s *WebServer) sendSSEEvent(w io.Writer, event string, data any) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, string(jsonData))
+	return err
+}
+
+func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.getSession(w, r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	sub := session.Client.Subscribe()
+	defer sub.Cancel()
+
+	// Initial State Hydration
+	resp := s.buildStatusPayload(session)
+	if err := s.sendSSEEvent(w, "status_update", resp); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-sub.C:
+			payload := s.buildStatusPayload(session)
+			if err := s.sendSSEEvent(w, "status_update", payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
 	}
 }
 
