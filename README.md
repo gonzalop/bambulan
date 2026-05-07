@@ -54,19 +54,23 @@ func main() {
     accessCode := "12345678" // Found in printer settings
     serial := "01S00A..."
 
-    // 2. Define a callback for status updates
-    onUpdate := func(status *bambulan.PrinterStatus) {
-        fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n",
-            status.NozzleTemp, status.BedTemp, status.McPercent)
-    }
-
-    // 3. Initialize and Start Client
-    client := bambulan.NewClient(host, accessCode, serial, onUpdate)
-
+    // 2. Initialize and Start Client
+    client := bambulan.NewClient(host, accessCode, serial)
     if err := client.Start(); err != nil {
         log.Fatalf("Failed to connect: %v", err)
     }
     defer client.Stop()
+
+    // 3. Subscribe to updates
+    sub := client.Subscribe()
+    defer sub.Cancel()
+
+    go func() {
+        for status := range sub.C {
+            fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n",
+                status.NozzleTemp, status.BedTemp, status.McPercent)
+        }
+    }()
 
     // Keep running...
     select {}

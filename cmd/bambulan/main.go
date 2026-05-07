@@ -58,17 +58,20 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	// Channel to signal that we received at least one update
 	updateReceived := make(chan struct{}, 1)
 
-	// For status, we update the callback to print
-	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
-		if c.Watch {
-			c.printStatus(client, status)
-		}
+	sub := client.Subscribe()
+	defer sub.Cancel()
 
-		select {
-		case updateReceived <- struct{}{}:
-		default:
+	go func() {
+		for status := range sub.C {
+			if c.Watch {
+				c.printStatus(client, status)
+			}
+			select {
+			case updateReceived <- struct{}{}:
+			default:
+			}
 		}
-	}
+	}()
 
 	if err := client.Start(); err != nil {
 		return err
@@ -457,6 +460,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 	// This requires connecting and waiting for the first status update.
 
 	var useAMS bool
+	var sub *bambulan.EventSubscription
 	if c.UseAMS != nil {
 		// User explicitly set it
 		useAMS = *c.UseAMS
@@ -468,12 +472,16 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		// User didn't specify. Auto-detect.
 		fmt.Println("Checking for AMS presence...")
 		statusChan := make(chan *bambulan.PrinterStatus, 1)
-		client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
-			select {
-			case statusChan <- status:
-			default:
+		sub = client.Subscribe()
+
+		go func() {
+			for status := range sub.C {
+				select {
+				case statusChan <- status:
+				default:
+				}
 			}
-		}
+		}()
 
 		if err := client.Start(); err != nil {
 			return err
@@ -493,7 +501,9 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		}
 	}
 	// Stop client callback to avoid noise, though client needs to stay connected
-	client.MQTT.OnUpdate = nil
+	if sub != nil {
+		sub.Cancel()
+	}
 
 	time.Sleep(1 * time.Second)
 
@@ -553,18 +563,9 @@ type SendGCodeCmd struct {
 
 func (c *SendGCodeCmd) Run(ctx *Context) error {
 	client := ctx.Client
-	// Buffer for updates to capture response even if it comes during SendGCode return
-	updates := make(chan *bambulan.PrinterStatus, 100)
-
-	// Override update handler to capture response
-	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
-		statusCopy := *status
-		select {
-		case updates <- &statusCopy:
-		default:
-			// Buffer full, drop update (unlikely with 100 size)
-		}
-	}
+	sub := client.Subscribe()
+	defer sub.Cancel()
+	updates := sub.C
 
 	if err := client.Start(); err != nil {
 		return err
@@ -908,21 +909,25 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 	client := ctx.Client
 	done := make(chan struct{})
 
-	// Override update handler to print JSON and exit
-	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
-		b, err := json.MarshalIndent(status, "", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error marshaling status: %v\n", err)
-			return
+	sub := client.Subscribe()
+	defer sub.Cancel()
+
+	go func() {
+		for status := range sub.C {
+			b, err := json.MarshalIndent(status, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error marshaling status: %v\n", err)
+				return
+			}
+			fmt.Println(string(b))
+			// We only want one dump
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
 		}
-		fmt.Println(string(b))
-		// We only want one dump
-		select {
-		case <-done:
-		default:
-			close(done)
-		}
-	}
+	}()
 
 	if err := client.Start(); err != nil {
 		return err
@@ -1065,17 +1070,9 @@ type AmsFilamentCmd struct {
 
 func (c *AmsFilamentCmd) Run(ctx *Context) error {
 	client := ctx.Client
-	// Buffer for updates to capture response
-	updates := make(chan *bambulan.PrinterStatus, 100)
-
-	// Override update handler to capture response
-	client.MQTT.OnUpdate = func(status *bambulan.PrinterStatus) {
-		statusCopy := *status
-		select {
-		case updates <- &statusCopy:
-		default:
-		}
-	}
+	sub := client.Subscribe()
+	defer sub.Cancel()
+	updates := sub.C
 
 	if err := client.Start(); err != nil {
 		return err
@@ -1289,7 +1286,7 @@ func main() {
 	// We create the client here but don't start it yet.
 	// Individual commands start it if needed.
 	// Status updates are handled by the callback injected in StatusCmd.Run.
-	client := bambulan.NewClient(cli.Host, cli.Code, cli.Serial, func(status *bambulan.PrinterStatus) {})
+	client := bambulan.NewClient(cli.Host, cli.Code, cli.Serial)
 
 	err := ctx.Run(&Context{Client: client})
 	ctx.FatalIfErrorf(err)
