@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sync"
 	"time"
@@ -209,6 +210,63 @@ func (f *ftpReadCloser) Close() error {
 //	})
 func (f *FileClient) DownloadFile(remotePath, localPath string, onProgress func(int64, int64)) error {
 	return f.downloadFileInternal(remotePath, localPath, onProgress)
+}
+
+// DownloadDirectory downloads a remote directory to a local directory.
+//
+// Parameters:
+//   - remoteDir: The remote directory path to download.
+//   - localDir: The local directory path where files should be saved.
+//   - recursive: If true, downloads subdirectories recursively.
+//   - onProgress: An optional callback function `func(filename string, current, total int64)`
+//     that reports progress for each file.
+func (f *FileClient) DownloadDirectory(remoteDir, localDir string, recursive bool, onProgress func(string, int64, int64)) error {
+	// Ensure local directory exists
+	info, err := os.Stat(localDir)
+	if err != nil {
+		return fmt.Errorf("local directory error: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("local path %s is not a directory", localDir)
+	}
+
+	entries, err := f.ListFiles(remoteDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.Name == "." || entry.Name == ".." {
+			continue
+		}
+
+		remotePath := path.Join(remoteDir, entry.Name)
+		localPath := filepath.Join(localDir, entry.Name)
+
+		if entry.Type == "dir" {
+			if recursive {
+				if err := os.MkdirAll(localPath, 0755); err != nil {
+					return err
+				}
+				if err := f.DownloadDirectory(remotePath, localPath, recursive, onProgress); err != nil {
+					return err
+				}
+			}
+		} else {
+			// It's a file
+			var fileProgress func(int64, int64)
+			if onProgress != nil {
+				name := entry.Name
+				fileProgress = func(current, total int64) {
+					onProgress(name, current, total)
+				}
+			}
+			if err := f.DownloadFile(remotePath, localPath, fileProgress); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (f *FileClient) downloadFileInternal(remotePath, localPath string, onProgress func(int64, int64)) error {
