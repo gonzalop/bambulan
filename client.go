@@ -62,3 +62,10 @@ func (c *Client) Stop() {
 	c.Camera.StopStream()
 	_ = c.File.Close()
 }
+
+// Subscribe creates a new subscription to receive real-time printer status updates.
+// The returned EventSubscription contains a channel (C) that will receive updates.
+// Make sure to call Cancel() on the subscription when it's no longer needed to free resources.
+func (c *Client) Subscribe() *EventSubscription {
+	return c.MQTT.Subscribe()
+}
