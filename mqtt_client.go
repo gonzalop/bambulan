@@ -29,8 +29,6 @@ type MQTTClient struct {
 	AccessCode string
 	// Serial is the printer's serial number, used to construct topic strings (device/<serial>/...).
 	Serial string
-	// OnUpdate is called whenever a new status report is received from the printer.
-	OnUpdate func(*PrinterStatus)
 
 	client *mq.Client
 	status *PrinterStatus
@@ -47,14 +45,12 @@ type MQTTClient struct {
 //   - hostname: Printer IP/hostname.
 //   - accessCode: Printer access code (password).
 //   - serial: Printer serial number.
-//   - onUpdate: Callback for status updates.
-func NewMQTTClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus)) *MQTTClient {
+func NewMQTTClient(hostname, accessCode, serial string) *MQTTClient {
 	client := &MQTTClient{
 		Hostname:    hostname,
 		AccessCode:  accessCode,
 		Serial:      serial,
 		status:      &PrinterStatus{},
-		OnUpdate:    onUpdate,
 		subscribers: make(map[int64]chan *PrinterStatus),
 	}
 	// Initialize sequence with timestamp to avoid collisions on restart
@@ -150,11 +146,6 @@ func (m *MQTTClient) unsubscribe(id int64) {
 
 func (m *MQTTClient) broadcastStatus() {
 	statusCopy := *m.status
-
-	if m.OnUpdate != nil {
-		// Invoke callback in a separate goroutine to avoid blocking the broadcast
-		go m.OnUpdate(&statusCopy)
-	}
 
 	m.mu.RLock()
 	defer m.mu.RUnlock()

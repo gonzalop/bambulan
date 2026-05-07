@@ -214,9 +214,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 	if !exists {
 		slog.Debug("Creating new client connection", "host", host, "serial", serial)
 
-		onUpdate := func(status *bambulan.PrinterStatus) {}
-
-		client = bambulan.NewClient(host, code, serial, onUpdate)
+		client = bambulan.NewClient(host, code, serial)
 		if err := client.Start(); err != nil {
 			return nil, err
 		}

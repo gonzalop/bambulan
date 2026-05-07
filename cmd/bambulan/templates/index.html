@@ -606,7 +606,7 @@
             });
         }
 
-        function updateStatus() {
+        function renderStatus(data) {
             // Update Unit UI
             const btnC = document.getElementById('btnUnitC');
             const btnF = document.getElementById('btnUnitF');
@@ -625,10 +625,7 @@
                 el.innerText = "°" + tempUnit;
             });
 
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    latestStatus = data; // Store for other functions
+            latestStatus = data; // Store for other functions
 
                     // Update print dialog features if capabilities are available
                     if (data.capabilities) {
@@ -1098,7 +1095,12 @@
                             }
                         }
                     }
-                })
+        } // end of renderStatus
+
+        function updateStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => renderStatus(data))
                 .catch(err => console.error("Status fetch error:", err));
         }
 
@@ -1456,8 +1458,54 @@
         }
 
 
-        setInterval(updateStatus, 1000);
-        updateStatus();
+        let evtSource = null;
+        let sseFailures = 0;
+        let pollingFallbackTimer = null;
+
+        function initEvents() {
+            if (evtSource) return;
+
+            evtSource = new EventSource('/api/events');
+
+            evtSource.onopen = () => {
+                console.log("SSE connected.");
+                sseFailures = 0;
+                if (pollingFallbackTimer) {
+                    clearInterval(pollingFallbackTimer);
+                    pollingFallbackTimer = null;
+                }
+            };
+
+            evtSource.addEventListener('status_update', (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    renderStatus(data);
+                } catch (err) {
+                    console.error("Failed to parse SSE data", err);
+                }
+            });
+
+            evtSource.onerror = (err) => {
+                console.error("SSE error", err);
+                sseFailures++;
+                if (sseFailures >= 3) {
+                    console.warn("Multiple SSE failures, falling back to polling.");
+                    evtSource.close();
+                    evtSource = null;
+                    if (!pollingFallbackTimer) {
+                        pollingFallbackTimer = setInterval(updateStatus, 5000);
+                    }
+                    // Try to reconnect to SSE eventually
+                    setTimeout(() => {
+                        sseFailures = 0;
+                        initEvents();
+                    }, 30000); // retry SSE after 30s
+                }
+            };
+        }
+
+        initEvents();
+        updateStatus(); // Initial fetch to ensure fast paint
     </script>
 </body>
 

@@ -13,8 +13,6 @@ type Client struct {
 	Camera *CameraClient
 	// File client for FTPS operations.
 	File *FileClient
-	// OnUpdate is a callback invoked whenever a new status message is received from the printer.
-	OnUpdate func(*PrinterStatus)
 }
 
 // NewClient creates a new BambuLAN Client instance.
@@ -33,13 +31,12 @@ type Client struct {
 //	client := bambulan.NewClient("192.168.1.50", "12345678", "01S00A...", func(status *bambulan.PrinterStatus) {
 //	    fmt.Printf("Current nozzle temp: %.1f\n", status.NozzleTemp)
 //	})
-func NewClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus)) *Client {
-	mqttClient := NewMQTTClient(hostname, accessCode, serial, onUpdate) // Pass initial callback
+func NewClient(hostname, accessCode, serial string) *Client {
+	mqttClient := NewMQTTClient(hostname, accessCode, serial)
 	c := &Client{
-		MQTT:     mqttClient,
-		Camera:   NewCameraClient(hostname, accessCode),
-		File:     NewFileClient(hostname, accessCode),
-		OnUpdate: onUpdate,
+		MQTT:   mqttClient,
+		Camera: NewCameraClient(hostname, accessCode),
+		File:   NewFileClient(hostname, accessCode),
 	}
 	return c
 }
