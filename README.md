@@ -2,30 +2,27 @@
 
 # BambuLAN
 
-A Go library for interacting with Bambu Lab 3D printers over the local network (LAN mode).
+**BambuLAN** is a high-performance Go ecosystem for complete, cloud-free management of Bambu Lab 3D printers over the local network (LAN mode).
 
-This library allows you to monitor printer status, control print jobs, view the camera stream, and manage files without relying on the Bambu Lab cloud service.
+It provides a robust developer library, a powerful CLI tool, and a modern, real-time web dashboard—allowing you to monitor status, control hardware, view camera streams, and manage files with total privacy and near-zero latency.
 
 ## Features
 
-- **LAN Control**: Connects directly to the printer's MQTT broker (port 8883).
-- **Status Monitoring**: Receive real-time updates on temperatures, fans, print progress, and more.
-- **Commands**:
-    - Control prints (`print start`, `pause`, `resume`, `stop`, `skip` objects).
-      - Supports printing existing files on printer with `--skip-upload`.
+- **Real-time Monitoring**: Receive updates on temperatures, fans, print progress, and detailed printer states.
+- **Full Printer Control**:
+    - Manage print jobs (`start`, `pause`, `resume`, `stop`, `skip objects`).
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
-    - **Configuration**: Toggle printer options (camera, sound, etc) and hardware settings (nozzle, detector).
-    - **AMS**: Load/Unload filament, control AMS, set filament types and K-values.
-    - **Temperature/Fan**: Control nozzle/bed temperatures and fan speeds.
-    - Control chamber lights.
-    - Send raw G-Code.
-    - Dump raw printer info (JSON).
-- **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
-- **File Management**: Full FTPS support via `bambulan file` command.
-    - List (`ls`), Download (`download`), Download Directory (`downloaddir`), Upload.
-    - Create directories (`mkdir`).
-    - Move/Rename files (`mv`).
-    - Remove files or directories recursively (`rm -r`).
+    - Control temperatures (nozzle/bed) and fan speeds (part/aux/chamber).
+    - Toggle hardware options (lights, sound, camera, filament tangle detection).
+- **Advanced AMS Support**:
+    - Load/Unload filament and control AMS units.
+    - Configure filament types, colors, and linear advance (K-values).
+    - Monitor AMS humidity and tray status.
+- **3MF Project Inspection**: Deep extraction of metadata, plate info, thumbnails, and filament requirements via the `bambu3mf` package.
+- **Filament Management**: Resolve filament inheritance, profiles, and compatibility via the `filament` package.
+- **Hardware Intelligence**: Automatic model detection (X1, P1, A1 series) to enforce hardware-specific safety limits and capabilities.
+- **Camera Streaming**: Access live MJPEG streams and capture static frames.
+- **File Management**: Full FTPS support for listing, downloading, uploading, and managing files/directories on the SD card.
 
 A CLI built using this library, `bambulan`, also acts as a web server providing a dashboard to monitor and control the printer.
 

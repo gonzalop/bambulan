@@ -80,7 +80,8 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 When using HTTPS, cookies are automatically marked with the `Secure` flag for enhanced security.
 
 **Features:**
-- **Dashboard**: Real-time status monitoring.
+- **Dashboard**: Real-time status monitoring with high-performance Server-Sent Events (SSE).
+- **Delta Updates**: Intelligent status synchronization that only sends changed fields to reduce bandwidth.
 - **Login**: Secure access with printer credentials.
 - **File Manager**: Browse files, download, and print directly.
 - **Print Start**: Upload and start prints with options.
