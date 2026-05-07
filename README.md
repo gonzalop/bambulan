@@ -24,17 +24,47 @@ It provides a robust developer library, a powerful CLI tool, and a modern, real-
 - **Camera Streaming**: Access live MJPEG streams and capture static frames.
 - **File Management**: Full FTPS support for listing, downloading, uploading, and managing files/directories on the SD card.
 
-A CLI built using this library, `bambulan`, also acts as a web server providing a dashboard to monitor and control the printer.
+## Usage
 
-## Installation
+BambuLAN can be used as a standalone CLI tool/web dashboard or as a library for your own Go projects.
 
+### CLI Tool & Web Dashboard
+
+The easiest way to get started is with the included `bambulan` tool. It provides a full-featured CLI and a real-time web interface.
+
+![BambuLAN Dashboard](assets/dashboard.png)
+
+**Install:**
+```bash
+go install github.com/gonzalop/bambulan/cmd/bambulan@latest
+```
+
+**Run:**
+```bash
+# Option 1: Using command-line flags
+bambulan web --host <printer-ip> --code <access-code> --serial <serial>
+
+# Option 2: Using environment variables (cleaner)
+export BAMBULAN_HOST="192.168.1.50"
+export BAMBULAN_CODE="12345678"
+export BAMBULAN_SERIAL="01S00A..."
+bambulan web
+```
+
+See the [CLI Documentation](cmd/bambulan/README.md) for detailed usage and configuration options.
+
+---
+
+### Go Library
+
+To use BambuLAN in your own Go applications:
+
+**Install:**
 ```bash
 go get github.com/gonzalop/bambulan
 ```
 
-## Usage
-
-### Connecting and Monitoring
+**Connecting and Monitoring:**
 
 ```go
 package main
@@ -74,7 +104,7 @@ func main() {
 }
 ```
 
-### Sending Commands
+**Sending Commands:**
 
 ```go
 // Turn light on
@@ -100,7 +130,7 @@ opts := bambulan.PrintOptions{
 client.MQTT.StartPrint("my-model.gcode.3mf", opts)
 ```
 
-### Camera Capture
+**Camera Capture:**
 
 ```go
 // Capture a single JPEG frame
@@ -111,7 +141,7 @@ if err != nil {
 // imgData contains the JPEG bytes
 ```
 
-### File Management
+**File Management:**
 
 ```go
 // List .3mf files
@@ -132,14 +162,6 @@ onProgress := func(current, total int64) {
 }
 err := client.File.UploadFile("./model.gcode.3mf", "/model.gcode.3mf", onProgress)
 ```
-
-## CLI Tool / Web Interface
-
-The included `cmd/bambulan` builds into a powerful CLI tool named `bambulan`, which also includes a web interface.
-
-![BambuLAN Dashboard](assets/dashboard.png)
-
-See [cmd/bambulan/README.md](cmd/bambulan/README.md) for full usage instructions.
 
 ## Acknowledgements
 
