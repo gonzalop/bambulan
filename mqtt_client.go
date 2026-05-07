@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +35,10 @@ type MQTTClient struct {
 	client *mq.Client
 	status *PrinterStatus
 	seq    atomic.Int64
+
+	mu          sync.RWMutex
+	subscribers map[int64]chan *PrinterStatus
+	nextSubID   int64
 }
 
 // NewMQTTClient creates a new MQTTClient.
@@ -45,11 +50,12 @@ type MQTTClient struct {
 //   - onUpdate: Callback for status updates.
 func NewMQTTClient(hostname, accessCode, serial string, onUpdate func(*PrinterStatus)) *MQTTClient {
 	client := &MQTTClient{
-		Hostname:   hostname,
-		AccessCode: accessCode,
-		Serial:     serial,
-		status:     &PrinterStatus{},
-		OnUpdate:   onUpdate,
+		Hostname:    hostname,
+		AccessCode:  accessCode,
+		Serial:      serial,
+		status:      &PrinterStatus{},
+		OnUpdate:    onUpdate,
+		subscribers: make(map[int64]chan *PrinterStatus),
 	}
 	// Initialize sequence with timestamp to avoid collisions on restart
 	client.seq.Store(time.Now().Unix())
@@ -97,6 +103,68 @@ func (m *MQTTClient) Start() error {
 func (m *MQTTClient) Stop() {
 	if m.client != nil && m.client.IsConnected() {
 		_ = m.client.Disconnect(context.Background())
+	}
+}
+
+// EventSubscription represents a subscription to printer status updates.
+type EventSubscription struct {
+	C      <-chan *PrinterStatus
+	id     int64
+	client *MQTTClient
+}
+
+// Cancel unsubscribes from the updates and cleans up resources.
+func (s *EventSubscription) Cancel() {
+	s.client.unsubscribe(s.id)
+}
+
+// Subscribe creates a new subscription for printer status updates.
+// The returned EventSubscription contains a channel that will receive updates.
+// Call Cancel() on the subscription when done to free resources.
+func (m *MQTTClient) Subscribe() *EventSubscription {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	id := m.nextSubID
+	m.nextSubID++
+
+	ch := make(chan *PrinterStatus)
+	m.subscribers[id] = ch
+
+	return &EventSubscription{
+		C:      ch,
+		id:     id,
+		client: m,
+	}
+}
+
+func (m *MQTTClient) unsubscribe(id int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if ch, ok := m.subscribers[id]; ok {
+		delete(m.subscribers, id)
+		close(ch)
+	}
+}
+
+func (m *MQTTClient) broadcastStatus() {
+	statusCopy := *m.status
+
+	if m.OnUpdate != nil {
+		// Invoke callback in a separate goroutine to avoid blocking the broadcast
+		go m.OnUpdate(&statusCopy)
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, ch := range m.subscribers {
+		select {
+		case ch <- &statusCopy:
+		default:
+			// Client is too slow, drop the update. They will get the next one.
+		}
 	}
 }
 
@@ -157,12 +225,7 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 		m.status.PrintStageDesc = m.status.GetPrintStageName()
 
 		slog.Debug("Message received", "raw", printRaw)
-		if m.OnUpdate != nil {
-			// Invoke callback in a separate goroutine to avoid blocking the MQTT read loop.
-			// Pass a shallow copy to minimize race conditions on immediate fields (like SequenceID/Result).
-			statusCopy := *m.status
-			go m.OnUpdate(&statusCopy)
-		}
+		m.broadcastStatus()
 	}
 
 	if infoRaw, ok := rawObj["info"]; ok {
@@ -175,10 +238,7 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 		m.processInfo(&info)
 
 		// We might want to notify update here too, so the UI gets the new limit immediately
-		if m.OnUpdate != nil {
-			statusCopy := *m.status
-			go m.OnUpdate(&statusCopy)
-		}
+		m.broadcastStatus()
 	}
 }
 
