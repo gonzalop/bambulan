@@ -710,12 +710,13 @@ func (c *FanCmd) Run(ctx *Context) error {
 }
 
 type FileCmd struct {
-	Ls       FileLsCmd       `cmd:"" help:"List files"`
-	Download FileDownloadCmd `cmd:"" help:"Download file"`
-	Upload   FileUploadCmd   `cmd:"" help:"Upload file"`
-	Rm       FileRmCmd       `cmd:"" help:"Remove file or directory"`
-	Mkdir    FileMkdirCmd    `cmd:"" help:"Make directory"`
-	Mv       FileMvCmd       `cmd:"" help:"Move/Rename file"`
+	Ls          FileLsCmd          `cmd:"" help:"List files"`
+	Download    FileDownloadCmd    `cmd:"" help:"Download file"`
+	DownloadDir FileDownloadDirCmd `cmd:"" help:"Download directory"`
+	Upload      FileUploadCmd      `cmd:"" help:"Upload file"`
+	Rm          FileRmCmd          `cmd:"" help:"Remove file or directory"`
+	Mkdir       FileMkdirCmd       `cmd:"" help:"Make directory"`
+	Mv          FileMvCmd          `cmd:"" help:"Move/Rename file"`
 }
 
 type FileLsCmd struct {
@@ -773,6 +774,33 @@ func (c *FileDownloadCmd) Run(ctx *Context) error {
 	}
 
 	if err := ctx.Client.File.DownloadFile(c.Remote, local, progressFunc); err != nil {
+		fmt.Println()
+		return err
+	}
+	fmt.Printf("\nDownloaded in %v\n", time.Since(start))
+	return nil
+}
+
+type FileDownloadDirCmd struct {
+	Remote    string `arg:"" help:"Remote directory path"`
+	Local     string `arg:"" help:"Local destination directory path"`
+	Recursive bool   `help:"Recursive download" short:"r"`
+}
+
+func (c *FileDownloadDirCmd) Run(ctx *Context) error {
+	fmt.Printf("Downloading directory %s to %s (recursive: %v)...\n", c.Remote, c.Local, c.Recursive)
+	start := time.Now()
+
+	progressFunc := func(filename string, current, total int64) {
+		if total > 0 {
+			percent := float64(current) / float64(total) * 100
+			fmt.Printf("\rDownload [%s]: %.1f%% (%d/%d bytes)          ", filename, percent, current, total)
+		} else {
+			fmt.Printf("\rDownload [%s]: %d bytes (unknown total)          ", filename, current)
+		}
+	}
+
+	if err := ctx.Client.File.DownloadDirectory(c.Remote, c.Local, c.Recursive, progressFunc); err != nil {
 		fmt.Println()
 		return err
 	}

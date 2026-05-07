@@ -22,7 +22,7 @@ This library allows you to monitor printer status, control print jobs, view the 
     - Dump raw printer info (JSON).
 - **Camera Streaming**: Connect to the printer's camera stream (MJPEG over TCP/TLS port 6000).
 - **File Management**: Full FTPS support via `bambulan file` command.
-    - List (`ls`), Download (`download`), Upload.
+    - List (`ls`), Download (`download`), Download Directory (`downloaddir`), Upload.
     - Create directories (`mkdir`).
     - Move/Rename files (`mv`).
     - Remove files or directories recursively (`rm -r`).
@@ -121,6 +121,9 @@ if err != nil {
 
 // Download a file
 err := client.File.DownloadFile("/timelapse/video.mp4", "./video.mp4", nil)
+
+// Download a directory recursively
+err := client.File.DownloadDirectory("/timelapse", "./backups", true, nil)
 
 // Upload a file with progress
 onProgress := func(current, total int64) {
