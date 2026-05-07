@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -589,6 +590,33 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func computeDelta(oldMap, newMap map[string]any) map[string]any {
+	delta := make(map[string]any)
+	for k, v := range newMap {
+		oldV, ok := oldMap[k]
+		if !ok {
+			delta[k] = v
+			continue
+		}
+
+		// If both are maps, recurse
+		newMapV, newIsMap := v.(map[string]any)
+		oldMapV, oldIsMap := oldV.(map[string]any)
+
+		if newIsMap && oldIsMap {
+			subDelta := computeDelta(oldMapV, newMapV)
+			if len(subDelta) > 0 {
+				delta[k] = subDelta
+			}
+			continue
+		}
+
+		if !reflect.DeepEqual(oldV, v) {
+			delta[k] = v
+		}
+	}
+	return delta
+}
 func (s *WebServer) sendSSEEvent(w io.Writer, event string, data any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -620,6 +648,8 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Initial State Hydration
 	resp := s.buildStatusPayload(session)
+	lastJSON, _ := json.Marshal(resp)
+
 	if err := s.sendSSEEvent(w, "status_update", resp); err != nil {
 		return
 	}
@@ -639,10 +669,24 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-sub.C:
 			payload := s.buildStatusPayload(session)
-			if err := s.sendSSEEvent(w, "status_update", payload); err != nil {
-				return
+			newJSON, _ := json.Marshal(payload)
+
+			if string(newJSON) == string(lastJSON) {
+				continue
 			}
-			flusher.Flush()
+
+			var oldMap, newMap map[string]any
+			json.Unmarshal(lastJSON, &oldMap)
+			json.Unmarshal(newJSON, &newMap)
+
+			delta := computeDelta(oldMap, newMap)
+			if len(delta) > 0 {
+				if err := s.sendSSEEvent(w, "status_update", delta); err != nil {
+					return
+				}
+				flusher.Flush()
+				lastJSON = newJSON
+			}
 		}
 	}
 }
