@@ -19,11 +19,19 @@ Example usage:
 		accessCode := "your_access_code" // Found in printer settings
 		serial := "your_printer_serial" // Printer's serial number
 
-		// Initialize the client with a status update callback
-		client := bambulan.NewClient(hostname, accessCode, serial, func(status *bambulan.PrinterStatus) {
-			fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n",
-				status.NozzleTemp, status.BedTemp, status.McPercent)
-		})
+		// Initialize the client
+		client := bambulan.NewClient(hostname, accessCode, serial)
+
+		// Subscribe to status updates
+		sub := client.Subscribe()
+		defer sub.Cancel()
+
+		go func() {
+			for status := range sub.C {
+				fmt.Printf("Nozzle: %.1f°C | Bed: %.1f°C | Progress: %d%%\n",
+					status.NozzleTemp, status.BedTemp, status.McPercent)
+			}
+		}()
 
 		// Start the client (connects to MQTT broker)
 		if err := client.Start(); err != nil {
