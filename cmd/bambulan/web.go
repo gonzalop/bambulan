@@ -1882,5 +1882,71 @@ func (s *WebServer) handleOctoPrinter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebServer) handleOctoFiles(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented in Phase 3", http.StatusNotImplemented)
+	session, ok := s.getOctoSession()
+	if !ok {
+		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// OctoPrint uses 100MB+ for large G-code files
+	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
+	if err := r.ParseMultipartForm(500 << 20); err != nil {
+		http.Error(w, "File too large or invalid form", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Missing file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// OctoPrint slicers often use / as the target, but we should ensure it goes to root
+	filename := header.Filename
+	targetPath := path.Clean("/" + filename)
+
+	// Stream directly to printer
+	slog.Info("OctoPrint upload starting", "filename", filename, "size", header.Size)
+	err = session.Client.File.Upload(targetPath, file, nil)
+	if err != nil {
+		slog.Error("OctoPrint upload failed", "error", err)
+		http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Check if we should print immediately
+	shouldPrint := r.FormValue("print") == "true"
+	if shouldPrint {
+		slog.Info("OctoPrint initiating print", "filename", filename)
+		// Use default print options for now (bed leveling on, etc.)
+		opts := bambulan.PrintOptions{
+			BedType:              "auto",
+			BedLeveling:          true,
+			FlowCalibration:      false,
+			VibrationCalibration: true,
+		}
+		_, err = session.Client.MQTT.StartPrint(filename, opts)
+		if err != nil {
+			slog.Error("OctoPrint auto-print failed", "error", err)
+			// Don't fail the whole request if upload succeeded but print failed
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{
+		"files": map[string]any{
+			"local": map[string]any{
+				"name": filename,
+				"path": filename,
+			},
+		},
+		"done": true,
+	})
 }
