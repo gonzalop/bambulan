@@ -35,6 +35,8 @@ var templateFS embed.FS
 type WebCmd struct {
 	Bind        string   `help:"Address to bind to" default:"127.0.0.1:8080"`
 	Secret      string   `help:"Secret for session encryption (optional, random default)"`
+	OctoPrint   bool     `help:"Enable OctoPrint compatibility layer (slicer integration)"`
+	APIKey      string   `help:"API Key for Slicer integration (optional, random default)"`
 	CertFile    string   `help:"TLS certificate file (enables HTTPS)"`
 	KeyFile     string   `help:"TLS private key file (enables HTTPS)"`
 	MaxFileSize ByteSize `help:"Maximum allowed size for 3MF file entries" default:"50MB"`
@@ -80,6 +82,8 @@ type WebServer struct {
 	ActiveClients map[string]*bambulan.Client
 	ClientsMu     sync.Mutex
 	Key           []byte
+	EnableOcto    bool
+	OctoApiKey    string
 	UseTLS        bool
 	CertFile      string
 	KeyFile       string
@@ -118,9 +122,27 @@ func (c *WebCmd) Run(ctx *Context) error {
 	keyHash := sha256.Sum256([]byte(secret))
 	key := keyHash[:]
 
+	var apiKey string
+	if c.OctoPrint {
+		apiKey = c.APIKey
+		if apiKey == "" {
+			// Generate 16 bytes of random data for API key
+			b := make([]byte, 16)
+			if _, err := rand.Read(b); err != nil {
+				return fmt.Errorf("failed to generate random API key: %w", err)
+			}
+			apiKey = hex.EncodeToString(b)
+			fmt.Printf("OctoPrint compatibility enabled. Generated API key:\n\n\t%s\n\n", apiKey)
+			fmt.Println("Use this key in your slicer (OrcaSlicer/PrusaSlicer) with type 'OctoPrint'.")
+			fmt.Printf("\tbambulan web --octoprint --api-key \"%s\"\n\n", apiKey)
+		}
+	}
+
 	s := NewWebServer()
 	s.BindAddr = c.Bind
 	s.Key = key
+	s.EnableOcto = c.OctoPrint
+	s.OctoApiKey = apiKey
 	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
 	s.CertFile = c.CertFile
 	s.KeyFile = c.KeyFile
@@ -147,6 +169,14 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/filament", s.handleAPIFilament)
 	http.HandleFunc("/api/thumbnail", s.handleAPIThumbnail)
 	http.HandleFunc("/camera", s.handleCamera)
+
+	// OctoPrint API Compatibility (Phase 1 placeholders)
+	if s.EnableOcto {
+		http.HandleFunc("/api/version", s.octoPrintAuth(s.handleOctoVersion))
+		http.HandleFunc("/api/connection", s.octoPrintAuth(s.handleOctoConnection))
+		http.HandleFunc("/api/printer", s.octoPrintAuth(s.handleOctoPrinter))
+		http.HandleFunc("/api/files/local", s.octoPrintAuth(s.handleOctoFiles))
+	}
 
 	if s.UseTLS {
 		slog.Info("Starting web server with TLS", "addr", s.BindAddr, "cert", s.CertFile)
@@ -1353,6 +1383,34 @@ func (s *WebServer) getSession(w http.ResponseWriter, r *http.Request) (*Session
 	return s.tryRestoreSession(w, r)
 }
 
+func (s *WebServer) octoPrintAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-Api-Key")
+		if key == "" {
+			key = r.URL.Query().Get("apikey")
+		}
+
+		if s.OctoApiKey == "" || key != s.OctoApiKey {
+			http.Error(w, "Invalid API Key", http.StatusForbidden)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+func (s *WebServer) getOctoSession() (*Session, bool) {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	// Use the first active session available
+	for _, sess := range s.Sessions {
+		if sess.Client != nil {
+			return sess, true
+		}
+	}
+	return nil, false
+}
+
 func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*Session, bool) {
 	cookie, err := r.Cookie("bambulan_auth")
 	if err != nil || cookie.Value == "" {
@@ -1724,4 +1782,33 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// OctoPrint API Compatibility Handlers (Placeholders for Phase 1)
+
+func (s *WebServer) handleOctoVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"api":    "0.1",
+		"server": "1.8.6",
+		"text":   "OctoPrint 1.8.6 (BambuLAN Emulation)",
+	})
+}
+
+func (s *WebServer) handleOctoConnection(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"current": map[string]any{
+			"state": "Operational",
+			"port":  "/dev/bambulan",
+		},
+	})
+}
+
+func (s *WebServer) handleOctoPrinter(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Not implemented in Phase 1", http.StatusNotImplemented)
+}
+
+func (s *WebServer) handleOctoFiles(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Not implemented in Phase 1", http.StatusNotImplemented)
 }
