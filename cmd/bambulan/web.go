@@ -1784,7 +1784,7 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 	w.WriteHeader(http.StatusOK)
 }
 
-// OctoPrint API Compatibility Handlers (Placeholders for Phase 1)
+// OctoPrint API Compatibility Handlers
 
 func (s *WebServer) handleOctoVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -1799,16 +1799,88 @@ func (s *WebServer) handleOctoConnection(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"current": map[string]any{
-			"state": "Operational",
-			"port":  "/dev/bambulan",
+			"state":          "Operational",
+			"port":           "/dev/bambulan",
+			"baudrate":       115200,
+			"printerProfile": "_default",
 		},
 	})
 }
 
 func (s *WebServer) handleOctoPrinter(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented in Phase 1", http.StatusNotImplemented)
+	session, ok := s.getOctoSession()
+	if !ok {
+		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
+		return
+	}
+
+	session.Mu.RLock()
+	st := session.Status
+	session.Mu.RUnlock()
+
+	if st == nil {
+		http.Error(w, "Printer status not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	caps := bambulan.GetPrinterCapabilities(st.DeviceModel)
+
+	// OctoPrint schema mapping
+	temps := map[string]any{
+		"bed": map[string]any{
+			"actual": st.BedTemp,
+			"target": st.BedTargetTemp,
+		},
+	}
+
+	// Tool 0 (Main)
+	temps["tool0"] = map[string]any{
+		"actual": st.NozzleTemp,
+		"target": st.NozzleTargetTemp,
+	}
+
+	// Tool 1+ (if dual extruder)
+	if caps.NumExtruders > 1 {
+		// Note: st.NozzleTemp for others might need to be indexed if we add it to the model later.
+		// For now, we report tool0's data as a placeholder or use the raw map if we have it.
+		// Slicers usually only care about the active tool's temp for the graph.
+		for i := 1; i < caps.NumExtruders; i++ {
+			key := fmt.Sprintf("tool%d", i)
+			// Placeholder for now as PrinterStatus only has one NozzleTemp field currently
+			temps[key] = map[string]any{
+				"actual": 0.0,
+				"target": 0.0,
+			}
+		}
+	}
+
+	// Chamber (if supported)
+	if caps.HasChamberHeater || st.ChamberTemp > 5 {
+		temps["chamber"] = map[string]any{
+			"actual": st.ChamberTemp,
+			"target": st.ChamberTargetTemp,
+		}
+	}
+
+	resp := map[string]any{
+		"temperature": temps,
+		"state": map[string]any{
+			"text": st.GetPrintStageName(),
+			"flags": map[string]bool{
+				"operational":   true,
+				"printing":      st.GcodeState == "RUNNING",
+				"paused":        st.GcodeState == "PAUSE",
+				"error":         st.PrintError != 0,
+				"ready":         st.GcodeState == "IDLE",
+				"closedOrError": false,
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *WebServer) handleOctoFiles(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented in Phase 1", http.StatusNotImplemented)
+	http.Error(w, "Not implemented in Phase 3", http.StatusNotImplemented)
 }
