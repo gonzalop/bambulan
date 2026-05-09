@@ -5,6 +5,12 @@
     <title>BambuLAN Login</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/style.css">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('bambulan_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
 </head>
 
 <body

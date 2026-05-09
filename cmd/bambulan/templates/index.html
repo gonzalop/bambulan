@@ -6,23 +6,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{.CSRFToken}}">
     <link rel="stylesheet" href="/style.css">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('bambulan_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
 </head>
 
 <body>
     <!-- Connection Loading Overlay -->
     <div id="loadingOverlay"
-        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f5f7fa; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s;">
+        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-color); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s;">
         <div style="font-size: 3em; margin-bottom: 20px;">🖨️</div>
-        <h2 style="margin-bottom: 10px; color: #333;">Connecting to Printer...</h2>
-        <div style="color: #666; font-size: 1.1em;" id="loadingStatus">Waiting for device info...</div>
+        <h2 style="margin-bottom: 10px; color: var(--text-color);">Connecting to Printer...</h2>
+        <div style="color: var(--text-light); font-size: 1.1em;" id="loadingStatus">Waiting for device info...</div>
         <div
-            style="margin-top: 20px; width: 200px; height: 4px; background: #e9ecef; border-radius: 2px; overflow: hidden;">
+            style="margin-top: 20px; width: 200px; height: 4px; background: var(--progress-bg); border-radius: 2px; overflow: hidden;">
             <div
-                style="width: 50%; height: 100%; background: #007bff; animation: indeterminate 1.5s infinite linear; border-radius: 2px;">
+                style="width: 50%; height: 100%; background: var(--accent-color); animation: indeterminate 1.5s infinite linear; border-radius: 2px;">
             </div>
         </div>
-        <div style="margin-top: 20px; font-size: 0.9em; color: #999;">
-            Stuck here? <a href="/logout" style="color: #007bff; text-decoration: none;">Log out</a> to reset connection
+        <div style="margin-top: 20px; font-size: 0.9em; color: var(--text-muted);">
+            Stuck here? <a href="/logout" style="color: var(--accent-color); text-decoration: none;">Log out</a> to reset connection
             settings.
         </div>
         <style>
@@ -43,7 +49,10 @@
             <h1>BambuLAN Dashboard <span
                     style="font-weight: 400; font-size: 0.8em; color: var(--text-light);">{{.Host}}</span></h1>
 
-            <div style="display: flex; gap: 15px;">
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <button onclick="toggleTheme()" class="theme-toggle" id="btnThemeToggle" title="Toggle Dark Mode">
+                    🌙
+                </button>
                 <a href="/files" class="btn btn-info">Manage Files</a>
                 <a href="/logout" class="btn">Logout</a>
             </div>
@@ -55,7 +64,7 @@
                 <div class="card"
                     style="padding: 0; overflow: hidden; background: #000; position: relative; width: 100%; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;">
                     <div id="cameraPlaceholder"
-                        style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; color: #666;">
+                        style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; color: var(--text-light);">
                         <span>Video Paused</span>
                     </div>
                     <img id="cameraFeed" src="/camera" class="camera-feed" alt="Camera Stream"
@@ -84,7 +93,7 @@
                             <span id="progress">--</span>%
                         </span>
                     </div>
-                    <div style="background: #e9ecef; border-radius: 4px; height: 10px; width: 100%; overflow: hidden;">
+                    <div style="background: var(--progress-bg); border-radius: 4px; height: 10px; width: 100%; overflow: hidden;">
                         <div id="progress_bar"
                             style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.5s;">
                         </div>
@@ -140,7 +149,7 @@
                                     style="background: none; border: none; padding: 0; cursor: pointer; color: var(--text-light);">⚙️</button>
                             </div>
                             <div class="metric-value"><span id="nozzle">--</span> <span
-                                    style="font-size: 0.7em; color: #999;">/ <span id="nozzle_target">--</span> <span
+                                    style="font-size: 0.7em; color: var(--text-muted);">/ <span id="nozzle_target">--</span> <span
                                         class="temp-unit">°C</span></span></div>
                         </div>
                         <div id="dynamic_nozzle_container" style="display: contents;"></div>
@@ -151,7 +160,7 @@
                                     style="background: none; border: none; padding: 0; cursor: pointer; color: var(--text-light);">⚙️</button>
                             </div>
                             <div class="metric-value"><span id="bed">--</span> <span
-                                    style="font-size: 0.7em; color: #999;">/ <span id="bed_target">--</span> <span
+                                    style="font-size: 0.7em; color: var(--text-muted);">/ <span id="bed_target">--</span> <span
                                         class="temp-unit">°C</span></span></div>
                         </div>
                         <div class="metric-item" id="chamber_row">
@@ -162,7 +171,7 @@
                             </div>
                             <div class="metric-value">
                                 <span id="chamber">--</span>
-                                <span id="chamber_target_container" style="display: none; font-size: 0.7em; color: #999;">
+                                <span id="chamber_target_container" style="display: none; font-size: 0.7em; color: var(--text-muted);">
                                     / <span id="chamber_target">--</span>
                                 </span>
                                 <span class="temp-unit">°C</span>
@@ -230,7 +239,7 @@
                     <h3 style="margin-bottom: 10px;">Print Info</h3>
                     <!-- Download Progress Indicator -->
                     <div id="metadataDownloadProgress"
-                        style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        style="display: none; margin-bottom: 15px; padding: 10px; background: var(--metric-bg); border-radius: 5px;">
                         <div style="font-size: 0.9em; color: var(--text-light); margin-bottom: 5px;">
                             📥 Downloading metadata... <span id="metadataDownloadBytes">0 KB</span>
                         </div>
@@ -302,7 +311,7 @@
         <div class="modal-content">
             <h3>🧵 Filament Control</h3>
             <div id="filamentModalStatus"
-                style="margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 6px;">
+                style="margin: 15px 0; padding: 10px; background: var(--metric-bg); border-radius: 6px;">
                 <div style="font-size: 0.9em; color: var(--text-light);">Current:</div>
                 <div id="filamentModalCurrent" style="font-weight: 600; margin-top: 5px;">None loaded</div>
             </div>
@@ -316,7 +325,7 @@
                     disabled>Load Selected Slot</button>
             </div>
 
-            <div style="margin: 20px 0; padding-top: 20px; border-top: 1px solid #ddd;">
+            <div style="margin: 20px 0; padding-top: 20px; border-top: 1px solid var(--border-color);">
                 <h4 style="margin-bottom: 10px;">Unload Filament</h4>
                 <button id="btnUnloadFilament" onclick="unloadFilament()" class="btn btn-danger" style="width: 100%;"
                     disabled>Unload Current Filament</button>
@@ -335,7 +344,7 @@
             <div id="filamentOpMessage" style="font-size: 1.1em; margin-bottom: 20px;">
                 Waiting for filament to load...
             </div>
-            <div style="font-size: 0.9em; color: #666;">
+            <div style="font-size: 0.9em; color: var(--text-light);">
                 This may take up to a minute. Please wait...
             </div>
         </div>
@@ -368,7 +377,7 @@
                         style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.2s;">
                     </div>
                 </div>
-                <div style="font-size: 0.9em; color: #666;">
+                <div style="font-size: 0.9em; color: var(--text-light);">
                     <span id="uploadPercent">0</span>% (<span id="uploadBytes">0/0</span> bytes)
                 </div>
             </div>
@@ -430,6 +439,25 @@
             localStorage.setItem("bambulan_temp_unit", unit);
             updateStatus();
         }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('bambulan_theme', newTheme);
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const btn = document.getElementById('btnThemeToggle');
+            if (btn) {
+                btn.innerHTML = currentTheme === 'light' ? '🌙' : '☀️';
+            }
+        }
+        
+        updateThemeIcon();
 
         // ... helpers ...
 
@@ -528,7 +556,7 @@
         }
 
         function formatColor(hex) {
-            if (!hex || hex.length < 6) return "#cccccc";
+            if (!hex || hex.length < 6) return "var(--metric-bg)";
             return "#" + hex.substring(0, 6);
         }
 
@@ -623,11 +651,11 @@
             const btnF = document.getElementById('btnUnitF');
             if (btnC && btnF) {
                 if (tempUnit === 'C') {
-                    btnC.style.background = '#007bff'; btnC.style.color = 'white';
-                    btnF.style.background = 'transparent'; btnF.style.color = '#333';
+                    btnC.style.background = 'var(--accent-color)'; btnC.style.color = 'white';
+                    btnF.style.background = 'transparent'; btnF.style.color = 'var(--text-color)';
                 } else {
-                    btnF.style.background = '#007bff'; btnF.style.color = 'white';
-                    btnC.style.background = 'transparent'; btnC.style.color = '#333';
+                    btnF.style.background = 'var(--accent-color)'; btnF.style.color = 'white';
+                    btnC.style.background = 'transparent'; btnC.style.color = 'var(--text-color)';
                 }
             }
 
@@ -768,7 +796,7 @@
                                 // Only update if changed? Or simple innerHTML
                                 const html = m.filaments.map(f =>
                                     `<div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
-                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escapeHTML(f.color)}; border:1px solid #ccc;"></span>
+                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escapeHTML(f.color)}; border:1px solid var(--border-color);"></span>
                                         <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHTML(f.type)}</span>
                                         <span style="font-weight:bold;">${f.used_grams.toFixed(1)}g</span>
                                       </div>`
@@ -859,7 +887,7 @@
                                             </div>
                                             <div class="metric-value">
                                                 <span>${formatTemp(current)}</span>
-                                                <span style="font-size: 0.7em; color: #999;">/ <span>${formatTemp(target)}</span> <span class="temp-unit">°${tempUnit}</span></span>
+                                                <span style="font-size: 0.7em; color: var(--text-muted);">/ <span>${formatTemp(target)}</span> <span class="temp-unit">°${tempUnit}</span></span>
                                             </div>
                                         </div>`;
                                     }
@@ -1009,8 +1037,8 @@
                                         // New Compact Format: Unit 0  🌡️ 25.0°C  💧 10% (Dry)
                                         unitDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 5px; color: var(--text-light); display: flex; align-items: center; gap: 15px;">
                                             <span>Unit ${idx}</span>
-                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">🌡️ ${escapeHTML(temp)}°C</span>
-                                            <span style="font-weight: normal; font-size: 0.9em; color: #666;">💧 ${escapeHTML(finalHum)}</span>
+                                            <span style="font-weight: normal; font-size: 0.9em; color: var(--text-light);">🌡️ ${escapeHTML(temp)}°C</span>
+                                            <span style="font-weight: normal; font-size: 0.9em; color: var(--text-light);">💧 ${escapeHTML(finalHum)}</span>
                                         </div>`;
 
                                         const grid = document.createElement('div');
@@ -1033,7 +1061,7 @@
                                                 }
 
                                                 const item = document.createElement('div');
-                                                item.style.background = '#f8f9fa';
+                                                item.style.background = 'var(--metric-bg)';
                                                 item.style.padding = '8px';
                                                 item.style.borderRadius = '6px';
                                                 item.style.display = 'flex';
@@ -1050,7 +1078,7 @@
                                                 circle.style.height = '14px';
                                                 circle.style.borderRadius = '50%';
                                                 circle.style.backgroundColor = color;
-                                                circle.style.border = '1px solid #ddd';
+                                                circle.style.border = '1px solid var(--border-color)';
                                                 circle.title = tray.tray_color;
 
                                                 const typeDiv = document.createElement('div');
@@ -1063,7 +1091,7 @@
 
                                                 const capDiv = document.createElement('div');
                                                 capDiv.style.fontSize = '0.8em';
-                                                capDiv.style.color = '#666';
+                                                capDiv.style.color = 'var(--text-light)';
                                                 capDiv.innerText = remainText;
 
                                                 item.appendChild(topRow);
@@ -1087,7 +1115,7 @@
                                         const extDiv = document.createElement('div');
                                         extDiv.style.marginTop = "20px";
                                         extDiv.style.paddingTop = "15px";
-                                        extDiv.style.borderTop = "2px solid #ddd";
+                                        extDiv.style.borderTop = "2px solid var(--border-color)";
 
                                         extDiv.innerHTML = `<div style="font-size: 0.9em; font-weight: 600; margin-bottom: 10px; color: var(--text-light);">External Spool</div>`;
 
@@ -1104,7 +1132,7 @@
                                         }
 
                                         const item = document.createElement('div');
-                                        item.style.background = '#f8f9fa';
+                                        item.style.background = 'var(--metric-bg)';
                                         item.style.padding = '8px';
                                         item.style.borderRadius = '6px';
                                         item.style.display = 'flex';
@@ -1122,7 +1150,7 @@
                                         circle.style.height = '14px';
                                         circle.style.borderRadius = '50%';
                                         circle.style.backgroundColor = color;
-                                        circle.style.border = '1px solid #ddd';
+                                        circle.style.border = '1px solid var(--border-color)';
                                         circle.title = p.vt_tray.tray_color;
 
                                         const typeDiv = document.createElement('div');
@@ -1135,7 +1163,7 @@
 
                                         const capDiv = document.createElement('div');
                                         capDiv.style.fontSize = '0.8em';
-                                        capDiv.style.color = '#666';
+                                        capDiv.style.color = 'var(--text-light)';
                                         capDiv.innerText = remainText;
 
                                         item.appendChild(topRow);

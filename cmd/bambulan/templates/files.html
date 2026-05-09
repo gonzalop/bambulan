@@ -6,13 +6,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{.CSRFToken}}">
     <link rel="stylesheet" href="/style.css">
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('bambulan_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        })();
+    </script>
 </head>
 
 <body>
     <div class="container">
         <header>
             <h1>File Manager</h1>
-            <div style="display: flex; gap: 15px;">
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <button onclick="toggleTheme()" class="theme-toggle" id="btnThemeToggle" title="Toggle Dark Mode">
+                    🌙
+                </button>
                 <a href="/" class="btn">Dashboard</a>
                 <a href="/logout" class="btn">Logout</a>
             </div>
@@ -21,7 +30,7 @@
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h3 style="margin: 0;">Path: <span id="currentPathDisplay"
-                        style="font-family: monospace; background: #f0f0f0; padding: 2px 5px; border-radius: 4px;">/</span>
+                        style="font-family: monospace; background: var(--metric-bg); padding: 2px 5px; border-radius: 4px; color: var(--text-color);">/</span>
                 </h3>
                 <div class="button-group">
                     <input type="file" id="uploadInput" style="display: none;" onchange="uploadFile()">
@@ -112,17 +121,17 @@
             display: none;
             position: absolute;
             right: 0;
-            background-color: #f9f9f9;
+            background-color: var(--card-bg);
             min-width: 160px;
-            box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+            box-shadow: var(--shadow);
             z-index: 1000;
             border-radius: 4px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color);
         }
 
         .dropdown-content button,
         .dropdown-content a {
-            color: black;
+            color: var(--text-color);
             padding: 12px 16px;
             text-decoration: none;
             display: block;
@@ -137,14 +146,14 @@
 
         .dropdown-content button:hover,
         .dropdown-content a:hover {
-            background-color: #f1f1f1;
+            background-color: var(--metric-bg);
         }
 
         .dropdown-divider {
             height: 1px;
             margin: 4px 0;
             overflow: hidden;
-            background-color: #e5e5e5;
+            background-color: var(--border-color);
         }
 
         .show {
@@ -157,15 +166,34 @@
             font-size: 20px;
             cursor: pointer;
             padding: 0 10px;
-            color: #666;
+            color: var(--text-light);
         }
 
         .menu-btn:hover {
-            color: #333;
+            color: var(--text-color);
         }
     </style>
     <script>
         let currentPath = "/";
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('bambulan_theme', newTheme);
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const btn = document.getElementById('btnThemeToggle');
+            if (btn) {
+                btn.innerHTML = currentTheme === 'light' ? '🌙' : '☀️';
+            }
+        }
+        
+        updateThemeIcon();
 
         // Custom modal helpers
         let confirmResolve = null;
@@ -356,7 +384,7 @@
             currentPath = path;
             document.getElementById('currentPathDisplay').innerText = path;
             const list = document.getElementById('file-list');
-            list.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">Loading...</div>';
+            list.innerHTML = '<div style="text-align: center; color: var(--text-light); padding: 20px;">Loading...</div>';
 
             fetch('/api/files?path=' + encodeURIComponent(path))
                 .then(response => response.json())
@@ -392,7 +420,7 @@
                         if (!parent.endsWith("/")) parent += "/";
                         const safeParent = escapeHtml(parent);
                         html += `
-                        <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <div class="file-item" style="padding: 10px; border-bottom: 1px solid var(--border-light);">
                             <a href="#" data-path="${safeParent}" onclick="loadFiles(this)" style="display: flex; align-items: center; gap: 10px;">
                                 <span>🔙</span> <strong>.. (Parent Directory)</strong>
                             </a>
@@ -415,7 +443,7 @@
                             const newPath = path + e.Name + "/";
                             const safeNewPath = escapeHtml(newPath);
                             html += `
-                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
+                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between;">
                                 <a href="#" data-path="${safeNewPath}" onclick="loadFiles(this)" style="display: flex; align-items: center; gap: 10px; flex: 1;">
                                     <span style="font-size: 1.2em;">📂</span> 
                                     <span style="font-weight: 600; color: var(--text-color);">${escapedName}</span>
@@ -430,10 +458,10 @@
                         } else if (e.Type === "link") {
                             const escapedTarget = escapeHtml(e.Target);
                             html += `
-                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
+                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between;">
                                 <div style="display: flex; align-items: center; gap: 10px;">
                                     <span style="font-size: 1.2em;">🔗</span>
-                                    <span>${escapedName} <span style="color: #666; font-size: 0.9em;">➔ ${escapedTarget}</span></span>
+                                    <span>${escapedName} <span style="color: var(--text-light); font-size: 0.9em;">➔ ${escapedTarget}</span></span>
                                 </div>
                                 <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
                                     <div class="dropdown">
@@ -448,13 +476,13 @@
                         } else {
                             const sizeMB = (e.Size / 1024 / 1024).toFixed(2);
                             html += `
-                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between;">
+                            <div class="file-item" style="padding: 10px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between;">
                                 <div style="display: flex; align-items: center; gap: 10px;">
                                     <span style="font-size: 1.2em;">📄</span>
                                     <span>${escapedName}</span>
                                 </div>
                                 <div style="font-size: 0.9em; display: flex; gap: 15px; align-items: center;">
-                                    <span style="color: #666;">${sizeMB} MB</span>
+                                    <span style="color: var(--text-light);">${sizeMB} MB</span>
                                     ${e.Name.endsWith('.gcode.3mf') ?
                                     `<button data-path="${fullPath}" onclick="openPrintModal(this)" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.8em; margin-right: 5px;">🖨️ Print</button>`
                                     : ''}

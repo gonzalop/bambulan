@@ -1,16 +1,41 @@
 :root {
     --primary-color: #00A651; /* Bambu Green-ish */
     --primary-hover: #008c44;
+    --accent-color: #007bff;
     --bg-color: #f4f7f6;
     --card-bg: #ffffff;
     --text-color: #333333;
     --text-light: #666666;
+    --text-muted: #999999;
     --border-color: #e0e0e0;
+    --border-light: #eeeeee;
+    --metric-bg: #f8f9fa;
+    --progress-bg: #e9ecef;
     --danger-color: #dc3545;
     --warning-color: #ffc107;
     --info-color: #17a2b8;
     --shadow: 0 2px 4px rgba(0,0,0,0.05);
     --radius: 12px;
+    --btn-bg: #e0e0e0;
+    --btn-text: #333333;
+    --modal-overlay: rgba(0,0,0,0.6);
+}
+
+[data-theme="dark"] {
+    --bg-color: #121212;
+    --card-bg: #1e1e1e;
+    --text-color: #e0e0e0;
+    --text-light: #aaaaaa;
+    --text-muted: #777777;
+    --border-color: #333333;
+    --border-light: #2d2d2d;
+    --metric-bg: #2d2d2d;
+    --progress-bg: #333333;
+    --shadow: 0 4px 6px rgba(0,0,0,0.3);
+    --btn-bg: #333333;
+    --btn-text: #e0e0e0;
+    --modal-overlay: rgba(0,0,0,0.8);
+    --accent-color: #3794ff;
 }
 
 body {
@@ -20,6 +45,7 @@ body {
     margin: 0;
     padding: 20px;
     line-height: 1.6;
+    transition: background-color 0.3s, color 0.3s;
 }
 
 .container {
@@ -36,6 +62,7 @@ header {
     padding: 15px 25px;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+    transition: background-color 0.3s;
 }
 
 h1 { margin: 0; font-size: 1.5rem; font-weight: 700; color: var(--text-color); }
@@ -51,8 +78,8 @@ a:hover { color: var(--primary-hover); }
     padding: 10px 20px;
     border: none;
     border-radius: 8px;
-    background-color: #e0e0e0;
-    color: #333;
+    background-color: var(--btn-bg);
+    color: var(--btn-text);
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -74,6 +101,7 @@ a:hover { color: var(--primary-hover); }
     padding: 25px;
     box-shadow: var(--shadow);
     margin-bottom: 20px;
+    transition: background-color 0.3s;
 }
 
 /* Dashboard Grid */
@@ -96,10 +124,11 @@ a:hover { color: var(--primary-hover); }
 }
 
 .metric-item {
-    background: #f8f9fa;
+    background: var(--metric-bg);
     padding: 10px 15px;
     border-radius: 8px;
     font-size: 0.9rem;
+    transition: background-color 0.3s;
 }
 
 .metric-label { display: block; color: var(--text-light); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
@@ -134,14 +163,16 @@ input[type="text"], input[type="password"], input[type="file"], select {
     border-radius: 8px;
     box-sizing: border-box;
     font-size: 1rem;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, background-color 0.3s, color 0.3s;
+    background-color: var(--card-bg);
+    color: var(--text-color);
 }
 input:focus, select:focus { outline: none; border-color: var(--primary-color); }
 
 /* Modal */
 .modal-overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.6);
+    background: var(--modal-overlay);
     backdrop-filter: blur(4px);
     display: none;
     justify-content: center; align-items: center;
@@ -154,9 +185,30 @@ input:focus, select:focus { outline: none; border-color: var(--primary-color); }
     width: 450px;
     max-width: 90%;
     box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    transition: background-color 0.3s;
 }
 
 /* Active States (overriding index.html inline if moved to class) */
 .btn.active-speed { background-color: #007bff; color: white; border: 2px solid #0056b3; }
 .btn.active-on { background-color: var(--primary-color); color: white; }
 .btn.active-off { background-color: #6c757d; color: white; }
+
+/* Theme Toggle Button */
+.theme-toggle {
+    background: transparent;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    transition: background-color 0.2s;
+    color: var(--text-color);
+}
+.theme-toggle:hover {
+    background-color: var(--metric-bg);
+}
