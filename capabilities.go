@@ -46,6 +46,15 @@ type PrinterCapability struct {
 
 	// HasBedLeveling indicates whether the printer supports automatic bed leveling.
 	HasBedLeveling bool `json:"has_bed_leveling"`
+
+	// HasChamberHeater indicates whether the printer has an active chamber heater.
+	HasChamberHeater bool `json:"has_chamber_heater"`
+
+	// MaxChamberTemp is the maximum target temperature for the chamber heater.
+	MaxChamberTemp int `json:"max_chamber_temp"`
+
+	// NumExtruders is the number of tool heads / extruders available on the printer.
+	NumExtruders int `json:"num_extruders"`
 }
 
 // GetPrinterCapabilities returns the capabilities for the given printer model ID (e.g., "BL-P001", "C11").

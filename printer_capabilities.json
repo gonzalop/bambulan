@@ -8,7 +8,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
   },
   "BL-P002": {
     "display_name": "Bambu Lab X1",
@@ -19,7 +22,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
   },
   "C11": {
     "display_name": "Bambu Lab P1P",
@@ -30,7 +36,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
   },
   "C12": {
     "display_name": "Bambu Lab P1S",
@@ -41,7 +50,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
   },
   "C13": {
     "display_name": "Bambu Lab X1E",
@@ -52,7 +64,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 60,
+    "num_extruders": 1
   },
   "N1": {
     "display_name": "Bambu Lab A1 mini",
@@ -63,7 +78,10 @@
     "has_ams_humidity": false,
     "has_ams_capacity_reporting": false,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
   },
   "N2S": {
     "display_name": "Bambu Lab A1",
@@ -74,7 +92,24 @@
     "has_ams_humidity": false,
     "has_ams_capacity_reporting": false,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
+  },
+  "N6": {
+    "display_name": "Bambu Lab X2D",
+    "max_nozzle_temp": 300,
+    "max_bed_temp": 120,
+    "has_chamber_fan": true,
+    "has_aux_fan": true,
+    "has_ams_humidity": true,
+    "has_ams_capacity_reporting": true,
+    "has_timelapse": true,
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 65,
+    "num_extruders": 2
   },
   "N7": {
     "display_name": "Bambu Lab P2S",
@@ -85,7 +120,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
   },
   "O1C": {
     "display_name": "Bambu Lab H2C",
@@ -96,7 +134,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 65,
+    "num_extruders": 2
   },
   "O1C2": {
     "display_name": "Bambu Lab H2C",
@@ -107,7 +148,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 65,
+    "num_extruders": 2
   },
   "O1D": {
     "display_name": "Bambu Lab H2D",
@@ -118,7 +162,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 65,
+    "num_extruders": 2
   },
   "O1E": {
     "display_name": "Bambu Lab H2D Pro",
@@ -129,7 +176,10 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 65,
+    "num_extruders": 2
   },
   "O1S": {
     "display_name": "Bambu Lab H2S",
@@ -140,6 +190,9 @@
     "has_ams_humidity": true,
     "has_ams_capacity_reporting": true,
     "has_timelapse": true,
-    "has_bed_leveling": true
+    "has_bed_leveling": true,
+    "has_chamber_heater": true,
+    "max_chamber_temp": 65,
+    "num_extruders": 1
   }
 }

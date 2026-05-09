@@ -16,17 +16,22 @@ type PrinterDefinition map[string]struct {
 	DisplayName string `json:"display_name"`
 	ModelID     string `json:"model_id"`
 	Print       struct {
-		NozzleTempRange     []int `json:"nozzle_temp_range"`
-		BedTempLimit        int   `json:"bed_temp_limit"`
-		BedTemperatureLimit int   `json:"bed_temperature_limit"` // Alternative spelling
-		BedTempRange        []int `json:"bed_temp_range"`        // Range [min, max]
-		SupportChamberFan   bool  `json:"support_chamber_fan"`
-		SupportAuxFan       bool  `json:"support_aux_fan"`
-		SupportAMSHumidity  bool  `json:"support_ams_humidity"`
-		SupportTimelapse    bool  `json:"support_timelapse"`
-		SupportBedLeveling  any   `json:"support_bed_leveling"`
-		SupportUpdateRemain bool  `json:"support_update_remain"`
+		NozzleTempRange              []int `json:"nozzle_temp_range"`
+		BedTempLimit                 int   `json:"bed_temp_limit"`
+		BedTemperatureLimit          int   `json:"bed_temperature_limit"` // Alternative spelling
+		BedTempRange                 []int `json:"bed_temp_range"`        // Range [min, max]
+		SupportChamberFan            bool  `json:"support_chamber_fan"`
+		SupportAuxFan                bool  `json:"support_aux_fan"`
+		SupportAMSHumidity           bool  `json:"support_ams_humidity"`
+		SupportTimelapse             bool  `json:"support_timelapse"`
+		SupportBedLeveling           any   `json:"support_bed_leveling"`
+		SupportUpdateRemain          bool  `json:"support_update_remain"`
+		SupportChamber               bool  `json:"support_chamber"`
+		SupportChamberTempEdit       bool  `json:"support_chamber_temp_edit"`
+		SupportChamberTempEditRange  []int `json:"support_chamber_temp_edit_range"`
+		SupportChamberTempSwitchHeat int   `json:"support_chamber_temp_switch_heating"`
 	} `json:"print"`
+	ToolHeadDisplayNames map[string]any `json:"tool_head_display_names"`
 }
 
 // Capabilities is the simplified struct we export
@@ -40,6 +45,9 @@ type Capabilities struct {
 	HasAMSCapacityReporting bool   `json:"has_ams_capacity_reporting"`
 	HasTimelapse            bool   `json:"has_timelapse"`
 	HasBedLeveling          bool   `json:"has_bed_leveling"`
+	HasChamberHeater        bool   `json:"has_chamber_heater"`
+	MaxChamberTemp          int    `json:"max_chamber_temp"`
+	NumExtruders            int    `json:"num_extruders"`
 }
 
 func main() {
@@ -79,6 +87,7 @@ func main() {
 		// For now, we will aggregate "true" flags and take the max of temps.
 
 		var caps Capabilities
+		caps.NumExtruders = 1 // Default to 1
 		var modelID string
 
 		// Iterate over all versions in the file
@@ -89,6 +98,11 @@ func main() {
 			}
 			if data.DisplayName != "" {
 				caps.DisplayName = data.DisplayName
+			}
+
+			// Check for multiple extruders
+			if len(data.ToolHeadDisplayNames) > caps.NumExtruders {
+				caps.NumExtruders = len(data.ToolHeadDisplayNames)
 			}
 
 			p := data.Print
@@ -127,6 +141,15 @@ func main() {
 			}
 			if p.SupportTimelapse {
 				caps.HasTimelapse = true
+			}
+
+			if p.SupportChamber && p.SupportChamberTempEdit {
+				caps.HasChamberHeater = true
+				if len(p.SupportChamberTempEditRange) >= 2 {
+					if p.SupportChamberTempEditRange[1] > caps.MaxChamberTemp {
+						caps.MaxChamberTemp = p.SupportChamberTempEditRange[1]
+					}
+				}
 			}
 
 			// Bed Leveling: can be bool or int(1)
