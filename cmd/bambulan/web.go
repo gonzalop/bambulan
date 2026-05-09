@@ -34,9 +34,9 @@ var templateFS embed.FS
 
 type WebCmd struct {
 	Bind        string   `help:"Address to bind to" default:"127.0.0.1:8080"`
-	Secret      string   `help:"Secret for session encryption (optional, random default)"`
-	OctoPrint   bool     `help:"Enable OctoPrint compatibility layer (slicer integration)"`
-	APIKey      string   `help:"API Key for Slicer integration (optional, random default)"`
+	Secret      string   `help:"Secret for session encryption (optional, random default)" env:"BAMBULAN_SECRET"`
+	Octoprint   bool     `help:"Enable OctoPrint compatibility layer (slicer integration)" env:"BAMBULAN_OCTOPRINT"`
+	APIKey      string   `help:"API Key for Slicer integration (optional, random default)" env:"BAMBULAN_API_KEY"`
 	CertFile    string   `help:"TLS certificate file (enables HTTPS)"`
 	KeyFile     string   `help:"TLS private key file (enables HTTPS)"`
 	MaxFileSize ByteSize `help:"Maximum allowed size for 3MF file entries" default:"50MB"`
@@ -123,7 +123,7 @@ func (c *WebCmd) Run(ctx *Context) error {
 	key := keyHash[:]
 
 	var apiKey string
-	if c.OctoPrint {
+	if c.Octoprint {
 		apiKey = c.APIKey
 		if apiKey == "" {
 			// Generate 16 bytes of random data for API key
@@ -141,7 +141,7 @@ func (c *WebCmd) Run(ctx *Context) error {
 	s := NewWebServer()
 	s.BindAddr = c.Bind
 	s.Key = key
-	s.EnableOcto = c.OctoPrint
+	s.EnableOcto = c.Octoprint
 	s.OctoApiKey = apiKey
 	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
 	s.CertFile = c.CertFile

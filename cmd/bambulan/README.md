@@ -60,9 +60,9 @@ Start the web dashboard (default port 8080).
 
 **Options:**
 - `--bind`: Address to bind to (default: `127.0.0.1:8080`)
-- `--secret`: Secret for session encryption (optional, random default)
-- `--octoprint`: Enable OctoPrint compatibility layer (slicer integration)
-- `--api-key`: API Key for OctoPrint integration (optional, random default)
+- `--secret`: Secret for session encryption (optional, random default) (Env: `BAMBULAN_SECRET`)
+- `--octoprint`: Enable OctoPrint compatibility layer (slicer integration) (Env: `BAMBULAN_OCTOPRINT`)
+- `--api-key`: API Key for OctoPrint integration (optional, random default) (Env: `BAMBULAN_API_KEY`)
 - `--cert`: TLS certificate file (enables HTTPS)
 - `--key`: TLS private key file (enables HTTPS)
 - `--max-file-size`: Maximum allowed size for 3MF file entries (default: `50MB`). Supports human-readable formats like `100MB`, `1GB`, `500KB`.
