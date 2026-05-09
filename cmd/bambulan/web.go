@@ -175,6 +175,7 @@ func (s *WebServer) Start() error {
 		http.HandleFunc("/api/version", s.octoPrintAuth(s.handleOctoVersion))
 		http.HandleFunc("/api/connection", s.octoPrintAuth(s.handleOctoConnection))
 		http.HandleFunc("/api/printer", s.octoPrintAuth(s.handleOctoPrinter))
+		http.HandleFunc("/api/printer/command", s.octoPrintAuth(s.handleOctoCommand))
 		http.HandleFunc("/api/files/local", s.octoPrintAuth(s.handleOctoFiles))
 	}
 
@@ -1949,4 +1950,53 @@ func (s *WebServer) handleOctoFiles(w http.ResponseWriter, r *http.Request) {
 		},
 		"done": true,
 	})
+}
+
+func (s *WebServer) handleOctoCommand(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.getOctoSession()
+	if !ok {
+		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		Command  string   `json:"command"`
+		Commands []string `json:"commands"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// OctoPrint sends either "command" or "commands"
+	cmds := payload.Commands
+	if payload.Command != "" {
+		cmds = append(cmds, payload.Command)
+	}
+
+	if len(cmds) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Combine commands into a single G-code block
+	gcode := ""
+	for _, c := range cmds {
+		gcode += c + "\n"
+	}
+
+	slog.Info("OctoPrint sending manual G-code", "commands", len(cmds))
+	if _, err := session.Client.MQTT.SendGCode(gcode); err != nil {
+		slog.Error("Failed to send OctoPrint G-code", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
