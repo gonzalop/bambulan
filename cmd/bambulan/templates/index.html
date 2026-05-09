@@ -46,8 +46,14 @@
 
     <div class="container">
         <header>
-            <h1>BambuLAN Dashboard <span
-                    style="font-weight: 400; font-size: 0.8em; color: var(--text-light);">{{.Host}}</span></h1>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <h1 style="margin: 0;">BambuLAN Dashboard <span
+                        style="font-weight: 400; font-size: 0.8em; color: var(--text-light);">{{.Host}}</span></h1>
+                <div id="connStatus" class="conn-badge conn-connecting">
+                    <div class="conn-dot"></div>
+                    <span id="connText">Connecting</span>
+                </div>
+            </div>
 
             <div style="display: flex; gap: 15px; align-items: center;">
                 <button onclick="toggleTheme()" class="theme-toggle" id="btnThemeToggle" title="Toggle Dark Mode">
@@ -447,6 +453,25 @@
             document.documentElement.setAttribute('data-theme', newTheme);
             localStorage.setItem('bambulan_theme', newTheme);
             updateThemeIcon();
+        }
+
+        function setConnectionStatus(state) {
+            const el = document.getElementById('connStatus');
+            const text = document.getElementById('connText');
+            if (!el || !text) return;
+
+            el.classList.remove('conn-connected', 'conn-connecting', 'conn-disconnected');
+            
+            if (state === 'connected') {
+                el.classList.add('conn-connected');
+                text.innerText = 'Connected';
+            } else if (state === 'connecting') {
+                el.classList.add('conn-connecting');
+                text.innerText = 'Connecting';
+            } else {
+                el.classList.add('conn-disconnected');
+                text.innerText = 'Disconnected';
+            }
         }
 
         function updateThemeIcon() {
@@ -1189,8 +1214,14 @@
         function updateStatus() {
             fetch('/api/status')
                 .then(response => response.json())
-                .then(data => renderStatus(data))
-                .catch(err => console.error("Status fetch error:", err));
+                .then(data => {
+                    renderStatus(data);
+                    if (pollingFallbackTimer) setConnectionStatus('connected');
+                })
+                .catch(err => {
+                    console.error("Status fetch error:", err);
+                    if (pollingFallbackTimer) setConnectionStatus('disconnected');
+                });
         }
 
         function showTempControl(target, index) {
@@ -1592,11 +1623,13 @@
 
         function initEvents() {
             if (evtSource) return;
+            setConnectionStatus('connecting');
 
             evtSource = new EventSource('/api/events');
 
             evtSource.onopen = () => {
                 console.log("SSE connected.");
+                setConnectionStatus('connected');
                 sseFailures = 0;
                 if (pollingFallbackTimer) {
                     clearInterval(pollingFallbackTimer);
@@ -1620,6 +1653,7 @@
 
             evtSource.onerror = (err) => {
                 console.error("SSE error", err);
+                setConnectionStatus('disconnected');
                 sseFailures++;
                 if (sseFailures >= 3) {
                     console.warn("Multiple SSE failures, falling back to polling.");
