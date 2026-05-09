@@ -8,7 +8,9 @@ It provides a robust developer library, a powerful CLI tool, and a modern, real-
 
 ## Features
 
-- **Real-time Monitoring**: Receive updates on temperatures, fans, print progress, and detailed printer states.
+- **Real-time Monitoring**: Receive updates on temperatures, fans, print progress, and detailed printer states via high-performance SSE.
+- **Connection Health**: Visual status indicator for the dashboard-to-server link.
+- **Slicer Integration**: Emulates OctoPrint API to allow one-click printing from OrcaSlicer, PrusaSlicer, and others.
 - **Full Printer Control**:
     - Manage print jobs (`start`, `pause`, `resume`, `stop`, `skip objects`).
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
