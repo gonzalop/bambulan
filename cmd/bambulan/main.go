@@ -16,7 +16,7 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/gonzalop/bambulan"
-	"github.com/gonzalop/bambulan/pkg/filament"
+	"github.com/gonzalop/bambulan/internal/filament"
 )
 
 var version = "dev"

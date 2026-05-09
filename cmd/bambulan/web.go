@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/gonzalop/bambulan"
-	"github.com/gonzalop/bambulan/pkg/bambu3mf"
+	"github.com/gonzalop/bambulan/internal/bambu3mf"
 )
 
 //go:embed templates/*
