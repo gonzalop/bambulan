@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -131,9 +132,10 @@ func (c *CameraClient) StartStream(onImage func([]byte)) error {
 	}
 	c.streaming = true
 	c.stopChan = make(chan struct{})
+	stopChan := c.stopChan
 	c.mu.Unlock()
 
-	go c.streamLoop(onImage)
+	go c.streamLoop(stopChan, onImage)
 	return nil
 }
 
@@ -147,7 +149,15 @@ func (c *CameraClient) StopStream() {
 	}
 }
 
-func (c *CameraClient) streamLoop(onImage func([]byte)) {
+func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) {
+	defer func() {
+		c.mu.Lock()
+		if c.stopChan == stopChan {
+			c.streaming = false
+		}
+		c.mu.Unlock()
+	}()
+
 	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", c.Hostname, c.Port), &tls.Config{
 		// Bambu Lab printers use self-signed certificates for their camera stream.
 		InsecureSkipVerify: true,
@@ -171,11 +181,21 @@ func (c *CameraClient) streamLoop(onImage func([]byte)) {
 
 	for {
 		select {
-		case <-c.stopChan:
+		case <-stopChan:
 			return
 		default:
+			// Set a read deadline so we don't block indefinitely and can check stopChan
+			if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+				slog.Error("Failed to set camera read deadline", "error", err)
+				return
+			}
+
 			n, err := conn.Read(readBuf)
 			if err != nil {
+				if os.IsTimeout(err) {
+					// Timeout is expected, just loop back and check stopChan
+					continue
+				}
 				if err != io.EOF {
 					slog.Error("Camera read error", "error", err)
 				}

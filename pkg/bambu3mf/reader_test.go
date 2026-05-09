@@ -1,8 +1,44 @@
 package bambu3mf
 
 import (
+	"archive/zip"
+	"bytes"
+	"strings"
 	"testing"
 )
+
+func TestDecompressionBomb(t *testing.T) {
+	// Create an in-memory zip file with a large uncompressed entry
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	// Create a file entry that is larger than the 50MB limit
+	// A file with 51MB of zeroes is highly compressible
+	w, err := zw.Create("bomb.txt")
+	if err != nil {
+		t.Fatalf("Failed to create zip entry: %v", err)
+	}
+	largeData := make([]byte, 51*1024*1024)
+	if _, err := w.Write(largeData); err != nil {
+		t.Fatalf("Failed to write large data: %v", err)
+	}
+	zw.Close()
+
+	// Parse it
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("Failed to create reader: %v", err)
+	}
+	defer r.Close()
+
+	// Attempt to read the large file
+	_, err = r.ReadFile("bomb.txt")
+	if err == nil {
+		t.Error("Expected error for large file, but got nil")
+	} else if !strings.Contains(err.Error(), "exceeds maximum size limit") {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
 
 func TestParseMetadata(t *testing.T) {
 	// Adjust path as needed for where tests are running

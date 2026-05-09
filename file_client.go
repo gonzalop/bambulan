@@ -160,11 +160,22 @@ func (f *FileClient) GetFiles(dir string, extension string) ([]string, error) {
 // Returns:
 //   - An `io.ReadCloser` from which the file content can be read.
 func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
-	f.mu.Lock()
+	// For streaming, we dial a dedicated connection to avoid blocking the shared
+	// client mutex for the duration of the download.
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+	}
 
-	c, err := f.getConn()
+	c, err := ftp.Dial(fmt.Sprintf("%s:990", f.Hostname),
+		ftp.WithImplicitTLS(tlsConfig),
+		ftp.WithTimeout(10*time.Second),
+	)
 	if err != nil {
-		f.mu.Unlock() // Unlock if error
+		return nil, err
+	}
+
+	if err := c.Login("bblp", f.AccessCode); err != nil {
+		_ = c.Quit()
 		return nil, err
 	}
 
@@ -172,25 +183,15 @@ func (f *FileClient) Download(remotePath string) (io.ReadCloser, error) {
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
+		defer func() { _ = c.Quit() }()
+
 		// If Retrieve fails, the writer is closed with error, reader sees error.
 		if err := c.Retrieve(remotePath, pw); err != nil {
 			pw.CloseWithError(err)
 		}
 	}()
 
-	return &ftpReadCloser{ReadCloser: pr, client: f}, nil
-}
-
-type ftpReadCloser struct {
-	io.ReadCloser
-	client *FileClient
-}
-
-func (f *ftpReadCloser) Close() error {
-	err := f.ReadCloser.Close()
-	// Release the lock, allowing other operations to proceed
-	f.client.mu.Unlock()
-	return err
+	return pr, nil
 }
 
 // DownloadFile downloads a file from the printer to a local path.

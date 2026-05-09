@@ -17,6 +17,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -32,10 +33,11 @@ import (
 var templateFS embed.FS
 
 type WebCmd struct {
-	Bind     string `help:"Address to bind to" default:"127.0.0.1:8080"`
-	Secret   string `help:"Secret for session encryption (optional, random default)"`
-	CertFile string `help:"TLS certificate file (enables HTTPS)"`
-	KeyFile  string `help:"TLS private key file (enables HTTPS)"`
+	Bind        string   `help:"Address to bind to" default:"127.0.0.1:8080"`
+	Secret      string   `help:"Secret for session encryption (optional, random default)"`
+	CertFile    string   `help:"TLS certificate file (enables HTTPS)"`
+	KeyFile     string   `help:"TLS private key file (enables HTTPS)"`
+	MaxFileSize ByteSize `help:"Maximum allowed size for 3MF file entries" default:"50MB"`
 }
 
 type Session struct {
@@ -81,12 +83,14 @@ type WebServer struct {
 	UseTLS        bool
 	CertFile      string
 	KeyFile       string
+	MaxFileSize   int64
 }
 
 func NewWebServer() *WebServer {
 	return &WebServer{
 		Sessions:      make(map[string]*Session),
 		ActiveClients: make(map[string]*bambulan.Client),
+		MaxFileSize:   bambu3mf.DefaultMaxFileSize,
 	}
 }
 
@@ -120,6 +124,7 @@ func (c *WebCmd) Run(ctx *Context) error {
 	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
 	s.CertFile = c.CertFile
 	s.KeyFile = c.KeyFile
+	s.MaxFileSize = int64(c.MaxFileSize)
 	return s.Start()
 }
 
@@ -446,8 +451,26 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if sessionID, ok := s.getSessionID(r); ok {
 		s.Mu.Lock()
 		if session, exists := s.Sessions[sessionID]; exists {
-			session.Client.Stop()
+			serial := session.Client.MQTT.Serial
 			delete(s.Sessions, sessionID)
+
+			// Check if any other session is still using this printer
+			inUse := false
+			for _, sess := range s.Sessions {
+				if sess.Client.MQTT.Serial == serial {
+					inUse = true
+					break
+				}
+			}
+
+			if !inUse {
+				s.ClientsMu.Lock()
+				if client, exists := s.ActiveClients[serial]; exists {
+					client.Stop()
+					delete(s.ActiveClients, serial)
+				}
+				s.ClientsMu.Unlock()
+			}
 		}
 		s.Mu.Unlock()
 	}
@@ -516,8 +539,8 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 			var foundFilename string
 
 			// 1. Try sanitized filename first (if starts with _)
-			if strings.HasPrefix(activeFile, "_") {
-				sanitized := strings.TrimPrefix(activeFile, "_")
+			if after, ok := strings.CutPrefix(activeFile, "_"); ok {
+				sanitized := after
 				if md, ok := session.MetadataCache[sanitized]; ok {
 					foundMD = md
 					foundFilename = sanitized
@@ -556,7 +579,7 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 	}
 
 	if session.CurrentMetadata != nil {
-		mdMap := map[string]interface{}{
+		mdMap := map[string]any{
 			"plates":    session.CurrentMetadata.Plates,
 			"filaments": session.CurrentMetadata.Filaments,
 			// Add unified filename field for thumbnails
@@ -715,14 +738,17 @@ func (s *WebServer) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize path
+	cleanPath := path.Clean("/" + file)
+
 	// 1. Delete file
-	if err := session.Client.File.Delete(file); err != nil {
-		slog.Error("Delete failed", "path", file, "error", err)
+	if err := session.Client.File.Delete(cleanPath); err != nil {
+		slog.Error("Delete failed", "path", cleanPath, "error", err)
 		http.Error(w, "Delete failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	slog.Debug("Deleted file", "path", file)
+	slog.Debug("Deleted file", "path", cleanPath)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -750,13 +776,17 @@ func (s *WebServer) handleAPIRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := session.Client.File.Rename(oldPath, newPath); err != nil {
-		slog.Error("Rename failed", "old", oldPath, "new", newPath, "error", err)
+	// Sanitize paths
+	cleanOld := path.Clean("/" + oldPath)
+	cleanNew := path.Clean("/" + newPath)
+
+	if err := session.Client.File.Rename(cleanOld, cleanNew); err != nil {
+		slog.Error("Rename failed", "old", cleanOld, "new", cleanNew, "error", err)
 		http.Error(w, "Rename failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	slog.Debug("Renamed file", "old", oldPath, "new", newPath)
+	slog.Debug("Renamed file", "old", cleanOld, "new", cleanNew)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -777,19 +807,22 @@ func (s *WebServer) handleAPIMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := r.FormValue("path")
-	if path == "" {
+	pathParam := r.FormValue("path")
+	if pathParam == "" {
 		http.Error(w, "Missing path parameter", http.StatusBadRequest)
 		return
 	}
 
-	if err := session.Client.File.MakeDirectory(path); err != nil {
-		slog.Error("Mkdir failed", "path", path, "error", err)
+	// Sanitize path
+	cleanPath := path.Clean("/" + pathParam)
+
+	if err := session.Client.File.MakeDirectory(cleanPath); err != nil {
+		slog.Error("Mkdir failed", "path", cleanPath, "error", err)
 		http.Error(w, "Mkdir failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	slog.Debug("Created directory", "path", path)
+	slog.Debug("Created directory", "path", cleanPath)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -865,9 +898,12 @@ func (s *WebServer) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
 		dir = "/"
 	}
 
-	files, err := session.Client.File.ListFiles(dir)
+	// Sanitize path
+	cleanDir := path.Clean("/" + dir)
+
+	files, err := session.Client.File.ListFiles(cleanDir)
 	if err != nil {
-		slog.Error("Failed to list files", "dir", dir, "error", err)
+		slog.Error("Failed to list files", "dir", cleanDir, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -885,21 +921,24 @@ func (s *WebServer) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := r.URL.Query().Get("path")
-	if path == "" {
+	pathParam := r.URL.Query().Get("path")
+	if pathParam == "" {
 		http.Error(w, "Missing path", http.StatusBadRequest)
 		return
 	}
 
-	reader, err := session.Client.File.Download(path)
+	// Sanitize path
+	cleanPath := path.Clean("/" + pathParam)
+
+	reader, err := session.Client.File.Download(cleanPath)
 	if err != nil {
-		slog.Error("Failed to start download", "path", path, "error", err)
+		slog.Error("Failed to start download", "path", cleanPath, "error", err)
 		http.Error(w, "Failed to download", http.StatusInternalServerError)
 		return
 	}
 	defer reader.Close()
 
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filepath.Base(path)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", path.Base(cleanPath)))
 	w.Header().Set("Content-Type", "application/octet-stream")
 
 	if _, err := io.Copy(w, reader); err != nil {
@@ -939,11 +978,13 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	path := r.FormValue("path")
-	if path == "" {
-		path = "/"
+	pathParam := r.FormValue("path")
+	if pathParam == "" {
+		pathParam = "/"
 	}
-	remotePath := filepath.Join(path, header.Filename)
+	// Sanitize path and join using path (not filepath) for remote FTP
+	cleanDir := path.Clean("/" + pathParam)
+	remotePath := path.Join(cleanDir, header.Filename)
 
 	// Setup progress tracking
 	session.Mu.Lock()
@@ -1022,7 +1063,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 1. Upload file
-		remotePath = filepath.Join("/", header.Filename) // Root dir
+		remotePath = path.Join("/", header.Filename) // Root dir
 
 		session.Mu.Lock()
 		session.UploadStatus = UploadStatus{
@@ -1054,11 +1095,13 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// Check for existing path
-		remotePath = r.FormValue("existing_path")
-		if remotePath == "" {
+		existingPath := r.FormValue("existing_path")
+		if existingPath == "" {
 			http.Error(w, "Missing file or existing_path", http.StatusBadRequest)
 			return
 		}
+		// Sanitize existing path
+		remotePath = path.Clean("/" + existingPath)
 		// No upload needed
 	}
 
@@ -1238,6 +1281,7 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 			slog.Warn("Failed to open 3mf reader", "error", err)
 			return
 		}
+		rdr.MaxFileSize = s.MaxFileSize
 		defer rdr.Close()
 
 		md, err := rdr.ParseMetadata()
@@ -1391,6 +1435,7 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 		slog.Warn("Failed to create 3MF reader", "error", err)
 		return
 	}
+	rdr.MaxFileSize = s.MaxFileSize
 	defer rdr.Close()
 
 	md, err := rdr.ParseMetadata()
@@ -1437,8 +1482,8 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string) (*os.File, int64, string, error) {
 	// If the file starts with "_", try the version without it first.
 	// The printer often reports "_foo.3mf" but the actual file we want is often "foo.3mf".
-	if strings.HasPrefix(filename, "_") {
-		corrected := strings.TrimPrefix(filename, "_")
+	if after, ok := strings.CutPrefix(filename, "_"); ok {
+		corrected := after
 		slog.Debug("Attempting to download sanitized filename first", "original", filename, "try", corrected)
 		t, sz, err := s.downloadToTemp(session, corrected)
 		if err == nil {

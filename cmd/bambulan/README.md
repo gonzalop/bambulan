@@ -63,6 +63,7 @@ Start the web dashboard (default port 8080).
 - `--secret`: Secret for session encryption (optional, random default)
 - `--cert`: TLS certificate file (enables HTTPS)
 - `--key`: TLS private key file (enables HTTPS)
+- `--max-file-size`: Maximum allowed size for 3MF file entries (default: `50MB`). Supports human-readable formats like `100MB`, `1GB`, `500KB`.
 
 **HTTPS Support:**
 

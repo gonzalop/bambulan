@@ -21,6 +21,36 @@ import (
 
 var version = "dev"
 
+// ByteSize represents a size in bytes, but can be unmarshaled from strings like "5MB", "10KB", etc.
+type ByteSize int64
+
+func (b *ByteSize) UnmarshalText(text []byte) error {
+	s := strings.ToUpper(string(text))
+	var multiplier int64 = 1
+
+	switch {
+	case strings.HasSuffix(s, "GB") || strings.HasSuffix(s, "G"):
+		multiplier = 1024 * 1024 * 1024
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "GB"), "G")
+	case strings.HasSuffix(s, "MB") || strings.HasSuffix(s, "M"):
+		multiplier = 1024 * 1024
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "MB"), "M")
+	case strings.HasSuffix(s, "KB") || strings.HasSuffix(s, "K"):
+		multiplier = 1024
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "KB"), "K")
+	case strings.HasSuffix(s, "B"):
+		s = strings.TrimSuffix(s, "B")
+	}
+
+	val, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid byte size: %q", string(text))
+	}
+
+	*b = ByteSize(val * multiplier)
+	return nil
+}
+
 var cli struct {
 	Version kong.VersionFlag `short:"v" help:"Print version"`
 	Host    string           `help:"Printer IP or hostname" env:"BAMBULAN_HOST" short:"H"`
