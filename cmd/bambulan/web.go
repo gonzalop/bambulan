@@ -176,6 +176,7 @@ func (s *WebServer) Start() error {
 		http.HandleFunc("/api/connection", s.octoPrintAuth(s.handleOctoConnection))
 		http.HandleFunc("/api/printer", s.octoPrintAuth(s.handleOctoPrinter))
 		http.HandleFunc("/api/printer/command", s.octoPrintAuth(s.handleOctoCommand))
+		http.HandleFunc("/api/job", s.octoPrintAuth(s.handleOctoJob))
 		http.HandleFunc("/api/files/local", s.octoPrintAuth(s.handleOctoFiles))
 	}
 
@@ -1999,4 +2000,139 @@ func (s *WebServer) handleOctoCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *WebServer) handleOctoJob(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.getOctoSession()
+	if !ok {
+		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
+		return
+	}
+
+	session.Mu.RLock()
+	st := session.Status
+	session.Mu.RUnlock()
+
+	if st == nil {
+		http.Error(w, "Printer status not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		completion := float64(st.McPercent)
+		printTimeLeft := st.McRemainingTime * 60
+
+		stateStr := "Operational"
+		if st.Lifecycle == "printing" || st.GcodeState == "RUNNING" {
+			stateStr = "Printing"
+		}
+		if st.GcodeState == "PAUSE" {
+			stateStr = "Paused"
+		}
+
+		resp := map[string]any{
+			"job": map[string]any{
+				"file": map[string]any{
+					"name":   st.SubtaskName,
+					"origin": "local",
+				},
+				"estimatedPrintTime": nil,
+			},
+			"progress": map[string]any{
+				"completion":    completion,
+				"printTimeLeft": printTimeLeft,
+			},
+			"state": stateStr,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var payload struct {
+			Command string `json:"command"`
+			Action  string `json:"action"` // for pause command
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		isActive := st.Lifecycle == "printing" || st.GcodeState == "RUNNING" || st.GcodeState == "PAUSE"
+		isPaused := st.GcodeState == "PAUSE"
+
+		switch payload.Command {
+		case "start":
+			if isActive {
+				http.Error(w, "Print already active", http.StatusConflict)
+				return
+			}
+			http.Error(w, "Starting without file selection not supported", http.StatusConflict)
+			return
+
+		case "cancel":
+			if !isActive {
+				http.Error(w, "No active print", http.StatusConflict)
+				return
+			}
+			if _, err := session.Client.MQTT.StopPrint(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+		case "restart":
+			if !isActive || !isPaused {
+				http.Error(w, "Print must be active and paused to restart", http.StatusConflict)
+				return
+			}
+			http.Error(w, "Restart not supported", http.StatusConflict)
+			return
+
+		case "pause":
+			if !isActive {
+				http.Error(w, "No active print to pause", http.StatusConflict)
+				return
+			}
+
+			action := payload.Action
+			if action == "" || action == "toggle" {
+				if isPaused {
+					action = "resume"
+				} else {
+					action = "pause"
+				}
+			}
+
+			if action == "pause" {
+				if isPaused {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				if _, err := session.Client.MQTT.PausePrint(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else if action == "resume" {
+				if !isPaused {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				if _, err := session.Client.MQTT.ResumePrint(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+
+		default:
+			http.Error(w, "Invalid command", http.StatusBadRequest)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
