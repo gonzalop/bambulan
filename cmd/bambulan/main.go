@@ -645,12 +645,14 @@ func (c *CaptureCmd) Run(ctx *Context) error {
 }
 
 type TempCmd struct {
-	Head TempHeadCmd `cmd:"" help:"Set nozzle temperature"`
-	Bed  TempBedCmd  `cmd:"" help:"Set bed temperature"`
+	Head    TempHeadCmd    `cmd:"" help:"Set nozzle temperature"`
+	Bed     TempBedCmd     `cmd:"" help:"Set bed temperature"`
+	Chamber TempChamberCmd `cmd:"" help:"Set chamber temperature"`
 }
 
 type TempHeadCmd struct {
 	Temperature int `arg:"" help:"Temperature in Celsius"`
+	Tool        int `help:"Tool (extruder) index" default:"0" short:"t"`
 }
 
 func (c *TempHeadCmd) Run(ctx *Context) error {
@@ -661,10 +663,10 @@ func (c *TempHeadCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetNozzleTemperature(c.Temperature); err != nil {
+	if _, err := client.MQTT.SetNozzleTemperature(c.Temperature, c.Tool); err != nil {
 		return err
 	}
-	fmt.Printf("Set nozzle temperature to %d°C\n", c.Temperature)
+	fmt.Printf("Set nozzle %d temperature to %d°C\n", c.Tool, c.Temperature)
 	return nil
 }
 
@@ -684,6 +686,25 @@ func (c *TempBedCmd) Run(ctx *Context) error {
 		return err
 	}
 	fmt.Printf("Set bed temperature to %d°C\n", c.Temperature)
+	return nil
+}
+
+type TempChamberCmd struct {
+	Temperature int `arg:"" help:"Temperature in Celsius"`
+}
+
+func (c *TempChamberCmd) Run(ctx *Context) error {
+	client := ctx.Client
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+	time.Sleep(1 * time.Second)
+
+	if _, err := client.MQTT.SetChamberTemperature(c.Temperature); err != nil {
+		return err
+	}
+	fmt.Printf("Set chamber temperature to %d°C\n", c.Temperature)
 	return nil
 }
 

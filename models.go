@@ -61,6 +61,9 @@ type PrinterStatus struct {
 	// Note: Not all printers have a chamber temperature sensor.
 	ChamberTemp float64 `json:"chamber_temper"`
 
+	// ChamberTargetTemp is the target chamber temperature in Celsius (for printers with heaters).
+	ChamberTargetTemp float64 `json:"chamber_target_temper"`
+
 	// McPrintStage is the internal numeric code for the current print stage.
 	// Use GetPrintStageName() to get a human-readable description.
 	McPrintStage string `json:"mc_print_stage"`

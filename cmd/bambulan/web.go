@@ -1691,13 +1691,28 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxNozzleTemp), http.StatusBadRequest)
 			return
 		}
-		_, err = session.Client.MQTT.SetNozzleTemperature(temp)
+		indexStr := r.FormValue("index")
+		index := 0
+		if indexStr != "" {
+			index, _ = strconv.Atoi(indexStr)
+		}
+		_, err = session.Client.MQTT.SetNozzleTemperature(temp, index)
 	case "bed":
 		if temp > caps.MaxBedTemp {
 			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxBedTemp), http.StatusBadRequest)
 			return
 		}
 		_, err = session.Client.MQTT.SetBedTemperature(temp)
+	case "chamber":
+		if !caps.HasChamberHeater {
+			http.Error(w, "Chamber heater not supported", http.StatusBadRequest)
+			return
+		}
+		if temp > caps.MaxChamberTemp {
+			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxChamberTemp), http.StatusBadRequest)
+			return
+		}
+		_, err = session.Client.MQTT.SetChamberTemperature(temp)
 	default:
 		http.Error(w, "Invalid target type", http.StatusBadRequest)
 		return

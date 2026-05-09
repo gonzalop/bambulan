@@ -12,7 +12,7 @@ It provides a robust developer library, a powerful CLI tool, and a modern, real-
 - **Full Printer Control**:
     - Manage print jobs (`start`, `pause`, `resume`, `stop`, `skip objects`).
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
-    - Control temperatures (nozzle/bed) and fan speeds (part/aux/chamber).
+    - Control temperatures (nozzle/bed/chamber) and fan speeds (part/aux/chamber).
     - Toggle hardware options (lights, sound, camera, filament tangle detection).
 - **Advanced AMS Support**:
     - Load/Unload filament and control AMS units.

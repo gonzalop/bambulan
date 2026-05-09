@@ -132,8 +132,8 @@
                                 style="border: none; background: transparent; padding: 2px 8px; font-size: 0.8em; cursor: pointer; border-radius: 3px;">°F</button>
                         </div>
                     </div>
-                    <div class="metrics-grid">
-                        <div class="metric-item">
+                    <div class="metrics-grid" id="tempMetricsGrid">
+                        <div class="metric-item" id="default_nozzle_row">
                             <div style="display: flex; justify-content: space-between; align-items: top;">
                                 <span class="metric-label">🌡️ Nozzle</span>
                                 <button onclick="showTempControl('nozzle')"
@@ -143,6 +143,7 @@
                                     style="font-size: 0.7em; color: #999;">/ <span id="nozzle_target">--</span> <span
                                         class="temp-unit">°C</span></span></div>
                         </div>
+                        <div id="dynamic_nozzle_container" style="display: contents;"></div>
                         <div class="metric-item">
                             <div style="display: flex; justify-content: space-between; align-items: top;">
                                 <span class="metric-label">🌡️ Bed</span>
@@ -154,8 +155,17 @@
                                         class="temp-unit">°C</span></span></div>
                         </div>
                         <div class="metric-item" id="chamber_row">
-                            <span class="metric-label">🌡️ Chamber</span>
-                            <div class="metric-value"><span id="chamber">--</span> <span class="temp-unit">°C</span>
+                            <div style="display: flex; justify-content: space-between; align-items: top;">
+                                <span class="metric-label">🌡️ Chamber</span>
+                                <button id="btnChamberControl" onclick="showTempControl('chamber')"
+                                    style="display: none; background: none; border: none; padding: 0; cursor: pointer; color: var(--text-light);">⚙️</button>
+                            </div>
+                            <div class="metric-value">
+                                <span id="chamber">--</span>
+                                <span id="chamber_target_container" style="display: none; font-size: 0.7em; color: #999;">
+                                    / <span id="chamber_target">--</span>
+                                </span>
+                                <span class="temp-unit">°C</span>
                             </div>
                         </div>
                     </div>
@@ -245,6 +255,7 @@
         <div class="modal-content">
             <h3 id="tempModalTitle">Set Temperature</h3>
             <input type="hidden" id="tempTargetInput">
+            <input type="hidden" id="tempIndexInput">
             <div style="margin: 20px 0;">
                 <label style="font-weight: bold; display: block; margin-bottom: 10px;">Target: <span
                         id="tempValueDisplay">--</span></label>
@@ -818,15 +829,65 @@
                             safeSetText('layer_num', isActive ? (p.layer_num || 0) : "--");
                             safeSetText('total_layer', isActive ? (p.total_layer_num || 0) : "--");
 
-                            safeSetText('nozzle', formatTemp(p.nozzle_temper));
-                            safeSetText('nozzle_target', formatTemp(p.nozzle_target_temper));
+                            // Nozzle logic
+                            const numExtruders = (data.capabilities && data.capabilities.num_extruders) || 1;
+                            const defaultRow = document.getElementById('default_nozzle_row');
+                            const dynamicContainer = document.getElementById('dynamic_nozzle_container');
+
+                            if (numExtruders > 1) {
+                                if (defaultRow) defaultRow.style.display = 'none';
+                                if (dynamicContainer) {
+                                    let html = "";
+                                    for (let i = 0; i < numExtruders; i++) {
+                                        // Try to find indexed data nozzle_temper_0, nozzle_temper_1 etc.
+                                        // or fallback to single value for the first one.
+                                        let current = (i === 0) ? p.nozzle_temper : (p[`nozzle_temper_${i}`] || 0);
+                                        let target = (i === 0) ? p.nozzle_target_temper : (p[`nozzle_target_temper_${i}`] || 0);
+                                        
+                                        // Check if nozzle_temper is an array
+                                        if (Array.isArray(p.nozzle_temper)) {
+                                            current = p.nozzle_temper[i] || 0;
+                                            target = p.nozzle_target_temper[i] || 0;
+                                        }
+
+                                        html += `
+                                        <div class="metric-item">
+                                            <div style="display: flex; justify-content: space-between; align-items: top;">
+                                                <span class="metric-label">🌡️ Nozzle ${i + 1}</span>
+                                                <button onclick="showTempControl('nozzle', ${i})"
+                                                    style="background: none; border: none; padding: 0; cursor: pointer; color: var(--text-light);">⚙️</button>
+                                            </div>
+                                            <div class="metric-value">
+                                                <span>${formatTemp(current)}</span>
+                                                <span style="font-size: 0.7em; color: #999;">/ <span>${formatTemp(target)}</span> <span class="temp-unit">°${tempUnit}</span></span>
+                                            </div>
+                                        </div>`;
+                                    }
+                                    if (dynamicContainer.innerHTML !== html) dynamicContainer.innerHTML = html;
+                                }
+                            } else {
+                                if (defaultRow) defaultRow.style.display = 'block';
+                                if (dynamicContainer) dynamicContainer.innerHTML = "";
+                                safeSetText('nozzle', formatTemp(p.nozzle_temper));
+                                safeSetText('nozzle_target', formatTemp(p.nozzle_target_temper));
+                            }
                             safeSetText('bed', formatTemp(p.bed_temper));
                             safeSetText('bed_target', formatTemp(p.bed_target_temper));
 
-                            // Chamber temp of 5 often means invalid/no sensor
-                            if (p.chamber_temper > 5) {
+                            // Chamber logic
+                            const hasChamberHeater = data.capabilities && data.capabilities.has_chamber_heater;
+                            if (p.chamber_temper > 5 || hasChamberHeater) {
                                 safeSetText('chamber', formatTemp(p.chamber_temper));
                                 safeSetStyleLocal('chamber_row', 'display', 'block');
+
+                                if (hasChamberHeater) {
+                                    safeSetStyleLocal('btnChamberControl', 'display', 'block');
+                                    safeSetStyleLocal('chamber_target_container', 'display', 'inline');
+                                    safeSetText('chamber_target', formatTemp(p.chamber_target_temper));
+                                } else {
+                                    safeSetStyleLocal('btnChamberControl', 'display', 'none');
+                                    safeSetStyleLocal('chamber_target_container', 'display', 'none');
+                                }
                             } else {
                                 safeSetStyleLocal('chamber_row', 'display', 'none');
                             }
@@ -1104,21 +1165,28 @@
                 .catch(err => console.error("Status fetch error:", err));
         }
 
-        function showTempControl(target) {
+        function showTempControl(target, index) {
             document.getElementById('tempTargetInput').value = target;
-            const title = (target === "nozzle") ? "Nozzle Temperature" : "Bed Temperature";
-            document.getElementById('tempModalTitle').innerText = "Set " + title;
-
+            document.getElementById('tempIndexInput').value = index !== undefined ? index : "";
+            let title = "Temperature";
             const rangeInput = document.getElementById('tempRange');
             const numInput = document.getElementById('tempNumber');
+            let limit = 300;
 
             if (target === "nozzle") {
-                rangeInput.max = nozzleTempLimit;
-                numInput.max = nozzleTempLimit;
-            } else {
-                rangeInput.max = bedTempLimit;
-                numInput.max = bedTempLimit;
+                title = index !== undefined ? `Nozzle ${index + 1} Temperature` : "Nozzle Temperature";
+                limit = nozzleTempLimit;
+            } else if (target === "bed") {
+                title = "Bed Temperature";
+                limit = bedTempLimit;
+            } else if (target === "chamber") {
+                title = "Chamber Temperature";
+                limit = (latestStatus && latestStatus.capabilities) ? latestStatus.capabilities.max_chamber_temp : 60;
             }
+
+            document.getElementById('tempModalTitle').innerText = "Set " + title;
+            rangeInput.max = limit;
+            numInput.max = limit;
 
             // Get current target
             let current = 0;
@@ -1152,11 +1220,16 @@
                 createBtn("PLA", 220);
                 createBtn("PETG", 250);
                 createBtn("ABS", 270);
-            } else {
+            } else if (target === "bed") {
                 createBtn("PLA", 55);
                 createBtn("PETG", 70);
                 createBtn("ABS", 90);
-                createBtn("Max", bedTempLimit);
+                createBtn("Max", limit);
+            } else if (target === "chamber") {
+                createBtn("Low", 35);
+                createBtn("Med", 45);
+                createBtn("High", 55);
+                createBtn("Max", limit);
             }
 
             document.getElementById('tempModal').style.display = 'flex';
@@ -1170,8 +1243,14 @@
 
         function submitTempControl() {
             const target = document.getElementById('tempTargetInput').value;
+            const index = document.getElementById('tempIndexInput').value;
             const temp = document.getElementById('tempNumber').value;
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            let body = `cmd=set_temp&target=${target}&temp=${temp}`;
+            if (index !== "") {
+                body += `&index=${index}`;
+            }
 
             fetch('/api/control', {
                 method: 'POST',
@@ -1179,7 +1258,7 @@
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-CSRF-Token': token
                 },
-                body: `cmd=set_temp&target=${target}&temp=${temp}`
+                body: body
             }).then(resp => {
                 if (!resp.ok) {
                     resp.text().then(t => alert("Failed: " + t));

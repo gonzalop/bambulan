@@ -124,7 +124,9 @@ When using HTTPS, cookies are automatically marked with the `Secure` flag for en
 ```bash
 # Set temperatures
 ./bambulan temp head 220
+./bambulan temp head 250 --tool 1  # Set second nozzle (for dual-extruder models)
 ./bambulan temp bed 60
+./bambulan temp chamber 50        # Set chamber temperature (for supported models)
 
 # Set fan speeds
 ./bambulan fan 50        # Set all fans to 50%

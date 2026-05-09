@@ -795,6 +795,7 @@ func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
 //
 // Parameters:
 //   - temp: The target temperature in Celsius.
+//   - toolIdx: The index of the tool (extruder) to set (optional, use 0 for single).
 //
 // Returns:
 //   - The sequence ID of the G-code command.
@@ -802,12 +803,45 @@ func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
 //
 // Example:
 //
-//	client.MQTT.SetNozzleTemperature(220) // Set nozzle to 220°C
-func (m *MQTTClient) SetNozzleTemperature(temp int) (string, error) {
-	if temp < 0 || temp > 320 {
-		return "", fmt.Errorf("invalid nozzle temperature: %d (must be 0-320)", temp)
+//	client.MQTT.SetNozzleTemperature(220, 0) // Set nozzle 1 to 220°C
+func (m *MQTTClient) SetNozzleTemperature(temp int, toolIdx int) (string, error) {
+	limit := m.status.NozzleTempLimit
+	if limit == 0 {
+		limit = 300 // Default safe limit
 	}
+	if temp < 0 || temp > limit {
+		return "", fmt.Errorf("invalid nozzle temperature: %d (must be 0-%d)", temp, limit)
+	}
+
 	gcode := fmt.Sprintf("M104 S%d\n", temp)
+	if toolIdx > 0 {
+		gcode = fmt.Sprintf("M104 T%d S%d\n", toolIdx, temp)
+	}
+	return m.SendGCode(gcode)
+}
+
+// SetChamberTemperature sets the target chamber temperature using M191 G-code.
+//
+// Parameters:
+//   - temp: The target temperature in Celsius.
+//
+// Returns:
+//   - The sequence ID of the G-code command.
+//   - An error if the command could not be sent.
+//
+// Example:
+//
+//	client.MQTT.SetChamberTemperature(50) // Set chamber to 50°C
+func (m *MQTTClient) SetChamberTemperature(temp int) (string, error) {
+	caps := GetPrinterCapabilities(m.status.DeviceModel)
+	if !caps.HasChamberHeater {
+		return "", fmt.Errorf("printer does not support chamber heating")
+	}
+	limit := caps.MaxChamberTemp
+	if temp < 0 || temp > limit {
+		return "", fmt.Errorf("invalid chamber temperature: %d (must be 0-%d)", temp, limit)
+	}
+	gcode := fmt.Sprintf("M191 S%d\n", temp)
 	return m.SendGCode(gcode)
 }
 func (m *MQTTClient) processInfo(info *InfoMessage) {
