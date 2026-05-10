@@ -1,0 +1,382 @@
+package octoprint
+
+import (
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"path"
+	"strings"
+
+	"github.com/gonzalop/bambulan"
+)
+
+// SessionFunc is a callback that the Handler uses to retrieve the active
+// bambulan Client and PrinterStatus for an incoming request. The WebServer
+// implements this so the handler does not depend on WebServer internals.
+type SessionFunc func() (*bambulan.Client, *bambulan.PrinterStatus, bool)
+
+// Handler is an http.Handler that serves the OctoPrint compatibility API.
+// Register its routes with http.HandleFunc or a mux — see RegisterRoutes.
+type Handler struct {
+	session SessionFunc
+	apiKey  string
+}
+
+// NewHandler creates a Handler.
+//
+//   - session: called per-request to obtain the active client and status.
+//   - apiKey: the expected value of the X-Api-Key header (or "apikey" query param).
+func NewHandler(session SessionFunc, apiKey string) *Handler {
+	return &Handler{session: session, apiKey: apiKey}
+}
+
+// RegisterRoutes wires all OctoPrint routes into mux.
+// Callers typically pass http.DefaultServeMux or their own mux.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	auth := h.authMiddleware
+
+	mux.HandleFunc("/api/version", auth(h.handleVersion))
+	mux.HandleFunc("/api/connection", auth(h.handleConnection))
+	mux.HandleFunc("/api/printer", auth(h.handlePrinter))
+	mux.HandleFunc("/api/printer/command", auth(h.handleCommand))
+	mux.HandleFunc("/api/printer/printhead", auth(h.handlePrinthead))
+	mux.HandleFunc("/api/printer/bed", auth(h.handleBed))
+	mux.HandleFunc("/api/printer/chamber", auth(h.handleChamber))
+	mux.HandleFunc("/api/printer/tool", auth(h.handleTool))
+	mux.HandleFunc("/api/job", auth(h.handleJob))
+
+	// File management — order matters: the specific path prefix must come first.
+	// /api/files/local/<path> handles GET (single entry) and DELETE.
+	// /api/files/local handles GET (list) and POST (upload).
+	// /api/files handles GET (list all).
+	mux.HandleFunc("/api/files/local/", auth(h.handleFileItem)) // trailing slash catches sub-paths
+	mux.HandleFunc("/api/files/local", auth(h.handleFiles))
+	mux.HandleFunc("/api/files", auth(h.handleFiles))
+}
+
+// authMiddleware validates the OctoPrint API key before calling next.
+func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-Api-Key")
+		if key == "" {
+			key = r.URL.Query().Get("apikey")
+		}
+		if h.apiKey == "" || key != h.apiKey {
+			http.Error(w, "Invalid API Key", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// getAdapter returns an Adapter for the current request, or writes an error
+// response and returns nil if no active session is available.
+func (h *Handler) getAdapter(w http.ResponseWriter) (*Adapter, *bambulan.PrinterStatus, bool) {
+	client, status, ok := h.session()
+	if !ok {
+		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
+		return nil, nil, false
+	}
+	return NewAdapter(client), status, true
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("OctoPrint: JSON encode failed", "error", err)
+	}
+}
+
+// handleVersion serves GET /api/version.
+func (h *Handler) handleVersion(w http.ResponseWriter, r *http.Request) {
+	// Version does not need an active session — slicers probe this first.
+	adapter := NewAdapter(nil)
+	writeJSON(w, http.StatusOK, adapter.Version())
+}
+
+// handleConnection serves GET /api/connection.
+func (h *Handler) handleConnection(w http.ResponseWriter, r *http.Request) {
+	adapter := NewAdapter(nil)
+	writeJSON(w, http.StatusOK, adapter.Connection())
+}
+
+// handlePrinter serves GET /api/printer.
+func (h *Handler) handlePrinter(w http.ResponseWriter, r *http.Request) {
+	adapter, status, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+
+	resp, err := adapter.PrinterState(r.Context(), status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleJob serves GET and POST /api/job.
+func (h *Handler) handleJob(w http.ResponseWriter, r *http.Request) {
+	adapter, status, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		resp, err := adapter.JobState(r.Context(), status)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+
+	case http.MethodPost:
+		var cmd JobCommand
+		if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		err := adapter.ExecuteJobCommand(r.Context(), cmd, status)
+		if err != nil {
+			var conflict *ConflictError
+			if errors.As(err, &conflict) {
+				http.Error(w, conflict.Message, http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleCommand serves POST /api/printer/command.
+func (h *Handler) handleCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+
+	var cmd PrinterCommand
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if err := adapter.ExecutePrinterCommand(r.Context(), cmd); err != nil {
+		slog.Error("OctoPrint: G-code command failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handlePrinthead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var cmd PrintheadCommand
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+	if err := adapter.ExecutePrintheadCommand(r.Context(), cmd); err != nil {
+		slog.Error("Printhead command failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleBed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var cmd BedCommand
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+	if err := adapter.ExecuteBedCommand(r.Context(), cmd); err != nil {
+		slog.Error("Bed command failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleChamber(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var cmd ChamberCommand
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+	if err := adapter.ExecuteChamberCommand(r.Context(), cmd); err != nil {
+		slog.Error("Chamber command failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleTool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var cmd ToolCommand
+	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+	if err := adapter.ExecuteToolCommand(r.Context(), cmd); err != nil {
+		slog.Error("Tool command failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleFiles serves GET /api/files, GET /api/files/local (listing)
+// and POST /api/files/local (file upload + optional auto-print).
+func (h *Handler) handleFiles(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.handleFileListing(w, r, "/")
+	case http.MethodPost:
+		h.handleFileUpload(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleFileItem serves GET and DELETE on /api/files/local/<path>.
+func (h *Handler) handleFileItem(w http.ResponseWriter, r *http.Request) {
+	// Strip the route prefix to get the relative file path.
+	relPath := strings.TrimPrefix(r.URL.Path, "/api/files/local/")
+	relPath = path.Clean(relPath)
+	absPath := "/" + relPath
+
+	switch r.Method {
+	case http.MethodGet:
+		h.handleFileListing(w, r, absPath)
+	case http.MethodDelete:
+		adapter, _, ok := h.getAdapter(w)
+		if !ok {
+			return
+		}
+		if err := adapter.DeleteFile(r.Context(), absPath); err != nil {
+			slog.Error("OctoPrint: delete failed", "path", absPath, "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleFileListing lists files in dir and writes a FilesResponse.
+func (h *Handler) handleFileListing(w http.ResponseWriter, r *http.Request, dir string) {
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+
+	recursive := r.URL.Query().Get("recursive") == "true"
+	resp, err := adapter.ListFiles(r.Context(), dir, recursive, serverBaseURL(r))
+	if err != nil {
+		slog.Error("OctoPrint: file listing failed", "dir", dir, "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleFileUpload handles POST /api/files/local (slicer upload + optional print).
+func (h *Handler) handleFileUpload(w http.ResponseWriter, r *http.Request) {
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+
+	// OctoPrint clients can send large gcode files.
+	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
+	if err := r.ParseMultipartForm(500 << 20); err != nil {
+		http.Error(w, "File too large or invalid form", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Missing file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	filename := header.Filename
+	remotePath := path.Clean("/" + filename)
+	shouldPrint := r.FormValue("print") == "true"
+
+	slog.Info("OctoPrint: upload starting", "filename", filename, "size", header.Size)
+
+	resp, err := adapter.UploadAndPrint(r.Context(), file, remotePath, filename, shouldPrint)
+	if err != nil {
+		slog.Error("OctoPrint: upload failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// serverBaseURL returns the scheme+host of the incoming request, used to
+// construct absolute refs URLs in file listing responses.
+func serverBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	// Respect X-Forwarded-Proto if behind a reverse proxy
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	host := r.Host
+	if host == "" {
+		host = "localhost"
+	}
+	return scheme + "://" + host
+}

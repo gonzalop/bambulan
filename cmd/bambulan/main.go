@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -280,7 +281,7 @@ func (c *ChamberLightCmd) Run(ctx *Context) error {
 	time.Sleep(1 * time.Second)
 
 	state := c.State == "on"
-	if _, err := client.MQTT.SetChamberLight(state); err != nil {
+	if _, err := client.MQTT.SetChamberLight(context.Background(), state); err != nil {
 		return err
 	}
 	fmt.Printf("Set chamber light to %v\n", state)
@@ -308,7 +309,7 @@ func (c *SpeedCmd) Run(ctx *Context) error {
 	}
 
 	val := speedMap[c.Mode]
-	if _, err := client.MQTT.SetSpeedProfile(val); err != nil {
+	if _, err := client.MQTT.SetSpeedProfile(context.Background(), val); err != nil {
 		return err
 	}
 	fmt.Printf("Set speed profile to %s (%s)\n", c.Mode, val)
@@ -335,7 +336,7 @@ func (c *PrintSkipCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SkipObjects(c.Objects); err != nil {
+	if _, err := client.MQTT.SkipObjects(context.Background(), c.Objects); err != nil {
 		return err
 	}
 	fmt.Printf("Sent skip objects command for IDs: %v\n", c.Objects)
@@ -367,7 +368,7 @@ func (c *ConfigOptionCmd) Run(ctx *Context) error {
 		enabled = false
 	}
 
-	if _, err := client.MQTT.SetPrintOption(c.Name, enabled); err != nil {
+	if _, err := client.MQTT.SetPrintOption(context.Background(), c.Name, enabled); err != nil {
 		return err
 	}
 	fmt.Printf("Set print option '%s' to %v\n", c.Name, enabled)
@@ -392,7 +393,7 @@ func (c *ConfigMarkerDetectorCmd) Run(ctx *Context) error {
 		enabled = false
 	}
 
-	if _, err := client.MQTT.SetBuildPlateMarkerDetector(enabled); err != nil {
+	if _, err := client.MQTT.SetBuildPlateMarkerDetector(context.Background(), enabled); err != nil {
 		return err
 	}
 	fmt.Printf("Set marker detector to %v\n", enabled)
@@ -412,7 +413,7 @@ func (c *ConfigNozzleCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetNozzleDetails(c.Diameter, c.Type); err != nil {
+	if _, err := client.MQTT.SetNozzleDetails(context.Background(), c.Diameter, c.Type); err != nil {
 		return err
 	}
 	fmt.Printf("Set nozzle details: diameter=%.1f, type=%s\n", c.Diameter, c.Type)
@@ -429,7 +430,7 @@ func (c *PrintPauseCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.PausePrint(); err != nil {
+	if _, err := client.MQTT.PausePrint(context.Background()); err != nil {
 		return err
 	}
 	fmt.Println("Sent pause command")
@@ -446,7 +447,7 @@ func (c *PrintResumeCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.ResumePrint(); err != nil {
+	if _, err := client.MQTT.ResumePrint(context.Background()); err != nil {
 		return err
 	}
 	fmt.Println("Sent resume command")
@@ -463,7 +464,7 @@ func (c *PrintStopCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.StopPrint(); err != nil {
+	if _, err := client.MQTT.StopPrint(context.Background()); err != nil {
 		return err
 	}
 	fmt.Println("Sent stop command")
@@ -553,7 +554,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 			}
 		}
 
-		if err := client.File.UploadFile(localPath, remotePath, uProgressFunc); err != nil {
+		if err := client.File.UploadFile(context.Background(), localPath, remotePath, uProgressFunc); err != nil {
 			fmt.Println()
 			return fmt.Errorf("failed to upload file: %w", err)
 		}
@@ -579,7 +580,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 	fmt.Printf("Options: BedType=%s, AMS=%v, Leveling=%v, FlowCalibration=%v, VibrationCalibration=%v\n",
 		opts.BedType, opts.UseAMS, opts.BedLeveling, opts.FlowCalibration, opts.VibrationCalibration)
 
-	if _, err := client.MQTT.StartPrint(remotePath, opts); err != nil {
+	if _, err := client.MQTT.StartPrint(context.Background(), remotePath, opts); err != nil {
 		return fmt.Errorf("failed to start print: %w", err)
 	}
 	fmt.Println("Print started!")
@@ -604,7 +605,7 @@ func (c *SendGCodeCmd) Run(ctx *Context) error {
 	time.Sleep(1 * time.Second)
 
 	fmt.Println("Calling SendGCode...")
-	seqID, err := client.MQTT.SendGCode(c.GCode)
+	seqID, err := client.MQTT.SendGCode(context.Background(), c.GCode)
 	if err != nil {
 		return err
 	}
@@ -663,7 +664,7 @@ func (c *TempHeadCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetNozzleTemperature(c.Temperature, c.Tool); err != nil {
+	if _, err := client.MQTT.SetNozzleTemperature(context.Background(), c.Temperature, c.Tool); err != nil {
 		return err
 	}
 	fmt.Printf("Set nozzle %d temperature to %d°C\n", c.Tool, c.Temperature)
@@ -682,7 +683,7 @@ func (c *TempBedCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetBedTemperature(c.Temperature); err != nil {
+	if _, err := client.MQTT.SetBedTemperature(context.Background(), c.Temperature); err != nil {
 		return err
 	}
 	fmt.Printf("Set bed temperature to %d°C\n", c.Temperature)
@@ -701,7 +702,7 @@ func (c *TempChamberCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetChamberTemperature(c.Temperature); err != nil {
+	if _, err := client.MQTT.SetChamberTemperature(context.Background(), c.Temperature); err != nil {
 		return err
 	}
 	fmt.Printf("Set chamber temperature to %d°C\n", c.Temperature)
@@ -754,7 +755,7 @@ func (c *FanCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetFanSpeed(fan, speed); err != nil {
+	if _, err := client.MQTT.SetFanSpeed(context.Background(), fan, speed); err != nil {
 		return err
 	}
 	fmt.Printf("Set %s fan speed to %d%%\n", fan, speed)
@@ -779,7 +780,7 @@ type FileLsCmd struct {
 func (c *FileLsCmd) Run(ctx *Context) error {
 	fmt.Printf("Listing files in %s...\n", c.Path)
 	if c.Extension != "" {
-		files, err := ctx.Client.File.GetFiles(c.Path, c.Extension)
+		files, err := ctx.Client.File.GetFiles(context.Background(), c.Path, c.Extension)
 		if err != nil {
 			return err
 		}
@@ -787,7 +788,7 @@ func (c *FileLsCmd) Run(ctx *Context) error {
 			fmt.Println(f)
 		}
 	} else {
-		files, err := ctx.Client.File.ListFiles(c.Path)
+		files, err := ctx.Client.File.ListFiles(context.Background(), c.Path)
 		if err != nil {
 			return err
 		}
@@ -825,7 +826,7 @@ func (c *FileDownloadCmd) Run(ctx *Context) error {
 		}
 	}
 
-	if err := ctx.Client.File.DownloadFile(c.Remote, local, progressFunc); err != nil {
+	if err := ctx.Client.File.DownloadFile(context.Background(), c.Remote, local, progressFunc); err != nil {
 		fmt.Println()
 		return err
 	}
@@ -852,7 +853,7 @@ func (c *FileDownloadDirCmd) Run(ctx *Context) error {
 		}
 	}
 
-	if err := ctx.Client.File.DownloadDirectory(c.Remote, c.Local, c.Recursive, progressFunc); err != nil {
+	if err := ctx.Client.File.DownloadDirectory(context.Background(), c.Remote, c.Local, c.Recursive, progressFunc); err != nil {
 		fmt.Println()
 		return err
 	}
@@ -883,7 +884,7 @@ func (c *FileUploadCmd) Run(ctx *Context) error {
 		}
 	}
 
-	if err := ctx.Client.File.UploadFile(c.Local, remote, progressFunc); err != nil {
+	if err := ctx.Client.File.UploadFile(context.Background(), c.Local, remote, progressFunc); err != nil {
 		fmt.Println()
 		return err
 	}
@@ -899,12 +900,12 @@ type FileRmCmd struct {
 func (c *FileRmCmd) Run(ctx *Context) error {
 	if c.Recursive {
 		fmt.Printf("Recursively removing %s...\n", c.Path)
-		if err := ctx.Client.File.RemoveAll(c.Path); err != nil {
+		if err := ctx.Client.File.RemoveAll(context.Background(), c.Path); err != nil {
 			return err
 		}
 	} else {
 		fmt.Printf("Removing file %s...\n", c.Path)
-		if err := ctx.Client.File.Delete(c.Path); err != nil {
+		if err := ctx.Client.File.Delete(context.Background(), c.Path); err != nil {
 			return err
 		}
 	}
@@ -918,7 +919,7 @@ type FileMkdirCmd struct {
 
 func (c *FileMkdirCmd) Run(ctx *Context) error {
 	fmt.Printf("Creating directory %s...\n", c.Path)
-	if err := ctx.Client.File.MakeDirectory(c.Path); err != nil {
+	if err := ctx.Client.File.MakeDirectory(context.Background(), c.Path); err != nil {
 		return err
 	}
 	fmt.Println("Done.")
@@ -932,7 +933,7 @@ type FileMvCmd struct {
 
 func (c *FileMvCmd) Run(ctx *Context) error {
 	fmt.Printf("Moving %s to %s...\n", c.Source, c.Dest)
-	if err := ctx.Client.File.Rename(c.Source, c.Dest); err != nil {
+	if err := ctx.Client.File.Rename(context.Background(), c.Source, c.Dest); err != nil {
 		return err
 	}
 	fmt.Println("Done.")
@@ -986,7 +987,7 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 	defer client.Stop()
 
 	// DumpInfo is called on connect, but we can also explicitly call it
-	if _, err := client.MQTT.DumpInfo(); err != nil {
+	if _, err := client.MQTT.DumpInfo(context.Background()); err != nil {
 		return err
 	}
 
@@ -1019,7 +1020,7 @@ func (c *AmsUnloadCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.UnloadFilament(); err != nil {
+	if _, err := client.MQTT.UnloadFilament(context.Background()); err != nil {
 		return err
 	}
 	fmt.Println("Sent unload filament command")
@@ -1038,7 +1039,7 @@ func (c *AmsLoadCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.LoadFilament(c.Target); err != nil {
+	if _, err := client.MQTT.LoadFilament(context.Background(), c.Target); err != nil {
 		return err
 	}
 	fmt.Printf("Sent load filament command for slot %d\n", c.Target)
@@ -1057,7 +1058,7 @@ func (c *AmsControlCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SendAMSControlCommand(c.Command); err != nil {
+	if _, err := client.MQTT.SendAMSControlCommand(context.Background(), c.Command); err != nil {
 		return err
 	}
 	fmt.Printf("Sent AMS control command: %s\n", c.Command)
@@ -1079,7 +1080,7 @@ func (c *AmsUserSettingCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetAMSUserSetting(c.Unit, c.StartupRead, c.TrayRead, c.CalibrateRemain); err != nil {
+	if _, err := client.MQTT.SetAMSUserSetting(context.Background(), c.Unit, c.StartupRead, c.TrayRead, c.CalibrateRemain); err != nil {
 		return err
 	}
 	fmt.Printf("Sent AMS user settings update for unit %d\n", c.Unit)
@@ -1100,7 +1101,7 @@ func (c *AmsKFactorCmd) Run(ctx *Context) error {
 	defer client.Stop()
 	time.Sleep(1 * time.Second)
 
-	if _, err := client.MQTT.SetSpoolKFactor(c.Tray, c.K, c.N); err != nil {
+	if _, err := client.MQTT.SetSpoolKFactor(context.Background(), c.Tray, c.K, c.N); err != nil {
 		return err
 	}
 	fmt.Printf("Sent K-factor update for tray %d: K=%f, N=%f\n", c.Tray, c.K, c.N)
@@ -1258,7 +1259,7 @@ func (c *AmsFilamentCmd) Run(ctx *Context) error {
 	fmt.Printf("Updating AMS Unit %d Slot %d...\n  Type: %s\n  Color: %s\n  FilamentID: %s\n  SettingID: %s\n  Temp: %d-%d\n",
 		c.Unit, c.Slot, c.Type, c.Color, c.FilamentID, c.SettingID, c.MinTemp, c.MaxTemp)
 
-	seqID, err := client.MQTT.SetAMSFilament(c.Unit, c.Slot, c.FilamentID, c.SettingID, c.Color, c.Type, c.MinTemp, c.MaxTemp)
+	seqID, err := client.MQTT.SetAMSFilament(context.Background(), c.Unit, c.Slot, c.FilamentID, c.SettingID, c.Color, c.Type, c.MinTemp, c.MaxTemp)
 	if err != nil {
 		return err
 	}

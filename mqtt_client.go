@@ -175,12 +175,16 @@ func (m *MQTTClient) onConnect(client *mq.Client) {
 		slog.Debug("Subscribed to topic", "topic", topic)
 
 		go func() {
+			// Initial fetch uses a dedicated timeout context
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
 			// Request version info to detect model (for bed limits)
-			if _, err := m.GetVersion(); err != nil {
+			if _, err := m.GetVersion(ctx); err != nil {
 				slog.Error("Failed to get version on connect", "error", err)
 			}
 			// Request full status update to ensure we have all fields (like lights_report)
-			if _, err := m.DumpInfo(); err != nil {
+			if _, err := m.DumpInfo(ctx); err != nil {
 				slog.Error("Failed to dump info on connect", "error", err)
 			}
 		}()
@@ -234,7 +238,7 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 }
 
 // Publish sends a JSON command to the printer request topic.
-func (m *MQTTClient) Publish(command any) error {
+func (m *MQTTClient) Publish(ctx context.Context, command any) error {
 	payload, err := json.Marshal(command)
 	if err != nil {
 		return err
@@ -244,8 +248,8 @@ func (m *MQTTClient) Publish(command any) error {
 	// Use QoS 0 for fire-and-forget sending.
 	// We rely on application-level response (Sequence ID) for confirmation.
 	token := m.client.Publish(topic, payload, mq.WithQoS(BambuQoS))
-	// Fire and forget usually doesn't need wait, but for consistency and error checking:
-	if err := token.Wait(context.Background()); err != nil {
+	// Pass ctx to Wait so we can cancel if needed
+	if err := token.Wait(ctx); err != nil {
 		return err
 	}
 	return token.Error()
@@ -256,7 +260,7 @@ func (m *MQTTClient) Publish(command any) error {
 // DumpInfo requests a full status push from the printer.
 // It sends a "pushall" command. The printer will respond by publishing a full status report to the report topic.
 // Returns the sequence ID of the request, which can be used to correlate the response.
-func (m *MQTTClient) DumpInfo() (string, error) {
+func (m *MQTTClient) DumpInfo(ctx context.Context) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"pushing": map[string]any{
@@ -265,11 +269,11 @@ func (m *MQTTClient) DumpInfo() (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // GetVersion requests the printer version info (firmware, model, etc).
-func (m *MQTTClient) GetVersion() (string, error) {
+func (m *MQTTClient) GetVersion(ctx context.Context) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"info": map[string]any{
@@ -278,7 +282,7 @@ func (m *MQTTClient) GetVersion() (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SendGCode sends a single line of G-Code to the printer.
@@ -286,8 +290,8 @@ func (m *MQTTClient) GetVersion() (string, error) {
 //
 // Example:
 //
-//	client.MQTT.SendGCode("G28") // Auto-home
-func (m *MQTTClient) SendGCode(gcode string) (string, error) {
+//	client.MQTT.SendGCode(ctx, "G28") // Auto-home
+func (m *MQTTClient) SendGCode(ctx context.Context, gcode string) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -297,7 +301,7 @@ func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // StartPrint starts a print job for a file already on the printer (SD card).
@@ -309,7 +313,7 @@ func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 // Example:
 //
 //	// 1. Upload file first (see FileClient.UploadFile)
-//	// err := client.File.UploadFile("local.3mf", "my-model.gcode.3mf", nil)
+//	// err := client.File.UploadFile(ctx, "local.3mf", "my-model.gcode.3mf", nil)
 //
 //	// 2. Start Print
 //	opts := bambulan.PrintOptions{
@@ -317,8 +321,8 @@ func (m *MQTTClient) SendGCode(gcode string) (string, error) {
 //	    BedLeveling:     true,
 //	    FlowCalibration: true,
 //	}
-//	seqID, err := client.MQTT.StartPrint("my-model.gcode.3mf", opts)
-func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, error) {
+//	seqID, err := client.MQTT.StartPrint(ctx, "my-model.gcode.3mf", opts)
+func (m *MQTTClient) StartPrint(ctx context.Context, filename string, opts PrintOptions) (string, error) {
 	param := "Metadata/plate_1.gcode"
 	if strings.HasSuffix(strings.ToLower(filename), ".gcode") {
 		param = filename
@@ -345,7 +349,7 @@ func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, err
 			"task_id":        "0",
 		},
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetChamberLight turns the chamber light on or off.
@@ -353,8 +357,8 @@ func (m *MQTTClient) StartPrint(filename string, opts PrintOptions) (string, err
 // Example:
 //
 //	// Turn light on
-//	client.MQTT.SetChamberLight(true)
-func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
+//	client.MQTT.SetChamberLight(ctx, true)
+func (m *MQTTClient) SetChamberLight(ctx context.Context, on bool) (string, error) {
 	mode := "off"
 	if on {
 		mode = "on"
@@ -373,11 +377,11 @@ func (m *MQTTClient) SetChamberLight(on bool) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // PausePrint pauses the current print job.
-func (m *MQTTClient) PausePrint() (string, error) {
+func (m *MQTTClient) PausePrint(ctx context.Context) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -386,11 +390,11 @@ func (m *MQTTClient) PausePrint() (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // ResumePrint resumes a paused print job.
-func (m *MQTTClient) ResumePrint() (string, error) {
+func (m *MQTTClient) ResumePrint(ctx context.Context) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -399,11 +403,11 @@ func (m *MQTTClient) ResumePrint() (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // StopPrint cancels and stops the current print job.
-func (m *MQTTClient) StopPrint() (string, error) {
+func (m *MQTTClient) StopPrint(ctx context.Context) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -412,12 +416,12 @@ func (m *MQTTClient) StopPrint() (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetSpeedProfile sets the print speed profile.
 // Supported levels are defined by Speed* constants in models.go.
-func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
+func (m *MQTTClient) SetSpeedProfile(ctx context.Context, level string) (string, error) {
 	// level: 1=Silent, 2=Standard, 3=Sport, 4=Ludicrous
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
@@ -428,12 +432,13 @@ func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetAMSFilament updates the filament properties for a specific AMS slot.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - amsID: AMS unit ID (0-3).
 //   - trayID: Slot ID (0-3).
 //   - filamentID: Filament ID (e.g., "GFA00").
@@ -442,7 +447,7 @@ func (m *MQTTClient) SetSpeedProfile(level string) (string, error) {
 //   - filamentType: Filament type (e.g., "PLA Basic").
 //   - minTemp: Min nozzle temp (e.g., 190).
 //   - maxTemp: Max nozzle temp (e.g., 220).
-func (m *MQTTClient) SetAMSFilament(amsID, trayID int, filamentID, settingID, color, filamentType string, minTemp, maxTemp int) (string, error) {
+func (m *MQTTClient) SetAMSFilament(ctx context.Context, amsID, trayID int, filamentID, settingID, color, filamentType string, minTemp, maxTemp int) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -460,7 +465,7 @@ func (m *MQTTClient) SetAMSFilament(amsID, trayID int, filamentID, settingID, co
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // UnloadFilament sends a command to the printer to unload the current filament.
@@ -469,7 +474,7 @@ func (m *MQTTClient) SetAMSFilament(amsID, trayID int, filamentID, settingID, co
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) UnloadFilament() (string, error) {
+func (m *MQTTClient) UnloadFilament(ctx context.Context) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -478,19 +483,20 @@ func (m *MQTTClient) UnloadFilament() (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // LoadFilament sends a command to load filament from a specific AMS slot.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - target: The slot ID to load from. 0-15 correspond to the 4 slots in up to 4 AMS units.
 //     254 typically represents the external spool holder.
 //
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) LoadFilament(target int) (string, error) {
+func (m *MQTTClient) LoadFilament(ctx context.Context, target int) (string, error) {
 	if (target < 0 || target > 15) && target != 254 {
 		return "", fmt.Errorf("invalid target: %d (must be 0-15 or 254)", target)
 	}
@@ -506,18 +512,19 @@ func (m *MQTTClient) LoadFilament(target int) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SendAMSControlCommand sends an AMS control command.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - param: The control parameter, one of "resume", "pause", or "reset".
 //
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SendAMSControlCommand(param string) (string, error) {
+func (m *MQTTClient) SendAMSControlCommand(ctx context.Context, param string) (string, error) {
 	allowedParams := map[string]bool{
 		"resume": true, "pause": true, "reset": true,
 	}
@@ -534,12 +541,13 @@ func (m *MQTTClient) SendAMSControlCommand(param string) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetAMSUserSetting updates AMS user settings for a specific unit.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - amsID: The ID of the AMS unit (0-3).
 //   - startupReadOption: If true, the AMS will read the RFID on startup.
 //   - trayReadOption: If true, the AMS will read the RFID when a tray is inserted.
@@ -548,7 +556,7 @@ func (m *MQTTClient) SendAMSControlCommand(param string) (string, error) {
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SetAMSUserSetting(amsID int, startupReadOption, trayReadOption, calibrateRemainFlag bool) (string, error) {
+func (m *MQTTClient) SetAMSUserSetting(ctx context.Context, amsID int, startupReadOption, trayReadOption, calibrateRemainFlag bool) (string, error) {
 	if amsID < 0 || amsID > 3 {
 		return "", fmt.Errorf("invalid amsID: %d (must be 0-3)", amsID)
 	}
@@ -565,12 +573,13 @@ func (m *MQTTClient) SetAMSUserSetting(amsID int, startupReadOption, trayReadOpt
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetSpoolKFactor sets the linear advance K-factor for a specific spool (tray).
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - trayID: The ID of the tray (0-15 or 254).
 //   - kValue: The K-factor value.
 //   - nCoef: The N coefficient (typically 1.4).
@@ -578,7 +587,7 @@ func (m *MQTTClient) SetAMSUserSetting(amsID int, startupReadOption, trayReadOpt
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SetSpoolKFactor(trayID int, kValue float64, nCoef float64) (string, error) {
+func (m *MQTTClient) SetSpoolKFactor(ctx context.Context, trayID int, kValue float64, nCoef float64) (string, error) {
 	if (trayID < 0 || trayID > 15) && trayID != 254 {
 		return "", fmt.Errorf("invalid trayID: %d (must be 0-15 or 254)", trayID)
 	}
@@ -598,12 +607,13 @@ func (m *MQTTClient) SetSpoolKFactor(trayID int, kValue float64, nCoef float64) 
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetPrintOption enables or disables specific printer options.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - option: The option name. Common options include:
 //     "auto_recovery", "auto_switch_filament", "filament_tangle_detect", "sound_enable".
 //   - enabled: The desired state of the option.
@@ -611,7 +621,7 @@ func (m *MQTTClient) SetSpoolKFactor(trayID int, kValue float64, nCoef float64) 
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SetPrintOption(option string, enabled bool) (string, error) {
+func (m *MQTTClient) SetPrintOption(ctx context.Context, option string, enabled bool) (string, error) {
 	allowedOptions := map[string]bool{
 		"auto_recovery":          true,
 		"auto_switch_filament":   true,
@@ -642,18 +652,19 @@ func (m *MQTTClient) SetPrintOption(option string, enabled bool) (string, error)
 		cmd["print"].(map[string]any)["option"] = val
 	}
 
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SkipObjects skips specific objects during a multi-object print.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - objects: A list of object IDs to skip.
 //
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SkipObjects(objects []int) (string, error) {
+func (m *MQTTClient) SkipObjects(ctx context.Context, objects []int) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"print": map[string]any{
@@ -663,18 +674,19 @@ func (m *MQTTClient) SkipObjects(objects []int) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetBuildPlateMarkerDetector enables or disables the AI build plate marker detector (ArUco).
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - enabled: If true, enables the detector.
 //
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SetBuildPlateMarkerDetector(enabled bool) (string, error) {
+func (m *MQTTClient) SetBuildPlateMarkerDetector(ctx context.Context, enabled bool) (string, error) {
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"xcam": map[string]any{
@@ -685,19 +697,20 @@ func (m *MQTTClient) SetBuildPlateMarkerDetector(enabled bool) (string, error) {
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetNozzleDetails configures the printer's nozzle settings.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - diameter: The nozzle diameter in mm (e.g., 0.4).
 //   - typeString: The nozzle type (e.g., "hardened_steel", "stainless_steel").
 //
 // Returns:
 //   - The sequence ID of the command.
 //   - An error if the command could not be published.
-func (m *MQTTClient) SetNozzleDetails(diameter float64, typeString string) (string, error) {
+func (m *MQTTClient) SetNozzleDetails(ctx context.Context, diameter float64, typeString string) (string, error) {
 	allowedDiameters := map[float64]bool{
 		0.2: true, 0.4: true, 0.6: true, 0.8: true,
 	}
@@ -723,13 +736,14 @@ func (m *MQTTClient) SetNozzleDetails(diameter float64, typeString string) (stri
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(cmd)
+	return seqID, m.Publish(ctx, cmd)
 }
 
 // SetFanSpeed sets the speed of the specified fan(s).
 // It sends the appropriate M106 G-code command.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - fan: The fan to control. One of "part" (P1), "aux" (P2), "chamber" (P3), or "all".
 //   - percent: The target speed percentage (0-100).
 //
@@ -739,8 +753,8 @@ func (m *MQTTClient) SetNozzleDetails(diameter float64, typeString string) (stri
 //
 // Example:
 //
-//	client.MQTT.SetFanSpeed("aux", 100) // Set auxiliary fan to 100%
-func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
+//	client.MQTT.SetFanSpeed(ctx, "aux", 100) // Set auxiliary fan to 100%
+func (m *MQTTClient) SetFanSpeed(ctx context.Context, fan string, percent int) (string, error) {
 	// Validate percentage
 	if percent < 0 || percent > 100 {
 		return "", fmt.Errorf("invalid fan speed: %d (must be 0-100)", percent)
@@ -764,12 +778,13 @@ func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
 		return "", fmt.Errorf("invalid fan type: %s (must be part, aux, chamber, or all)", fan)
 	}
 
-	return m.SendGCode(gcode)
+	return m.SendGCode(ctx, gcode)
 }
 
 // SetBedTemperature sets the target bed temperature using M140 G-code.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - temp: The target temperature in Celsius.
 //
 // Returns:
@@ -778,8 +793,8 @@ func (m *MQTTClient) SetFanSpeed(fan string, percent int) (string, error) {
 //
 // Example:
 //
-//	client.MQTT.SetBedTemperature(60) // Set bed to 60°C
-func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
+//	client.MQTT.SetBedTemperature(ctx, 60) // Set bed to 60°C
+func (m *MQTTClient) SetBedTemperature(ctx context.Context, temp int) (string, error) {
 	limit := m.status.BedTempLimit
 	if limit == 0 {
 		limit = 100 // Default safe limit if unknown
@@ -788,12 +803,13 @@ func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
 		return "", fmt.Errorf("invalid bed temperature: %d (must be 0-%d)", temp, limit)
 	}
 	gcode := fmt.Sprintf("M140 S%d\n", temp)
-	return m.SendGCode(gcode)
+	return m.SendGCode(ctx, gcode)
 }
 
 // SetNozzleTemperature sets the target nozzle (tool) temperature using M104 G-code.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - temp: The target temperature in Celsius.
 //   - toolIdx: The index of the tool (extruder) to set (optional, use 0 for single).
 //
@@ -803,8 +819,8 @@ func (m *MQTTClient) SetBedTemperature(temp int) (string, error) {
 //
 // Example:
 //
-//	client.MQTT.SetNozzleTemperature(220, 0) // Set nozzle 1 to 220°C
-func (m *MQTTClient) SetNozzleTemperature(temp int, toolIdx int) (string, error) {
+//	client.MQTT.SetNozzleTemperature(ctx, 220, 0) // Set nozzle 1 to 220°C
+func (m *MQTTClient) SetNozzleTemperature(ctx context.Context, temp int, toolIdx int) (string, error) {
 	limit := m.status.NozzleTempLimit
 	if limit == 0 {
 		limit = 300 // Default safe limit
@@ -817,12 +833,13 @@ func (m *MQTTClient) SetNozzleTemperature(temp int, toolIdx int) (string, error)
 	if toolIdx > 0 {
 		gcode = fmt.Sprintf("M104 T%d S%d\n", toolIdx, temp)
 	}
-	return m.SendGCode(gcode)
+	return m.SendGCode(ctx, gcode)
 }
 
 // SetChamberTemperature sets the target chamber temperature using M191 G-code.
 //
 // Parameters:
+//   - ctx: Context for cancellation.
 //   - temp: The target temperature in Celsius.
 //
 // Returns:
@@ -831,8 +848,8 @@ func (m *MQTTClient) SetNozzleTemperature(temp int, toolIdx int) (string, error)
 //
 // Example:
 //
-//	client.MQTT.SetChamberTemperature(50) // Set chamber to 50°C
-func (m *MQTTClient) SetChamberTemperature(temp int) (string, error) {
+//	client.MQTT.SetChamberTemperature(ctx, 50) // Set chamber to 50°C
+func (m *MQTTClient) SetChamberTemperature(ctx context.Context, temp int) (string, error) {
 	caps := GetPrinterCapabilities(m.status.DeviceModel)
 	if !caps.HasChamberHeater {
 		return "", fmt.Errorf("printer does not support chamber heating")
@@ -842,8 +859,9 @@ func (m *MQTTClient) SetChamberTemperature(temp int) (string, error) {
 		return "", fmt.Errorf("invalid chamber temperature: %d (must be 0-%d)", temp, limit)
 	}
 	gcode := fmt.Sprintf("M191 S%d\n", temp)
-	return m.SendGCode(gcode)
+	return m.SendGCode(ctx, gcode)
 }
+
 func (m *MQTTClient) processInfo(info *InfoMessage) {
 	if info.Command != "get_version" {
 		return

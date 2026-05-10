@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/gonzalop/bambulan"
 	"github.com/gonzalop/bambulan/internal/bambu3mf"
+	"github.com/gonzalop/bambulan/octoprint"
 )
 
 //go:embed templates/*
@@ -83,7 +85,7 @@ type WebServer struct {
 	ClientsMu     sync.Mutex
 	Key           []byte
 	EnableOcto    bool
-	OctoApiKey    string
+	OctoHandler   *octoprint.Handler
 	UseTLS        bool
 	CertFile      string
 	KeyFile       string
@@ -142,11 +144,15 @@ func (c *WebCmd) Run(ctx *Context) error {
 	s.BindAddr = c.Bind
 	s.Key = key
 	s.EnableOcto = c.Octoprint
-	s.OctoApiKey = apiKey
 	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
 	s.CertFile = c.CertFile
 	s.KeyFile = c.KeyFile
 	s.MaxFileSize = int64(c.MaxFileSize)
+
+	if c.Octoprint {
+		s.OctoHandler = octoprint.NewHandler(s.octoSession, apiKey)
+	}
+
 	return s.Start()
 }
 
@@ -170,14 +176,9 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/thumbnail", s.handleAPIThumbnail)
 	http.HandleFunc("/camera", s.handleCamera)
 
-	// OctoPrint API Compatibility (Phase 1 placeholders)
+	// OctoPrint API compatibility layer
 	if s.EnableOcto {
-		http.HandleFunc("/api/version", s.octoPrintAuth(s.handleOctoVersion))
-		http.HandleFunc("/api/connection", s.octoPrintAuth(s.handleOctoConnection))
-		http.HandleFunc("/api/printer", s.octoPrintAuth(s.handleOctoPrinter))
-		http.HandleFunc("/api/printer/command", s.octoPrintAuth(s.handleOctoCommand))
-		http.HandleFunc("/api/job", s.octoPrintAuth(s.handleOctoJob))
-		http.HandleFunc("/api/files/local", s.octoPrintAuth(s.handleOctoFiles))
+		s.OctoHandler.RegisterRoutes(http.DefaultServeMux)
 	}
 
 	if s.UseTLS {
@@ -774,7 +775,7 @@ func (s *WebServer) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	cleanPath := path.Clean("/" + file)
 
 	// 1. Delete file
-	if err := session.Client.File.Delete(cleanPath); err != nil {
+	if err := session.Client.File.Delete(r.Context(), cleanPath); err != nil {
 		slog.Error("Delete failed", "path", cleanPath, "error", err)
 		http.Error(w, "Delete failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -812,7 +813,7 @@ func (s *WebServer) handleAPIRename(w http.ResponseWriter, r *http.Request) {
 	cleanOld := path.Clean("/" + oldPath)
 	cleanNew := path.Clean("/" + newPath)
 
-	if err := session.Client.File.Rename(cleanOld, cleanNew); err != nil {
+	if err := session.Client.File.Rename(r.Context(), cleanOld, cleanNew); err != nil {
 		slog.Error("Rename failed", "old", cleanOld, "new", cleanNew, "error", err)
 		http.Error(w, "Rename failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -848,7 +849,7 @@ func (s *WebServer) handleAPIMkdir(w http.ResponseWriter, r *http.Request) {
 	// Sanitize path
 	cleanPath := path.Clean("/" + pathParam)
 
-	if err := session.Client.File.MakeDirectory(cleanPath); err != nil {
+	if err := session.Client.File.MakeDirectory(r.Context(), cleanPath); err != nil {
 		slog.Error("Mkdir failed", "path", cleanPath, "error", err)
 		http.Error(w, "Mkdir failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -882,23 +883,23 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch cmd {
 	case "light_on":
-		_, err = session.Client.MQTT.SetChamberLight(true)
+		_, err = session.Client.MQTT.SetChamberLight(r.Context(), true)
 	case "light_off":
-		_, err = session.Client.MQTT.SetChamberLight(false)
+		_, err = session.Client.MQTT.SetChamberLight(r.Context(), false)
 	case "speed_silent":
-		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSilent)
+		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedSilent)
 	case "speed_std":
-		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedStandard)
+		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedStandard)
 	case "speed_sport":
-		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedSport)
+		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedSport)
 	case "speed_ludi":
-		_, err = session.Client.MQTT.SetSpeedProfile(bambulan.SpeedLudicrous)
+		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedLudicrous)
 	case "pause":
-		_, err = session.Client.MQTT.PausePrint()
+		_, err = session.Client.MQTT.PausePrint(r.Context())
 	case "resume":
-		_, err = session.Client.MQTT.ResumePrint()
+		_, err = session.Client.MQTT.ResumePrint(r.Context())
 	case "stop":
-		_, err = session.Client.MQTT.StopPrint()
+		_, err = session.Client.MQTT.StopPrint(r.Context())
 	case "set_fan":
 		s.handleFanControl(w, r, session)
 		return
@@ -933,7 +934,7 @@ func (s *WebServer) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
 	// Sanitize path
 	cleanDir := path.Clean("/" + dir)
 
-	files, err := session.Client.File.ListFiles(cleanDir)
+	files, err := session.Client.File.ListFiles(r.Context(), cleanDir)
 	if err != nil {
 		slog.Error("Failed to list files", "dir", cleanDir, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -962,7 +963,7 @@ func (s *WebServer) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
 	// Sanitize path
 	cleanPath := path.Clean("/" + pathParam)
 
-	reader, err := session.Client.File.Download(cleanPath)
+	reader, err := session.Client.File.Download(r.Context(), cleanPath)
 	if err != nil {
 		slog.Error("Failed to start download", "path", cleanPath, "error", err)
 		http.Error(w, "Failed to download", http.StatusInternalServerError)
@@ -1042,7 +1043,7 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := session.Client.File.Upload(remotePath, file, progressCb); err != nil {
+	if err := session.Client.File.Upload(r.Context(), remotePath, file, progressCb); err != nil {
 		slog.Error("Upload failed", "path", remotePath, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1120,7 +1121,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := session.Client.File.Upload(remotePath, file, progressCb); err != nil {
+		if err := session.Client.File.Upload(r.Context(), remotePath, file, progressCb); err != nil {
 			slog.Error("Upload failed during print start", "path", remotePath, "error", err)
 			http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1153,7 +1154,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Start Print
-	if _, err := session.Client.MQTT.StartPrint(remotePath, opts); err != nil {
+	if _, err := session.Client.MQTT.StartPrint(r.Context(), remotePath, opts); err != nil {
 		slog.Error("Start print failed", "path", remotePath, "error", err)
 		http.Error(w, "Start print failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1201,14 +1202,14 @@ func (s *WebServer) handleAPIFilament(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if _, err := session.Client.MQTT.LoadFilament(target); err != nil {
+		if _, err := session.Client.MQTT.LoadFilament(r.Context(), target); err != nil {
 			slog.Error("Load filament failed", "target", target, "error", err)
 			http.Error(w, "Load filament failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 	case "unload":
-		if _, err := session.Client.MQTT.UnloadFilament(); err != nil {
+		if _, err := session.Client.MQTT.UnloadFilament(r.Context()); err != nil {
 			slog.Error("Unload filament failed", "error", err)
 			http.Error(w, "Unload filament failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1280,6 +1281,9 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 	session.Mu.Unlock()
 
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
 		defer func() {
 			session.Mu.Lock()
 			delete(session.Fetching, filename)
@@ -1290,7 +1294,7 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 
 		slog.Info("Async fetching metadata for", "file", filename)
 
-		tmpFile, size, tryFile, err := s.downloadMetadataWithRetry(session, filename)
+		tmpFile, size, tryFile, err := s.downloadMetadataWithRetry(ctx, session, filename)
 		if err != nil {
 			slog.Error("Failed to download metadata after retry", "file", filename, "error", err)
 			session.Mu.Lock()
@@ -1385,32 +1389,21 @@ func (s *WebServer) getSession(w http.ResponseWriter, r *http.Request) (*Session
 	return s.tryRestoreSession(w, r)
 }
 
-func (s *WebServer) octoPrintAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-Api-Key")
-		if key == "" {
-			key = r.URL.Query().Get("apikey")
-		}
-
-		if s.OctoApiKey == "" || key != s.OctoApiKey {
-			http.Error(w, "Invalid API Key", http.StatusForbidden)
-			return
-		}
-
-		next(w, r)
-	}
-}
-
-func (s *WebServer) getOctoSession() (*Session, bool) {
+// octoSession implements octoprint.SessionFunc. It returns the client and
+// status from the first active session, giving the OctoPrint handler access
+// to the printer without depending on WebServer session internals.
+func (s *WebServer) octoSession() (*bambulan.Client, *bambulan.PrinterStatus, bool) {
 	s.Mu.RLock()
 	defer s.Mu.RUnlock()
-	// Use the first active session available
 	for _, sess := range s.Sessions {
 		if sess.Client != nil {
-			return sess, true
+			sess.Mu.RLock()
+			st := sess.Status
+			sess.Mu.RUnlock()
+			return sess.Client, st, true
 		}
 	}
-	return nil, false
+	return nil, nil, false
 }
 
 func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*Session, bool) {
@@ -1539,13 +1532,13 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 	}
 }
 
-func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string) (*os.File, int64, string, error) {
+func (s *WebServer) downloadMetadataWithRetry(ctx context.Context, session *Session, filename string) (*os.File, int64, string, error) {
 	// If the file starts with "_", try the version without it first.
 	// The printer often reports "_foo.3mf" but the actual file we want is often "foo.3mf".
 	if after, ok := strings.CutPrefix(filename, "_"); ok {
 		corrected := after
 		slog.Debug("Attempting to download sanitized filename first", "original", filename, "try", corrected)
-		t, sz, err := s.downloadToTemp(session, corrected)
+		t, sz, err := s.downloadToTemp(ctx, session, corrected)
 		if err == nil {
 			return t, sz, corrected, nil
 		}
@@ -1553,7 +1546,7 @@ func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string)
 	}
 
 	// Fallback to original filename
-	tmpFile, size, err := s.downloadToTemp(session, filename)
+	tmpFile, size, err := s.downloadToTemp(ctx, session, filename)
 	if err == nil {
 		return tmpFile, size, filename, nil
 	}
@@ -1564,7 +1557,7 @@ func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string)
 		// Try .gcode.3mf first (most likely for print jobs)
 		withGcodeExt := filename + ".gcode.3mf"
 		slog.Debug("Attempting to download with .gcode.3mf appended", "original", filename, "try", withGcodeExt)
-		t, sz, err := s.downloadToTemp(session, withGcodeExt)
+		t, sz, err := s.downloadToTemp(ctx, session, withGcodeExt)
 		if err == nil {
 			return t, sz, withGcodeExt, nil
 		}
@@ -1573,7 +1566,7 @@ func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string)
 		// Try .3mf second
 		withExt := filename + ".3mf"
 		slog.Debug("Attempting to download with .3mf appended", "original", filename, "try", withExt)
-		t, sz, err = s.downloadToTemp(session, withExt)
+		t, sz, err = s.downloadToTemp(ctx, session, withExt)
 		if err == nil {
 			return t, sz, withExt, nil
 		}
@@ -1583,8 +1576,8 @@ func (s *WebServer) downloadMetadataWithRetry(session *Session, filename string)
 	return nil, 0, "", err
 }
 
-func (s *WebServer) downloadToTemp(session *Session, target string) (*os.File, int64, error) {
-	rc, err := session.Client.File.Download(target)
+func (s *WebServer) downloadToTemp(ctx context.Context, session *Session, target string) (*os.File, int64, error) {
+	rc, err := session.Client.File.Download(ctx, target)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1725,7 +1718,7 @@ func (s *WebServer) handleFanControl(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 
-	if _, err := session.Client.MQTT.SetFanSpeed(fan, speed); err != nil {
+	if _, err := session.Client.MQTT.SetFanSpeed(r.Context(), fan, speed); err != nil {
 		slog.Error("Control command failed", "cmd", "set_fan", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1756,13 +1749,13 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 		if indexStr != "" {
 			index, _ = strconv.Atoi(indexStr)
 		}
-		_, err = session.Client.MQTT.SetNozzleTemperature(temp, index)
+		_, err = session.Client.MQTT.SetNozzleTemperature(r.Context(), temp, index)
 	case "bed":
 		if temp > caps.MaxBedTemp {
 			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxBedTemp), http.StatusBadRequest)
 			return
 		}
-		_, err = session.Client.MQTT.SetBedTemperature(temp)
+		_, err = session.Client.MQTT.SetBedTemperature(r.Context(), temp)
 	case "chamber":
 		if !caps.HasChamberHeater {
 			http.Error(w, "Chamber heater not supported", http.StatusBadRequest)
@@ -1772,7 +1765,7 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxChamberTemp), http.StatusBadRequest)
 			return
 		}
-		_, err = session.Client.MQTT.SetChamberTemperature(temp)
+		_, err = session.Client.MQTT.SetChamberTemperature(r.Context(), temp)
 	default:
 		http.Error(w, "Invalid target type", http.StatusBadRequest)
 		return
@@ -1784,355 +1777,4 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-}
-
-// OctoPrint API Compatibility Handlers
-
-func (s *WebServer) handleOctoVersion(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"api":    "0.1",
-		"server": "1.8.6",
-		"text":   "OctoPrint 1.8.6 (BambuLAN Emulation)",
-	})
-}
-
-func (s *WebServer) handleOctoConnection(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"current": map[string]any{
-			"state":          "Operational",
-			"port":           "/dev/bambulan",
-			"baudrate":       115200,
-			"printerProfile": "_default",
-		},
-	})
-}
-
-func (s *WebServer) handleOctoPrinter(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getOctoSession()
-	if !ok {
-		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
-		return
-	}
-
-	session.Mu.RLock()
-	st := session.Status
-	session.Mu.RUnlock()
-
-	if st == nil {
-		http.Error(w, "Printer status not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	caps := bambulan.GetPrinterCapabilities(st.DeviceModel)
-
-	// OctoPrint schema mapping
-	temps := map[string]any{
-		"bed": map[string]any{
-			"actual": st.BedTemp,
-			"target": st.BedTargetTemp,
-		},
-	}
-
-	// Tool 0 (Main)
-	temps["tool0"] = map[string]any{
-		"actual": st.NozzleTemp,
-		"target": st.NozzleTargetTemp,
-	}
-
-	// Tool 1+ (if dual extruder)
-	if caps.NumExtruders > 1 {
-		// Note: st.NozzleTemp for others might need to be indexed if we add it to the model later.
-		// For now, we report tool0's data as a placeholder or use the raw map if we have it.
-		// Slicers usually only care about the active tool's temp for the graph.
-		for i := 1; i < caps.NumExtruders; i++ {
-			key := fmt.Sprintf("tool%d", i)
-			// Placeholder for now as PrinterStatus only has one NozzleTemp field currently
-			temps[key] = map[string]any{
-				"actual": 0.0,
-				"target": 0.0,
-			}
-		}
-	}
-
-	// Chamber (if supported)
-	if caps.HasChamberHeater || st.ChamberTemp > 5 {
-		temps["chamber"] = map[string]any{
-			"actual": st.ChamberTemp,
-			"target": st.ChamberTargetTemp,
-		}
-	}
-
-	resp := map[string]any{
-		"temperature": temps,
-		"state": map[string]any{
-			"text": st.GetPrintStageName(),
-			"flags": map[string]bool{
-				"operational":   true,
-				"printing":      st.GcodeState == "RUNNING",
-				"paused":        st.GcodeState == "PAUSE",
-				"error":         st.PrintError != 0,
-				"ready":         st.GcodeState == "IDLE",
-				"closedOrError": false,
-			},
-		},
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *WebServer) handleOctoFiles(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getOctoSession()
-	if !ok {
-		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// OctoPrint uses 100MB+ for large G-code files
-	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
-		http.Error(w, "File too large or invalid form", http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "Missing file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	// OctoPrint slicers often use / as the target, but we should ensure it goes to root
-	filename := header.Filename
-	targetPath := path.Clean("/" + filename)
-
-	// Stream directly to printer
-	slog.Info("OctoPrint upload starting", "filename", filename, "size", header.Size)
-	err = session.Client.File.Upload(targetPath, file, nil)
-	if err != nil {
-		slog.Error("OctoPrint upload failed", "error", err)
-		http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Check if we should print immediately
-	shouldPrint := r.FormValue("print") == "true"
-	if shouldPrint {
-		slog.Info("OctoPrint initiating print", "filename", filename)
-		// Use default print options for now (bed leveling on, etc.)
-		opts := bambulan.PrintOptions{
-			BedType:              "auto",
-			BedLeveling:          true,
-			FlowCalibration:      false,
-			VibrationCalibration: true,
-		}
-		_, err = session.Client.MQTT.StartPrint(filename, opts)
-		if err != nil {
-			slog.Error("OctoPrint auto-print failed", "error", err)
-			// Don't fail the whole request if upload succeeded but print failed
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{
-		"files": map[string]any{
-			"local": map[string]any{
-				"name": filename,
-				"path": filename,
-			},
-		},
-		"done": true,
-	})
-}
-
-func (s *WebServer) handleOctoCommand(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getOctoSession()
-	if !ok {
-		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var payload struct {
-		Command  string   `json:"command"`
-		Commands []string `json:"commands"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	// OctoPrint sends either "command" or "commands"
-	cmds := payload.Commands
-	if payload.Command != "" {
-		cmds = append(cmds, payload.Command)
-	}
-
-	if len(cmds) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	// Combine commands into a single G-code block
-	gcode := ""
-	for _, c := range cmds {
-		gcode += c + "\n"
-	}
-
-	slog.Info("OctoPrint sending manual G-code", "commands", len(cmds))
-	if _, err := session.Client.MQTT.SendGCode(gcode); err != nil {
-		slog.Error("Failed to send OctoPrint G-code", "error", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *WebServer) handleOctoJob(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.getOctoSession()
-	if !ok {
-		http.Error(w, "No active printer session", http.StatusServiceUnavailable)
-		return
-	}
-
-	session.Mu.RLock()
-	st := session.Status
-	session.Mu.RUnlock()
-
-	if st == nil {
-		http.Error(w, "Printer status not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	if r.Method == http.MethodGet {
-		completion := float64(st.McPercent)
-		printTimeLeft := st.McRemainingTime * 60
-
-		stateStr := "Operational"
-		if st.Lifecycle == "printing" || st.GcodeState == "RUNNING" {
-			stateStr = "Printing"
-		}
-		if st.GcodeState == "PAUSE" {
-			stateStr = "Paused"
-		}
-
-		resp := map[string]any{
-			"job": map[string]any{
-				"file": map[string]any{
-					"name":   st.SubtaskName,
-					"origin": "local",
-				},
-				"estimatedPrintTime": nil,
-			},
-			"progress": map[string]any{
-				"completion":    completion,
-				"printTimeLeft": printTimeLeft,
-			},
-			"state": stateStr,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	if r.Method == http.MethodPost {
-		var payload struct {
-			Command string `json:"command"`
-			Action  string `json:"action"` // for pause command
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		isActive := st.Lifecycle == "printing" || st.GcodeState == "RUNNING" || st.GcodeState == "PAUSE"
-		isPaused := st.GcodeState == "PAUSE"
-
-		switch payload.Command {
-		case "start":
-			if isActive {
-				http.Error(w, "Print already active", http.StatusConflict)
-				return
-			}
-			http.Error(w, "Starting without file selection not supported", http.StatusConflict)
-			return
-
-		case "cancel":
-			if !isActive {
-				http.Error(w, "No active print", http.StatusConflict)
-				return
-			}
-			if _, err := session.Client.MQTT.StopPrint(); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-		case "restart":
-			if !isActive || !isPaused {
-				http.Error(w, "Print must be active and paused to restart", http.StatusConflict)
-				return
-			}
-			http.Error(w, "Restart not supported", http.StatusConflict)
-			return
-
-		case "pause":
-			if !isActive {
-				http.Error(w, "No active print to pause", http.StatusConflict)
-				return
-			}
-
-			action := payload.Action
-			if action == "" || action == "toggle" {
-				if isPaused {
-					action = "resume"
-				} else {
-					action = "pause"
-				}
-			}
-
-			if action == "pause" {
-				if isPaused {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-				if _, err := session.Client.MQTT.PausePrint(); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-			} else if action == "resume" {
-				if !isPaused {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-				if _, err := session.Client.MQTT.ResumePrint(); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-			}
-
-		default:
-			http.Error(w, "Invalid command", http.StatusBadRequest)
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
