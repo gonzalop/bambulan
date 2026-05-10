@@ -42,18 +42,34 @@ go install github.com/gonzalop/bambulan/cmd/bambulan@latest
 ```
 
 **Run:**
-```bash
-# Option 1: Using command-line flags
-bambulan web --host <printer-ip> --code <access-code> --serial <serial>
+BambuLAN uses environment variables for configuration, making it easy to run securely without leaking credentials in your command history.
 
-# Option 2: Using environment variables (cleaner)
+```bash
 export BAMBULAN_HOST="192.168.1.50"
 export BAMBULAN_CODE="12345678"
 export BAMBULAN_SERIAL="01S00A..."
+
+# Start the web dashboard on port 8080 (default)
 bambulan web
+
+# Or bind to a specific address/port
+bambulan web --bind :9000
 ```
 
 See the [CLI Documentation](cmd/bambulan/README.md) for detailed usage and configuration options.
+
+---
+
+### Slicer Integration (OctoPrint Compatibility)
+
+BambuLAN can emulate an **OctoPrint** server, allowing you to send files and control your printer directly from **OrcaSlicer**, **Bambu Studio**, or **PrusaSlicer**.
+
+1.  **Enable Integration**: Start the server with the `--octoprint` flag:
+    ```bash
+    bambulan web --octoprint --api-key my-secret-key
+    ```
+2.  **Configure Slicer**: In your slicer, add a "Physical Printer" using the **OctoPrint** host type.
+3.  **One-Click Print**: You can now monitor temperatures and use "Send and Print" directly from your workspace!
 
 ---
 
