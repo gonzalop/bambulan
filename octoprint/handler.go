@@ -3,6 +3,8 @@ package octoprint
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path"
@@ -44,6 +46,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/printer/bed", auth(h.handleBed))
 	mux.HandleFunc("/api/printer/chamber", auth(h.handleChamber))
 	mux.HandleFunc("/api/printer/tool", auth(h.handleTool))
+	mux.HandleFunc("/api/printerprofiles", auth(h.handlePrinterProfiles))
+	mux.HandleFunc("/api/timelapse", auth(h.handleTimelapse))
+	mux.HandleFunc("/api/timelapse/download/", auth(h.handleTimelapseDownload))
 	mux.HandleFunc("/api/job", auth(h.handleJob))
 
 	// File management — order matters: the specific path prefix must come first.
@@ -268,6 +273,58 @@ func (h *Handler) handleTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handlePrinterProfiles(w http.ResponseWriter, r *http.Request) {
+	adapter, status, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, adapter.PrinterProfiles(status))
+}
+
+func (h *Handler) handleTimelapse(w http.ResponseWriter, r *http.Request) {
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+	resp, err := adapter.ListTimelapses(r.Context(), serverBaseURL(r))
+	if err != nil {
+		slog.Error("Timelapse listing failed", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) handleTimelapseDownload(w http.ResponseWriter, r *http.Request) {
+	adapter, _, ok := h.getAdapter(w)
+	if !ok {
+		return
+	}
+
+	// Extract filename from path: /api/timelapse/download/<name>
+	name := strings.TrimPrefix(r.URL.Path, "/api/timelapse/download/")
+	if name == "" {
+		http.Error(w, "Missing filename", http.StatusBadRequest)
+		return
+	}
+
+	remotePath := path.Join("/timelapse", name)
+	reader, err := adapter.client.File.Download(r.Context(), remotePath)
+	if err != nil {
+		slog.Error("Timelapse download failed", "path", remotePath, "error", err)
+		http.Error(w, "Failed to download timelapse", http.StatusNotFound)
+		return
+	}
+	defer reader.Close()
+
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", name))
+
+	if _, err := io.Copy(w, reader); err != nil {
+		slog.Error("Timelapse stream failed", "error", err)
+	}
 }
 
 // handleFiles serves GET /api/files, GET /api/files/local (listing)

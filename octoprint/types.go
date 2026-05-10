@@ -197,3 +197,51 @@ type ToolCommand struct {
 	// Amount is the amount to extrude or retract (in mm).
 	Amount int `json:"amount"`
 }
+
+// PrinterProfileResponse is the response for GET /api/printerprofiles.
+type PrinterProfileResponse struct {
+	Profiles map[string]PrinterProfile `json:"profiles"`
+}
+
+// PrinterProfile defines machine dimensions and extruder configuration.
+type PrinterProfile struct {
+	ID            string                `json:"id"`
+	Name          string                `json:"name"`
+	Model         string                `json:"model"`
+	Default       bool                  `json:"default"`
+	Current       bool                  `json:"current"`
+	Volume        PrinterVolume         `json:"volume"`
+	Extruder      PrinterExtruderConfig `json:"extruder"`
+	HeatedBed     bool                  `json:"heatedBed"`
+	HeatedChamber bool                  `json:"heatedChamber"`
+}
+
+// PrinterVolume defines the build area.
+type PrinterVolume struct {
+	FormFactor string `json:"formFactor"` // "rectangular" or "circular"
+	Width      int    `json:"width"`
+	Depth      int    `json:"depth"`
+	Height     int    `json:"height"`
+	Origin     string `json:"origin"` // "lowerleft" or "center"
+}
+
+// PrinterExtruderConfig defines the extruder setup.
+type PrinterExtruderConfig struct {
+	Count          int     `json:"count"`
+	NozzleDiameter float64 `json:"nozzleDiameter"`
+	SharedNozzle   bool    `json:"sharedNozzle"`
+}
+
+// TimelapseResponse is the response for GET /api/timelapse.
+type TimelapseResponse struct {
+	Files   []TimelapseFile `json:"files"`
+	Enabled bool            `json:"enabled"`
+}
+
+// TimelapseFile describes a single recorded timelapse video.
+type TimelapseFile struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Size int64  `json:"size"`
+	Date string `json:"date"` // Format: "YYYY-MM-DD HH:MM"
+}

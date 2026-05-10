@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/gonzalop/bambulan"
 )
@@ -201,6 +202,84 @@ func (a *Adapter) ExecutePrinterCommand(ctx context.Context, cmd PrinterCommand)
 	gcode := strings.Join(lines, "\n") + "\n"
 	_, err := a.client.MQTT.SendGCode(ctx, gcode)
 	return err
+}
+
+// PrinterProfiles returns a single-profile response describing the machine's build
+// volume and heating capabilities.
+func (a *Adapter) PrinterProfiles(status *bambulan.PrinterStatus) PrinterProfileResponse {
+	caps := bambulan.GetPrinterCapabilities(status.DeviceModel)
+
+	width, depth, height := 256, 256, 256
+	if status.DeviceModel == "N1" { // A1 Mini
+		width, depth, height = 180, 180, 180
+	}
+
+	name := caps.DisplayName
+	if name == "" {
+		name = "Bambu Lab Printer"
+	}
+
+	model := status.DeviceModel
+	if model == "" {
+		model = "Generic"
+	}
+
+	profile := PrinterProfile{
+		ID:      "_default",
+		Name:    name,
+		Model:   model,
+		Default: true,
+		Current: true,
+		Volume: PrinterVolume{
+			FormFactor: "rectangular",
+			Width:      width,
+			Depth:      depth,
+			Height:     height,
+			Origin:     "lowerleft",
+		},
+		Extruder: PrinterExtruderConfig{
+			Count:          1,
+			NozzleDiameter: 0.4,
+			SharedNozzle:   false,
+		},
+		HeatedBed:     true, // All Bambu printers have a heated bed
+		HeatedChamber: caps.HasChamberHeater,
+	}
+
+	return PrinterProfileResponse{
+		Profiles: map[string]PrinterProfile{
+			"_default": profile,
+		},
+	}
+}
+
+// ListTimelapses returns the list of recorded timelapse videos.
+func (a *Adapter) ListTimelapses(ctx context.Context, baseURL string) (TimelapseResponse, error) {
+	entries, err := a.client.File.ListFiles(ctx, "/timelapse")
+	if err != nil {
+		return TimelapseResponse{}, err
+	}
+
+	var files []TimelapseFile
+	for _, entry := range entries {
+		if entry.Type == "directory" {
+			continue
+		}
+		// TODO: ftp.Entry currently lacks ModTime. Using current time for now.
+		dateStr := time.Now().Format("2006-01-02 15:04")
+
+		files = append(files, TimelapseFile{
+			Name: entry.Name,
+			URL:  fmt.Sprintf("%s/api/timelapse/download/%s", baseURL, entry.Name),
+			Size: entry.Size,
+			Date: dateStr,
+		})
+	}
+
+	return TimelapseResponse{
+		Files:   files,
+		Enabled: true,
+	}, nil
 }
 
 // ExecutePrintheadCommand handles axis homing and jogging.
