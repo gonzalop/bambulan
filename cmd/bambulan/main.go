@@ -12,11 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/gonzalop/bambulan"
+	"github.com/gonzalop/bambulan/homeassistant"
 	"github.com/gonzalop/bambulan/internal/filament"
 )
 
@@ -71,6 +73,8 @@ var cli struct {
 	File         FileCmd         `cmd:"" help:"File management (ls, download, rm, mkdir, mv)"`
 	Capture      CaptureCmd      `cmd:"" help:"Capture camera frame"`
 	DumpInfo     DumpInfoCmd     `cmd:"" help:"Dump full printer status as JSON"`
+	SysInfo      SysInfoCmd      `cmd:"" help:"Display detailed hardware and network information"`
+	HA           HACmd           `cmd:"" help:"Start Home Assistant MQTT bridge"`
 	Web          WebCmd          `cmd:"" help:"Start web interface"`
 }
 
@@ -998,6 +1002,156 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 		return nil
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("timeout waiting for dump info")
+	}
+}
+
+type SysInfoCmd struct{}
+
+func (c *SysInfoCmd) Run(ctx *Context) error {
+	client := ctx.Client
+
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+
+	// Wait for "complete" update or timeout
+	// "Complete" means we have info (from get_version)
+	timeout := time.After(5 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			status := client.GetPrinterStatus()
+			hasInfo := len(status.Modules) > 0 || status.DeviceModel != ""
+			hasStatus := status.McPrintStage != "" || status.GcodeState != ""
+
+			if hasInfo && hasStatus {
+				c.printSysInfo(client, status)
+				return nil
+			}
+		case <-timeout:
+			// Timeout, print what we have
+			c.printSysInfo(client, client.MQTT.GetPrinterStatus())
+			return nil
+		}
+	}
+}
+
+func (c *SysInfoCmd) printSysInfo(client *bambulan.Client, status *bambulan.PrinterStatus) {
+	fmt.Println("=== Bambu Printer System Information ===")
+	fmt.Println()
+
+	// 1. Hardware Summary
+	caps := bambulan.GetPrinterCapabilities(status.DeviceModel)
+	modelName := caps.DisplayName
+	if modelName == "" {
+		modelName = "Unknown Model (" + status.DeviceModel + ")"
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "HARDWARE SUMMARY")
+	fmt.Fprintf(w, "Model:\t%s\n", modelName)
+	fmt.Fprintf(w, "Serial Number:\t%s\n", client.MQTT.Serial)
+	fmt.Fprintf(w, "Host/IP:\t%s\n", client.MQTT.Hostname)
+
+	wifi := status.WifiSignal
+	if wifi == "" {
+		wifi = "Unknown"
+	}
+	fmt.Fprintf(w, "WiFi Signal:\t%s\n", wifi)
+	w.Flush()
+	fmt.Println()
+
+	// 2. Capabilities
+	fmt.Fprintln(w, "CAPABILITIES")
+	fmt.Fprintf(w, "Nozzle Max Temp:\t%d°C\n", caps.MaxNozzleTemp)
+	fmt.Fprintf(w, "Bed Max Temp:\t%d°C\n", caps.MaxBedTemp)
+	fmt.Fprintf(w, "Chamber Fan:\t%v\n", caps.HasChamberFan)
+	fmt.Fprintf(w, "Aux Fan:\t%v\n", caps.HasAuxFan)
+	fmt.Fprintf(w, "AMS Support:\t%v\n", caps.HasAMSHumidity || caps.HasAMSCapacityReporting)
+	fmt.Fprintf(w, "Timelapse:\t%v\n", caps.HasTimelapse)
+	w.Flush()
+	fmt.Println()
+
+	// 3. Versions (Modules)
+	if len(status.Modules) > 0 {
+		fmt.Fprintln(w, "MODULE\tPROJECT\tSW VER\tHW VER")
+		for _, m := range status.Modules {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", m.Name, m.Project, m.SwVer, m.HwVer)
+		}
+		w.Flush()
+		fmt.Println()
+	}
+
+	// 4. AMS Status
+	if status.Ams != nil {
+		fmt.Fprintln(w, "AMS STATUS")
+		if len(status.Ams.Ams) == 0 {
+			fmt.Fprintf(w, "Status:\tDetected (no units reported yet)\n")
+		} else {
+			for i, unit := range status.Ams.Ams {
+				hum := unit.Humidity
+				if hum == "" {
+					hum = "N/A"
+				}
+				fmt.Fprintf(w, "Unit %d Humidity:\t%s\n", i, hum)
+				for j, tray := range unit.Tray {
+					if tray == nil {
+						continue
+					}
+					filament := tray.TrayType
+					if filament == "" {
+						filament = "Empty"
+					}
+					fmt.Fprintf(w, "  Slot %d:\t%s (%d%%)\n", j+1, filament, tray.Remain)
+				}
+			}
+		}
+		w.Flush()
+	}
+}
+
+type HACmd struct {
+	Broker   string `help:"MQTT broker address (e.g. tcp://192.168.1.100:1883)" env:"BAMBULAN_MQTT_BROKER" required:"" short:"b"`
+	User     string `help:"MQTT username" env:"BAMBULAN_MQTT_USER" short:"u"`
+	Password string `help:"MQTT password" env:"BAMBULAN_MQTT_PASSWORD" short:"p"`
+	Prefix   string `help:"MQTT topic prefix for Home Assistant discovery" env:"BAMBULAN_MQTT_PREFIX" default:"homeassistant"`
+}
+
+func (c *HACmd) Run(ctx *Context) error {
+	client := ctx.Client
+
+	bridge, err := homeassistant.NewBridge(client, c.Broker, c.User, c.Password, c.Prefix)
+	if err != nil {
+		return err
+	}
+	defer bridge.Close()
+
+	if err := client.Start(); err != nil {
+		return err
+	}
+	defer client.Stop()
+
+	slog.Info("Starting Home Assistant bridge", "broker", c.Broker, "printer", client.MQTT.Hostname)
+
+	// Handle interrupt for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- bridge.Start(context.Background())
+	}()
+
+	select {
+	case <-sigChan:
+		fmt.Println("\nShutting down...")
+		return nil
+	case err := <-errChan:
+		return err
 	}
 }
 

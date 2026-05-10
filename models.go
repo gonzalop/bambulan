@@ -36,6 +36,9 @@ type PrinterStatus struct {
 	// DeviceModel is the printer's model ID (e.g., "BL-P001", "C11"). Use this with GetPrinterCapabilities.
 	DeviceModel string `json:"device_model,omitempty"`
 
+	// DevName is the user-defined nickname of the printer.
+	DevName string `json:"dev_name,omitempty"`
+
 	// Modules lists the hardware and software versions of printer components.
 	Modules []ModuleInfo `json:"modules,omitempty"`
 

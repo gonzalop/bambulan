@@ -51,6 +51,18 @@ Dump the full printer status as a JSON object. Useful for debugging or inspectin
 ./bambulan dump-info
 ```
 
+#### System Info
+Display a clean table with detailed hardware information, firmware versions for all modules, and AMS status.
+```bash
+./bambulan sys-info
+```
+
+#### Home Assistant Bridge
+Start a standalone MQTT bridge for Home Assistant discovery and monitoring.
+```bash
+./bambulan ha --broker tcp://192.168.1.100:1883 --user myuser --password mypass
+```
+
 #### Web Interface
 Start the web dashboard (default port 8080).
 ```bash
@@ -66,6 +78,10 @@ Start the web dashboard (default port 8080).
 - `--cert`: TLS certificate file (enables HTTPS)
 - `--key`: TLS private key file (enables HTTPS)
 - `--max-file-size`: Maximum allowed size for 3MF file entries (default: `50MB`). Supports human-readable formats like `100MB`, `1GB`, `500KB`.
+- `--mqtt-broker`: MQTT broker address for Home Assistant (e.g. `tcp://192.168.1.100:1883`) (Env: `BAMBULAN_MQTT_BROKER`)
+- `--mqtt-user`: MQTT username (Env: `BAMBULAN_MQTT_USER`)
+- `--mqtt-password`: MQTT password (Env: `BAMBULAN_MQTT_PASSWORD`)
+- `--mqtt-prefix`: MQTT topic prefix for HA discovery (default: `homeassistant`) (Env: `BAMBULAN_MQTT_PREFIX`)
 
 **HTTPS Support:**
 

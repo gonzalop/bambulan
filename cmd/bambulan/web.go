@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gonzalop/bambulan"
+	"github.com/gonzalop/bambulan/homeassistant"
 	"github.com/gonzalop/bambulan/internal/bambu3mf"
 	"github.com/gonzalop/bambulan/octoprint"
 )
@@ -42,6 +43,12 @@ type WebCmd struct {
 	CertFile    string   `help:"TLS certificate file (enables HTTPS)"`
 	KeyFile     string   `help:"TLS private key file (enables HTTPS)"`
 	MaxFileSize ByteSize `help:"Maximum allowed size for 3MF file entries" default:"50MB"`
+
+	// HA MQTT Flags
+	MQTTBroker   string `help:"MQTT broker address for Home Assistant (e.g. tcp://192.168.1.100:1883)" env:"BAMBULAN_MQTT_BROKER" name:"mqtt-broker"`
+	MQTTUser     string `help:"MQTT username" env:"BAMBULAN_MQTT_USER" name:"mqtt-user"`
+	MQTTPassword string `help:"MQTT password" env:"BAMBULAN_MQTT_PASSWORD" name:"mqtt-password"`
+	MQTTPrefix   string `help:"MQTT topic prefix for Home Assistant discovery" env:"BAMBULAN_MQTT_PREFIX" default:"homeassistant" name:"mqtt-prefix"`
 }
 
 type Session struct {
@@ -151,6 +158,28 @@ func (c *WebCmd) Run(ctx *Context) error {
 
 	if c.Octoprint {
 		s.OctoHandler = octoprint.NewHandler(s.octoSession, apiKey)
+	}
+
+	if c.MQTTBroker != "" {
+		if ctx.Client.MQTT.Hostname == "" || ctx.Client.MQTT.AccessCode == "" || ctx.Client.MQTT.Serial == "" {
+			slog.Warn("HA MQTT Broker configured but printer credentials (host/code/serial) are missing. Bridge will not start until a printer is connected.")
+		} else {
+			bridge, err := homeassistant.NewBridge(ctx.Client, c.MQTTBroker, c.MQTTUser, c.MQTTPassword, c.MQTTPrefix)
+			if err != nil {
+				return fmt.Errorf("failed to initialize Home Assistant bridge: %w", err)
+			}
+			go func() {
+				slog.Info("Starting Home Assistant bridge", "broker", c.MQTTBroker)
+				// Ensure printer client is started for the bridge
+				if err := ctx.Client.Start(); err != nil {
+					slog.Error("Failed to start printer client for HA bridge", "error", err)
+					return
+				}
+				if err := bridge.Start(context.Background()); err != nil {
+					slog.Error("Home Assistant bridge error", "error", err)
+				}
+			}()
+		}
 	}
 
 	return s.Start()

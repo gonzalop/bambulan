@@ -5,6 +5,7 @@ It supports:
 - MQTT for status monitoring and command control (printing, lights, speed).
 - FTPS for file management (listing, uploading, downloading).
 - Camera access for frame capture.
+- Home Assistant integration via MQTT Discovery.
 
 Example usage:
 

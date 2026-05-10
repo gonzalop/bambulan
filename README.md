@@ -23,6 +23,7 @@ It provides a robust developer library, a powerful CLI tool, and a modern, real-
 - **3MF Project Inspection**: Deep extraction of metadata, plate info, thumbnails, and filament requirements via the `bambu3mf` package.
 - **Filament Management**: Resolve filament inheritance, profiles, and compatibility via the `filament` package.
 - **Hardware Intelligence**: Automatic model detection (X1, P1, A1 series) to enforce hardware-specific safety limits and capabilities.
+- **Home Assistant Integration**: Expose printer status and controls to Home Assistant via MQTT Discovery (automatic setup).
 - **Camera Streaming**: Access live MJPEG streams and capture static frames.
 - **File Management**: Full FTPS support for listing, downloading, uploading, and managing files/directories on the SD card.
 
@@ -70,6 +71,22 @@ BambuLAN can emulate an **OctoPrint** server, allowing you to send files and con
     ```
 2.  **Configure Slicer**: In your slicer, add a "Physical Printer" using the **OctoPrint** host type.
 3.  **One-Click Print**: You can now monitor temperatures and use "Send and Print" directly from your workspace!
+
+---
+
+### Home Assistant Integration
+
+BambuLAN can bridge your printer status to **Home Assistant** using **MQTT Discovery**.
+
+1.  **Enable Integration**: Start the web server or the dedicated bridge with your MQTT broker details:
+    ```bash
+    # Run alongside the dashboard
+    bambulan web --mqtt-broker tcp://192.168.1.100:1883 --mqtt-user myuser --mqtt-password mypass
+
+    # Or run as a standalone background bridge
+    bambulan ha --broker tcp://192.168.1.100:1883
+    ```
+2.  **Automatic Discovery**: Home Assistant will automatically detect your printer as a new device with sensors for temperatures, progress, print stage, and a switch for the chamber light.
 
 ---
 
