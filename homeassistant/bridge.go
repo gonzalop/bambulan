@@ -33,12 +33,16 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 		prefix = "homeassistant"
 	}
 
+	tag := fmt.Sprintf("bambu_%s", bambu.MQTT.Serial)
+	onlineTopic := fmt.Sprintf("%s/binary_sensor/%s/online/state", prefix, tag)
+
 	opts := []mq.Option{
 		mq.WithCredentials(user, pass),
 		mq.WithProtocolVersion(mq.ProtocolV50),
 		mq.WithKeepAlive(30 * time.Second),
 		mq.WithAutoReconnect(true),
 		mq.WithLogger(slog.Default()),
+		mq.WithWill(onlineTopic, []byte("OFF"), 0, true),
 	}
 
 	client, err := mq.Dial(broker, opts...)
@@ -46,13 +50,26 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 		return nil, err
 	}
 
-	return &Bridge{
+	b := &Bridge{
 		bambu:  bambu,
 		ha:     client,
 		prefix: prefix,
 		host:   bambu.MQTT.Hostname,
+		serial: bambu.MQTT.Serial,
 		amsOk:  make(map[string]bool),
-	}, nil
+	}
+
+	// Setup connection callbacks
+	bambu.MQTT.OnConnect = func() {
+		slog.Info("Printer connected, notifying Home Assistant")
+		_ = b.ha.Publish(onlineTopic, []byte("ON"), mq.WithRetain(true))
+	}
+	bambu.MQTT.OnDisconnect = func(err error) {
+		slog.Warn("Printer disconnected, notifying Home Assistant", "error", err)
+		_ = b.ha.Publish(onlineTopic, []byte("OFF"), mq.WithRetain(true))
+	}
+
+	return b, nil
 }
 
 // Start runs the bridge event loop.
@@ -191,6 +208,9 @@ func (b *Bridge) publishDiscovery() error {
 		createSensorConfig(b.prefix, b.serial, b.displayName, "wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi", b.host),
 		createSensorConfig(b.prefix, b.serial, b.displayName, "ip_address", "IP Address", "", "", "", "mdi:ip-network", b.host),
 
+		// Binary Sensors
+		createBinarySensorConfig(b.prefix, b.serial, b.displayName, "online", "Online", "connectivity", "mdi:printer-check", b.host),
+
 		// Switches
 		createSwitchConfig(b.prefix, b.serial, b.displayName, "chamber_light", "Chamber Light", "mdi:lightbulb-outline", b.host),
 	}
@@ -199,6 +219,8 @@ func (b *Bridge) publishDiscovery() error {
 		component := "sensor"
 		if cfg.CommandTopic != "" {
 			component = "switch"
+		} else if cfg.PayloadOn != "" && !strings.Contains(cfg.UniqueID, "chamber_light") {
+			component = "binary_sensor"
 		}
 
 		topic := fmt.Sprintf("%s/%s/%s/config", b.prefix, component, cfg.UniqueID)

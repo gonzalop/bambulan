@@ -61,6 +61,25 @@ func createSensorConfigCustom(prefix, serial, model, entityID, name, unit, devic
 	}
 }
 
+func createBinarySensorConfig(prefix, serial, model, entityID, name, deviceClass, icon, host string) *DiscoveryConfig {
+	tag := fmt.Sprintf("bambu_%s", serial)
+	return &DiscoveryConfig{
+		Name:        fmt.Sprintf("%s %s", model, name),
+		UniqueID:    fmt.Sprintf("%s_%s", tag, entityID),
+		StateTopic:  fmt.Sprintf("%s/binary_sensor/%s/%s/state", prefix, tag, entityID),
+		PayloadOn:   "ON",
+		PayloadOff:  "OFF",
+		DeviceClass: deviceClass,
+		Icon:        icon,
+		Device: &Device{
+			Identifiers:  []string{tag, host},
+			Name:         fmt.Sprintf("Bambu %s", model),
+			Model:        model,
+			Manufacturer: "Bambu Lab",
+		},
+	}
+}
+
 func createSwitchConfig(prefix, serial, model, entityID, name, icon, host string) *DiscoveryConfig {
 	tag := fmt.Sprintf("bambu_%s", serial)
 	return &DiscoveryConfig{

@@ -37,6 +37,9 @@ type MQTTClient struct {
 	mu          sync.RWMutex
 	subscribers map[int64]chan *PrinterStatus
 	nextSubID   int64
+
+	OnConnect    func()
+	OnDisconnect func(error)
 }
 
 // NewMQTTClient creates a new MQTTClient.
@@ -161,10 +164,16 @@ func (m *MQTTClient) broadcastStatus() {
 
 func (m *MQTTClient) onConnectionLost(_ *mq.Client, err error) {
 	slog.Warn("Connection lost", "error", err)
+	if m.OnDisconnect != nil {
+		m.OnDisconnect(err)
+	}
 }
 
 func (m *MQTTClient) onConnect(client *mq.Client) {
 	slog.Warn("Connection established")
+	if m.OnConnect != nil {
+		m.OnConnect()
+	}
 	topic := fmt.Sprintf("device/%s/report", m.Serial)
 	token := client.Subscribe(topic, BambuQoS, m.onMessage)
 	if err := token.Wait(context.Background()); err != nil {
