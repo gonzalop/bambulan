@@ -78,13 +78,21 @@ BambuLAN can emulate an **OctoPrint** server, allowing you to send files and con
 
 BambuLAN can bridge your printer status to **Home Assistant** using **MQTT Discovery**.
 
-1.  **Enable Integration**: Start the web server or the dedicated bridge with your MQTT broker details:
+1.  **Enable Integration**: Start the web server or the dedicated bridge with your MQTT broker details. You can use flags or environment variables:
     ```bash
+    # Flags
+    bambulan web --mqtt-broker tcp://192.168.1.100:1883 --mqtt-user myuser --mqtt-password mypass --bind :9000
+
+    # Using environment variables (Recommended)
+    export BAMBULAN_MQTT_BROKER="tcp://192.168.1.100:1883"
+    export BAMBULAN_MQTT_USER="myuser"
+    export BAMBULAN_MQTT_PASSWORD="mypass"
+
     # Run alongside the dashboard
-    bambulan web --mqtt-broker tcp://192.168.1.100:1883 --mqtt-user myuser --mqtt-password mypass
+    bambulan web --bind :9000
 
     # Or run as a standalone background bridge
-    bambulan ha --broker tcp://192.168.1.100:1883
+    bambulan ha --bind :9000
     ```
 2.  **Automatic Discovery**: Home Assistant will automatically detect your printer as a new device with sensors for temperatures, progress, print stage, and a switch for the chamber light.
 

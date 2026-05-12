@@ -170,7 +170,7 @@ func (m *MQTTClient) onConnectionLost(_ *mq.Client, err error) {
 }
 
 func (m *MQTTClient) onConnect(client *mq.Client) {
-	slog.Warn("Connection established")
+	slog.Info("Connection established")
 	if m.OnConnect != nil {
 		m.OnConnect()
 	}

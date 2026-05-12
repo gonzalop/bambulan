@@ -506,33 +506,35 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 	} else {
 		// User didn't specify. Auto-detect.
 		fmt.Println("Checking for AMS presence...")
-		statusChan := make(chan *bambulan.PrinterStatus, 1)
 		sub = client.Subscribe()
-
-		go func() {
-			for status := range sub.C {
-				select {
-				case statusChan <- status:
-				default:
-				}
-			}
-		}()
 
 		if err := client.Start(); err != nil {
 			return err
 		}
 
-		select {
-		case status := <-statusChan:
-			if status.Ams != nil && len(status.Ams.Ams) > 0 {
-				useAMS = true
-				fmt.Println("-> AMS detected. Enabling AMS.")
-			} else {
+		// Wait for AMS detection.
+		// Usually we get a few messages, the first ones might be partial.
+		// We stop as soon as we see an AMS or get a full status (pushall).
+		timeout := time.After(3 * time.Second)
+	waitLoop:
+		for {
+			select {
+			case status := <-sub.C:
+				if status.Ams != nil && len(status.Ams.Ams) > 0 {
+					useAMS = true
+					fmt.Println("-> AMS detected. Enabling AMS.")
+					break waitLoop
+				}
+				if status.Command == "pushall" {
+					useAMS = false
+					fmt.Println("-> No AMS detected. Disabling AMS.")
+					break waitLoop
+				}
+			case <-timeout:
 				useAMS = false
-				fmt.Println("-> No AMS detected. Disabling AMS.")
+				fmt.Println("-> No AMS detected (timeout). Disabling AMS.")
+				break waitLoop
 			}
-		case <-time.After(10 * time.Second):
-			return fmt.Errorf("timeout waiting for printer status to detect AMS")
 		}
 	}
 	// Stop client callback to avoid noise, though client needs to stay connected
