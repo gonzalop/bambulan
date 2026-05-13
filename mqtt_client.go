@@ -98,6 +98,11 @@ func (m *MQTTClient) Start() error {
 	return nil
 }
 
+// IsConnected returns true if the client is currently connected to the printer.
+func (m *MQTTClient) IsConnected() bool {
+	return m.client != nil && m.client.IsConnected()
+}
+
 // Stop disconnects from the MQTT broker.
 func (m *MQTTClient) Stop() {
 	if m.client != nil && m.client.IsConnected() {

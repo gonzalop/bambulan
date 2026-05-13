@@ -50,6 +50,12 @@ type PrinterCapability struct {
 	// HasChamberHeater indicates whether the printer has an active chamber heater.
 	HasChamberHeater bool `json:"has_chamber_heater"`
 
+	// HasChamberTemp indicates whether the printer chamber temperature is available.
+	HasChamberTemp bool `json:"has_chamber_temp"`
+
+	// MinChamberTemp is the minimum target temperature for the chamber heater.
+	MinChamberTemp int `json:"min_chamber_temp"`
+
 	// MaxChamberTemp is the maximum target temperature for the chamber heater.
 	MaxChamberTemp int `json:"max_chamber_temp"`
 

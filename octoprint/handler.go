@@ -51,6 +51,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/timelapse/download/", auth(h.handleTimelapseDownload))
 	mux.HandleFunc("/api/job", auth(h.handleJob))
 
+	// Auth and Apps
+	mux.HandleFunc("/api/login", h.handleLogin)
+	mux.HandleFunc("/api/apps/auth", h.handleAppsAuth)
+	mux.HandleFunc("/api/apps/auth/", h.handleAppsAuth)
+	mux.HandleFunc("/plugin/appkeys/request/", h.handleAppsAuth)
+
 	// File management — order matters: the specific path prefix must come first.
 	// /api/files/local/<path> handles GET (single entry) and DELETE.
 	// /api/files/local handles GET (list) and POST (upload).
@@ -63,11 +69,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // authMiddleware validates the OctoPrint API key before calling next.
 func (h *Handler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		slog.Info("OctoPrint API request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 		key := r.Header.Get("X-Api-Key")
 		if key == "" {
 			key = r.URL.Query().Get("apikey")
 		}
 		if h.apiKey == "" || key != h.apiKey {
+			slog.Warn("OctoPrint API: Invalid or missing API key", "path", r.URL.Path, "remote", r.RemoteAddr)
 			http.Error(w, "Invalid API Key", http.StatusForbidden)
 			return
 		}
@@ -436,4 +444,80 @@ func serverBaseURL(r *http.Request) string {
 		host = "localhost"
 	}
 	return scheme + "://" + host
+}
+
+// handleLogin serves POST /api/login.
+func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	slog.Info("OctoPrint Login request", "method", r.Method, "remote", r.RemoteAddr)
+	// Simple mock login: if an API key is provided and valid, return a successful session.
+	// This is often probed by HA and slicers to verify connectivity.
+	key := r.Header.Get("X-Api-Key")
+	if key == "" {
+		key = r.URL.Query().Get("apikey")
+	}
+
+	active := h.apiKey != "" && key == h.apiKey
+	resp := LoginResponse{
+		Name:   "admin",
+		Active: active,
+		User:   true,
+		Admin:  true,
+	}
+	if active {
+		resp.Apikey = h.apiKey
+		resp.Session = "bambulan-session"
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleAppsAuth handles the OctoPrint "Application Keys" flow used by Home Assistant.
+// It automatically approves any request to simplify the cloud-free setup experience.
+func (h *Handler) handleAppsAuth(w http.ResponseWriter, r *http.Request) {
+	slog.Info("OctoPrint Apps Auth request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
+	slog.Debug("OctoPrint: Auth request received", "method", r.Method, "path", r.URL.Path)
+
+	switch r.Method {
+	case http.MethodPost:
+		var body struct {
+			App string `json:"app"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			slog.Warn("OctoPrint: Failed to decode auth request body", "error", err)
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		slog.Info("OctoPrint: Received application auth request (Step 1/2)", "app", body.App)
+
+		// Set Location header for polling
+		// We use the current path to ensure consistency regardless of trailing slash
+		pollURL := serverBaseURL(r) + r.URL.Path
+		if !strings.HasSuffix(pollURL, "/") {
+			pollURL += "/"
+		}
+		pollURL += "bambulan-token"
+
+		w.Header().Set("Location", pollURL)
+
+		resp := struct {
+			AppToken string `json:"app_token"`
+		}{
+			AppToken: "bambulan-token",
+		}
+		writeJSON(w, http.StatusCreated, resp)
+
+	case http.MethodGet:
+		slog.Info("OctoPrint: Received auth polling request (Step 2/2), granting access")
+		// When polling, HA expects a 200 OK with the api_key if granted.
+		resp := struct {
+			APIKey string `json:"api_key"`
+		}{
+			APIKey: h.apiKey,
+		}
+		writeJSON(w, http.StatusOK, resp)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }

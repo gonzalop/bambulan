@@ -10,6 +10,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -24,6 +26,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -38,6 +42,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -52,6 +58,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -66,6 +74,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 60,
     "num_extruders": 1
   },
@@ -80,6 +90,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -94,6 +106,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -108,6 +122,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 65,
     "num_extruders": 2
   },
@@ -122,6 +138,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
@@ -136,6 +154,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 65,
     "num_extruders": 2
   },
@@ -150,6 +170,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 65,
     "num_extruders": 2
   },
@@ -164,6 +186,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 65,
     "num_extruders": 2
   },
@@ -178,6 +202,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 65,
     "num_extruders": 2
   },
@@ -192,6 +218,8 @@
     "has_timelapse": true,
     "has_bed_leveling": true,
     "has_chamber_heater": true,
+    "has_chamber_temp": true,
+    "min_chamber_temp": 0,
     "max_chamber_temp": 65,
     "num_extruders": 1
   }

@@ -97,6 +97,12 @@ type WebServer struct {
 	CertFile      string
 	KeyFile       string
 	MaxFileSize   int64
+
+	// HA MQTT Bridge
+	MQTTBroker   string
+	MQTTUser     string
+	MQTTPassword string
+	MQTTPrefix   string
 }
 
 func NewWebServer() *WebServer {
@@ -155,60 +161,42 @@ func (c *WebCmd) Run(ctx *Context) error {
 	s.CertFile = c.CertFile
 	s.KeyFile = c.KeyFile
 	s.MaxFileSize = int64(c.MaxFileSize)
+	s.MQTTBroker = c.MQTTBroker
+	s.MQTTUser = c.MQTTUser
+	s.MQTTPassword = c.MQTTPassword
+	s.MQTTPrefix = c.MQTTPrefix
 
 	if c.Octoprint {
 		s.OctoHandler = octoprint.NewHandler(s.octoSession, apiKey)
-	}
-
-	if c.MQTTBroker != "" {
-		if ctx.Client.MQTT.Hostname == "" || ctx.Client.MQTT.AccessCode == "" || ctx.Client.MQTT.Serial == "" {
-			slog.Warn("HA MQTT Broker configured but printer credentials (host/code/serial) are missing. Bridge will not start until a printer is connected.")
-		} else {
-			bridge, err := homeassistant.NewBridge(ctx.Client, c.MQTTBroker, c.MQTTUser, c.MQTTPassword, c.MQTTPrefix)
-			if err != nil {
-				return fmt.Errorf("failed to initialize Home Assistant bridge: %w", err)
-			}
-			go func() {
-				slog.Info("Starting Home Assistant bridge", "broker", c.MQTTBroker)
-				// Ensure printer client is started for the bridge
-				if err := ctx.Client.Start(); err != nil {
-					slog.Error("Failed to start printer client for HA bridge", "error", err)
-					return
-				}
-				if err := bridge.Start(context.Background()); err != nil {
-					slog.Error("Home Assistant bridge error", "error", err)
-				}
-			}()
-		}
 	}
 
 	return s.Start()
 }
 
 func (s *WebServer) Start() error {
+	if s.EnableOcto {
+		slog.Info("OctoPrint compatibility enabled", "apiKey", "********")
+		s.OctoHandler.RegisterRoutes(http.DefaultServeMux)
+	}
+
 	http.HandleFunc("/", s.handleIndex)
 	http.HandleFunc("/files", s.handleFiles)
 	http.HandleFunc("/login", s.handleLogin)
 	http.HandleFunc("/logout", s.handleLogout)
 	http.HandleFunc("/style.css", s.handleStyle)
-	http.HandleFunc("/api/status", s.handleAPIStatus)
-	http.HandleFunc("/api/events", s.handleAPIEvents)
-	http.HandleFunc("/api/control", s.handleAPIControl)
-	http.HandleFunc("/api/files", s.handleAPIFiles)
-	http.HandleFunc("/api/download", s.handleAPIDownload)
-	http.HandleFunc("/api/upload", s.handleAPIUpload)
-	http.HandleFunc("/api/delete", s.handleAPIDelete)
-	http.HandleFunc("/api/rename", s.handleAPIRename)
-	http.HandleFunc("/api/mkdir", s.handleAPIMkdir)
-	http.HandleFunc("/api/print", s.handleAPIPrint)
-	http.HandleFunc("/api/filament", s.handleAPIFilament)
-	http.HandleFunc("/api/thumbnail", s.handleAPIThumbnail)
+	http.HandleFunc("/api/b/status", s.handleAPIStatus)
+	http.HandleFunc("/api/b/events", s.handleAPIEvents)
+	http.HandleFunc("/api/b/control", s.handleAPIControl)
+	http.HandleFunc("/api/b/files", s.handleAPIFiles)
+	http.HandleFunc("/api/b/download", s.handleAPIDownload)
+	http.HandleFunc("/api/b/upload", s.handleAPIUpload)
+	http.HandleFunc("/api/b/delete", s.handleAPIDelete)
+	http.HandleFunc("/api/b/rename", s.handleAPIRename)
+	http.HandleFunc("/api/b/mkdir", s.handleAPIMkdir)
+	http.HandleFunc("/api/b/print", s.handleAPIPrint)
+	http.HandleFunc("/api/b/filament", s.handleAPIFilament)
+	http.HandleFunc("/api/b/thumbnail", s.handleAPIThumbnail)
 	http.HandleFunc("/camera", s.handleCamera)
-
-	// OctoPrint API compatibility layer
-	if s.EnableOcto {
-		s.OctoHandler.RegisterRoutes(http.DefaultServeMux)
-	}
 
 	if s.UseTLS {
 		slog.Info("Starting web server with TLS", "addr", s.BindAddr, "cert", s.CertFile)
@@ -271,7 +259,6 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 
 	if exists {
 		// Verify host hasn't changed (e.g. DHCP)
-		// Verify host hasn't changed (e.g. DHCP)
 		if client.MQTT.Hostname != host {
 			slog.Info("Host IP changed for serial, reconnecting", "serial", serial, "old_host", client.MQTT.Hostname, "new_host", host)
 			client.Stop()
@@ -287,6 +274,21 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 			return nil, err
 		}
 		s.ActiveClients[key] = client
+
+		// Start HA Bridge if configured
+		if s.MQTTBroker != "" {
+			go func() {
+				slog.Info("Starting Home Assistant bridge for newly connected printer", "serial", serial, "broker", s.MQTTBroker)
+				bridge, err := homeassistant.NewBridge(client, s.MQTTBroker, s.MQTTUser, s.MQTTPassword, s.MQTTPrefix)
+				if err != nil {
+					slog.Error("Failed to initialize Home Assistant bridge", "serial", serial, "error", err)
+					return
+				}
+				if err := bridge.Start(context.Background()); err != nil {
+					slog.Error("Home Assistant bridge error", "serial", serial, "error", err)
+				}
+			}()
+		}
 	}
 
 	return client, nil

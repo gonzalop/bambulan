@@ -290,7 +290,7 @@
             const statusDiv = document.getElementById('file-list');
             statusDiv.innerHTML = '<div style="text-align: center; padding: 20px;">Uploading ' + escapeHtml(file.name) + '... <span id="uploadDetails"></span></div>';
             const poller = setInterval(() => {
-                fetch('/api/status').then(r => r.json()).then(d => {
+                fetch('/api/b/status').then(r => r.json()).then(d => {
                     if (d.upload_status && d.upload_status.uploading) {
                         const u = d.upload_status;
                         const details = document.getElementById('uploadDetails');
@@ -300,7 +300,7 @@
                     }
                 });
             }, 500);
-            fetch('/api/upload', {
+            fetch('/api/b/upload', {
                 method: 'POST',
                 headers: { 'X-CSRF-Token': token },
                 body: formData
@@ -333,7 +333,7 @@
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             formData.append('_csrf', token);
             try {
-                const resp = await fetch('/api/mkdir', { method: 'POST', body: formData });
+                const resp = await fetch('/api/b/mkdir', { method: 'POST', body: formData });
                 if (resp.status === 403) { window.location.reload(); return; }
                 if (!resp.ok) { const txt = await resp.text(); alert("Failed to create folder: " + txt); }
                 else { loadFiles(currentPath); }
@@ -364,7 +364,7 @@
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             formData.append('_csrf', token);
             try {
-                const resp = await fetch('/api/rename', { method: 'POST', body: formData });
+                const resp = await fetch('/api/b/rename', { method: 'POST', body: formData });
                 if (resp.status === 403) { window.location.reload(); return; }
                 if (!resp.ok) { const txt = await resp.text(); alert("Failed to rename: " + txt); }
                 else { loadFiles(currentPath); }
@@ -386,7 +386,7 @@
             const list = document.getElementById('file-list');
             list.innerHTML = '<div style="text-align: center; color: var(--text-light); padding: 20px;">Loading...</div>';
 
-            fetch('/api/files?path=' + encodeURIComponent(path))
+            fetch('/api/b/files?path=' + encodeURIComponent(path))
                 .then(response => response.json())
                 .then(entries => {
                     if (!entries) {
@@ -434,7 +434,7 @@
 
                         // Menu content
                         let menuItems = `
-                            ${e.Type !== "dir" ? `<a href="/api/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
+                            ${e.Type !== "dir" ? `<a href="/api/b/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
                             <button data-name="${escapedName}" data-isdir="${e.Type === "dir"}" onclick="renameItem(this)">✎ Rename</button>
                             <button data-path="${fullPath}" onclick="deleteFile(this)" style="color: #d9534f;">🗑️ Delete</button>
                         `;
@@ -522,7 +522,7 @@
             formData.append("_csrf", token);
 
             try {
-                const response = await fetch('/api/delete', {
+                const response = await fetch('/api/b/delete', {
                     method: 'POST',
                     body: formData
                 });
@@ -554,7 +554,7 @@
             document.getElementById('printModal').style.display = 'flex';
             document.getElementById('printFilename').innerText = fullPath.split('/').pop();
             document.getElementById('printExistingPath').value = fullPath;
-            fetch('/api/status').then(r => r.json()).then(d => {
+            fetch('/api/b/status').then(r => r.json()).then(d => {
                 if (d.print && d.print.ams && d.print.ams.ams_exist_bits !== "0") {
                     document.getElementById('chkUseAMS').checked = true;
                 }
@@ -573,7 +573,7 @@
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             btn.disabled = true;
             btn.innerText = "Starting...";
-            fetch('/api/print', {
+            fetch('/api/b/print', {
                 method: 'POST',
                 headers: { 'X-CSRF-Token': token },
                 body: data

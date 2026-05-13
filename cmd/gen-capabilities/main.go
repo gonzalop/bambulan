@@ -27,6 +27,7 @@ type PrinterDefinition map[string]struct {
 		SupportBedLeveling           any   `json:"support_bed_leveling"`
 		SupportUpdateRemain          bool  `json:"support_update_remain"`
 		SupportChamber               bool  `json:"support_chamber"`
+		SupportChamberTempDisplay    bool  `json:"support_chamber_temp_display"`
 		SupportChamberTempEdit       bool  `json:"support_chamber_temp_edit"`
 		SupportChamberTempEditRange  []int `json:"support_chamber_temp_edit_range"`
 		SupportChamberTempSwitchHeat int   `json:"support_chamber_temp_switch_heating"`
@@ -46,6 +47,8 @@ type Capabilities struct {
 	HasTimelapse            bool   `json:"has_timelapse"`
 	HasBedLeveling          bool   `json:"has_bed_leveling"`
 	HasChamberHeater        bool   `json:"has_chamber_heater"`
+	HasChamberTemp          bool   `json:"has_chamber_temp"`
+	MinChamberTemp          int    `json:"min_chamber_temp"`
 	MaxChamberTemp          int    `json:"max_chamber_temp"`
 	NumExtruders            int    `json:"num_extruders"`
 }
@@ -143,12 +146,17 @@ func main() {
 				caps.HasTimelapse = true
 			}
 
+			if p.SupportChamberTempDisplay || p.SupportChamberTempEdit {
+				caps.HasChamberTemp = true
+			}
+
 			if p.SupportChamber && p.SupportChamberTempEdit {
 				caps.HasChamberHeater = true
 				if len(p.SupportChamberTempEditRange) >= 2 {
 					if p.SupportChamberTempEditRange[1] > caps.MaxChamberTemp {
 						caps.MaxChamberTemp = p.SupportChamberTempEditRange[1]
 					}
+					caps.MinChamberTemp = p.SupportChamberTempEditRange[0]
 				}
 			}
 

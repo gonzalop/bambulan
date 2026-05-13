@@ -652,7 +652,7 @@
             btn.disabled = true;
             btn.innerText = "Starting...";
 
-            fetch('/api/print', {
+            fetch('/api/b/print', {
                 method: 'POST',
                 headers: {
                     'X-CSRF-Token': token
@@ -798,8 +798,8 @@
                                     // Browser cache (3600s) should handle it, but we can check src
                                     const pID = m.plates[0].id;
                                     // Default to small thumbnail
-                                    const smallSrc = `/api/thumbnail?key=${encodeURIComponent(filename)}/${pID}_small`;
-                                    const largeSrc = `/api/thumbnail?key=${encodeURIComponent(filename)}/${pID}`;
+                                    const smallSrc = `/api/b/thumbnail?key=${encodeURIComponent(filename)}/${pID}_small`;
+                                    const largeSrc = `/api/b/thumbnail?key=${encodeURIComponent(filename)}/${pID}`;
 
                                     if (!thumb.src.endsWith(smallSrc)) {
                                         thumb.src = smallSrc;
@@ -1212,7 +1212,7 @@
         } // end of renderStatus
 
         function updateStatus() {
-            fetch('/api/status')
+            fetch('/api/b/status')
                 .then(response => response.json())
                 .then(data => {
                     renderStatus(data);
@@ -1311,7 +1311,7 @@
                 body += `&index=${index}`;
             }
 
-            fetch('/api/control', {
+            fetch('/api/b/control', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -1353,7 +1353,7 @@
             const speed = document.getElementById('fanSpeedRange').value;
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
-            fetch('/api/control', {
+            fetch('/api/b/control', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -1466,7 +1466,7 @@
             const slotSelect = document.getElementById('filamentSlotSelect');
             const slotText = slotSelect.options[slotSelect.selectedIndex].text;
 
-            fetch('/api/filament', {
+            fetch('/api/b/filament', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -1523,7 +1523,7 @@
             unloadBtn.disabled = true;
             unloadBtn.innerText = "Sending...";
 
-            fetch('/api/filament', {
+            fetch('/api/b/filament', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -1577,7 +1577,7 @@
 
         function control(cmd) {
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-            fetch('/api/control', {
+            fetch('/api/b/control', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -1625,7 +1625,7 @@
             if (evtSource) return;
             setConnectionStatus('connecting');
 
-            evtSource = new EventSource('/api/events');
+            evtSource = new EventSource('/api/b/events');
 
             evtSource.onopen = () => {
                 console.log("SSE connected.");

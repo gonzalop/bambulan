@@ -245,3 +245,20 @@ type TimelapseFile struct {
 	Size int64  `json:"size"`
 	Date string `json:"date"` // Format: "YYYY-MM-DD HH:MM"
 }
+
+// LoginResponse is the response for POST /api/login.
+type LoginResponse struct {
+	Name    string `json:"name"`
+	Active  bool   `json:"active"`
+	User    bool   `json:"user"`
+	Admin   bool   `json:"admin"`
+	Apikey  string `json:"apikey,omitempty"`
+	Session string `json:"session,omitempty"`
+}
+
+// AppAuthResponse is the response for POST/GET /api/apps/auth.
+type AppAuthResponse struct {
+	App    string `json:"app"`
+	Status string `json:"status"` // "pending", "granted", "denied"
+	APIKey string `json:"api_key,omitempty"`
+}
