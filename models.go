@@ -1,6 +1,11 @@
 package bambulan
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/gonzalop/bambulan/internal/hms"
+)
 
 // bambuMessage represents the top-level JSON structure received from the printer.
 // It is used internally to unwrap the "print" object.
@@ -161,7 +166,7 @@ type PrinterStatus struct {
 
 	SObj         []any           `json:"s_obj"`
 	FanGear      int             `json:"fan_gear"`
-	Hms          []any           `json:"hms"`
+	Hms          []HMSEvent      `json:"hms"`
 	Online       *Online         `json:"online,omitempty"`
 	Ams          *AMS            `json:"ams,omitempty"`
 	IPCam        *IPCam          `json:"ipcam,omitempty"`
@@ -173,6 +178,75 @@ type PrinterStatus struct {
 	SequenceID   string          `json:"sequence_id"`
 	Result       string          `json:"result"`
 	Reason       string          `json:"reason"`
+}
+
+// HMSMessage returns a formatted string containing the dash-separated HMS code and its human-readable description (if available).
+func (ps *PrinterStatus) HMSMessage() string {
+	if len(ps.Hms) == 0 {
+		return ""
+	}
+	var msgs []string
+	for _, event := range ps.Hms {
+		codeStr := hms.FormatCode(event.Code, event.Attr)
+		if desc, ok := hms.Lookup(event.Code, event.Attr); ok {
+			msgs = append(msgs, fmt.Sprintf("%s: %s", codeStr, desc))
+		} else {
+			msgs = append(msgs, codeStr)
+		}
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// HMSDescription returns the human-readable description for the first HMS event, if any.
+func (ps *PrinterStatus) HMSDescription() string {
+	if len(ps.Hms) == 0 {
+		return ""
+	}
+	if desc, ok := hms.Lookup(ps.Hms[0].Code, ps.Hms[0].Attr); ok {
+		return desc
+	}
+	return hms.FormatCode(ps.Hms[0].Code, ps.Hms[0].Attr)
+}
+
+// FormatHMSCode returns the dash-separated hex string for a given code and attribute.
+func FormatHMSCode(code, attr uint32) string {
+	return hms.FormatCode(code, attr)
+}
+
+// LookupHMS returns the description for the given code and attribute.
+func LookupHMS(code, attr uint32) (string, bool) {
+	return hms.Lookup(code, attr)
+}
+
+// WikiURLs returns a list of troubleshooting Wiki URLs for all active HMS events.
+func (ps *PrinterStatus) WikiURLs() []string {
+	if len(ps.Hms) == 0 {
+		return nil
+	}
+	var urls []string
+	for _, event := range ps.Hms {
+		urls = append(urls, event.WikiURL())
+	}
+	return urls
+}
+
+// HMSEvent represents a Health Management System event reported by the printer.
+type HMSEvent struct {
+	Attr uint32 `json:"attr"`
+	Code uint32 `json:"code"`
+}
+
+// WikiURL returns the official Bambu Lab Wiki URL for this HMS event.
+func (e *HMSEvent) WikiURL() string {
+	return hms.WikiURL(e.Code, e.Attr)
+}
+
+// Online indicates the connection status of various printer modules.
+type Online struct {
+	Ahb     bool `json:"ahb"`     // Automatic Hub Board
+	Ext     bool `json:"ext"`     // Extruder Board
+	Rfid    bool `json:"rfid"`    // AMS RFID Reader
+	Version int  `json:"version"` // Protocol version
 }
 
 // Upload represents the progress and status of a file upload to the printer via FTPS.
@@ -188,14 +262,6 @@ type Upload struct {
 	TaskID        string `json:"task_id"`
 	TimeRemaining int    `json:"time_remaining"` // Estimated seconds remaining
 	TroubleID     string `json:"trouble_id"`
-}
-
-// Online indicates the connection status of various printer modules.
-type Online struct {
-	Ahb     bool `json:"ahb"`     // Automatic Hub Board
-	Ext     bool `json:"ext"`     // Extruder Board
-	Rfid    bool `json:"rfid"`    // AMS RFID Reader
-	Version int  `json:"version"` // Protocol version
 }
 
 // VTTray represents a single filament tray in the AMS.
@@ -375,29 +441,29 @@ var stgDescriptions = map[int]string{
 //
 //	status := client.GetPrinterStatus()
 //	fmt.Println("Printer stage:", status.GetPrintStageName())
-func (p *PrinterStatus) GetPrintStageName() string {
-	if p.GcodeState == "PAUSE" {
+func (ps *PrinterStatus) GetPrintStageName() string {
+	if ps.GcodeState == "PAUSE" {
 		return "Paused"
 	}
-	if p.GcodeState == "FINISH" {
+	if ps.GcodeState == "FINISH" {
 		return "Finished"
 	}
-	if p.GcodeState == "IDLE" {
+	if ps.GcodeState == "IDLE" {
 		return "Idle"
 	}
 
 	// Logic for stage 2 (Heatbed Preheating)
 	// "2" is Heatbed Preheating, but sometimes sticks during printing.
 	// If we are actively running and past the first layer, just call it Printing.
-	if p.StgCur == 2 && p.GcodeState == "RUNNING" && p.LayerNum > 0 {
+	if ps.StgCur == 2 && ps.GcodeState == "RUNNING" && ps.LayerNum > 0 {
 		return "Printing"
 	}
 
-	if desc, ok := stgDescriptions[p.StgCur]; ok {
+	if desc, ok := stgDescriptions[ps.StgCur]; ok {
 		return desc
 	}
 
-	return fmt.Sprintf("Unknown (%d)", p.StgCur)
+	return fmt.Sprintf("Unknown (%d)", ps.StgCur)
 }
 
 // PrintOptions configures the parameters for starting a print job.

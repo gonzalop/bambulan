@@ -64,6 +64,21 @@
             </div>
         </header>
 
+        <div id="hmsAlert" class="card hms-alert"
+            style="display: none; background: #fff5f5; border-left: 5px solid #e53e3e; margin-bottom: 20px; color: #2d3748;">
+            <div style="display: flex; align-items: flex-start; gap: 15px;">
+                <span style="font-size: 1.5em;">⚠️</span>
+                <div style="flex: 1;">
+                    <h4 style="margin: 0 0 5px 0; color: #c53030;">Printer Error</h4>
+                    <div id="hmsMessage" style="font-weight: 500;"></div>
+                    <div id="hmsWiki" style="margin-top: 10px; font-size: 0.9em;">
+                        <a id="hmsWikiLink" href="#" target="_blank"
+                            style="color: #c53030; text-decoration: underline; font-weight: bold;">Troubleshooting Guide</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="dashboard-grid">
             <!-- Left Column: Camera and Monitor -->
             <div class="column-main">
@@ -723,6 +738,25 @@
                             // But for startup, we just stay here.
                         }
                         if (statusText) statusText.innerText = "Waiting for printer data...";
+                    }
+
+                    // Handle HMS Errors
+                    const hmsAlert = document.getElementById('hmsAlert');
+                    const hmsMsg = document.getElementById('hmsMessage');
+                    const hmsWiki = document.getElementById('hmsWiki');
+                    const hmsWikiLink = document.getElementById('hmsWikiLink');
+
+                    if (data.hms && data.hms.active) {
+                        if (hmsAlert) hmsAlert.style.display = 'block';
+                        if (hmsMsg) hmsMsg.innerText = data.hms.message;
+                        if (hmsWiki && data.hms.urls && data.hms.urls.length > 0) {
+                            hmsWiki.style.display = 'block';
+                            hmsWikiLink.href = data.hms.urls[0];
+                        } else if (hmsWiki) {
+                            hmsWiki.style.display = 'none';
+                        }
+                    } else {
+                        if (hmsAlert) hmsAlert.style.display = 'none';
                     }
 
                     // Handle Upload Status

@@ -609,6 +609,12 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 		"metadata_download_status": session.MetadataDownloadStatus,
 		"capabilities":             bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
 		"metadata":                 nil,
+		"hms": map[string]any{
+			"message":     session.Status.HMSMessage(),
+			"description": session.Status.HMSDescription(),
+			"urls":        session.Status.WikiURLs(),
+			"active":      len(session.Status.Hms) > 0,
+		},
 	}
 
 	if session.CurrentMetadata != nil {

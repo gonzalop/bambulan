@@ -176,7 +176,6 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 	if caps.HasChamberFan {
 		fmt.Printf("Fan - Chamb:  %s\n", formatFan(status.BigFan2Speed))
 	}
-	fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
 	if len(status.LightsReport) > 0 {
 		fmt.Print("Light:        ")
 		for i, l := range status.LightsReport {
@@ -188,6 +187,20 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 		fmt.Println()
 	} else {
 		fmt.Println("Light:        N/A")
+	}
+	fmt.Printf("Speed Lvl:    %d\n", status.SpdLvl)
+
+	if len(status.Hms) > 0 {
+		fmt.Println("\n--- ACTIVE ERRORS (HMS) ---")
+		for _, event := range status.Hms {
+			codeStr := bambulan.FormatHMSCode(event.Code, event.Attr)
+			desc, _ := bambulan.LookupHMS(event.Code, event.Attr)
+			if desc == "" {
+				desc = "Unknown Error"
+			}
+			fmt.Printf("[!] %s: %s\n", codeStr, desc)
+			fmt.Printf("    Troubleshooting: %s\n", event.WikiURL())
+		}
 	}
 
 	if status.Ams != nil {
@@ -1088,7 +1101,23 @@ func (c *SysInfoCmd) printSysInfo(client *bambulan.Client, status *bambulan.Prin
 		fmt.Println()
 	}
 
-	// 4. AMS Status
+	// 4. HMS Status
+	if len(status.Hms) > 0 {
+		fmt.Fprintln(w, "ACTIVE ERRORS (HMS)")
+		for _, event := range status.Hms {
+			codeStr := bambulan.FormatHMSCode(event.Code, event.Attr)
+			desc, _ := bambulan.LookupHMS(event.Code, event.Attr)
+			if desc == "" {
+				desc = "Unknown Error"
+			}
+			fmt.Fprintf(w, "%s\t%s\n", codeStr, desc)
+			fmt.Fprintf(w, "\tTroubleshooting: %s\n", event.WikiURL())
+		}
+		w.Flush()
+		fmt.Println()
+	}
+
+	// 5. AMS Status
 	if status.Ams != nil {
 		fmt.Fprintln(w, "AMS STATUS")
 		if len(status.Ams.Ams) == 0 {
@@ -1101,9 +1130,6 @@ func (c *SysInfoCmd) printSysInfo(client *bambulan.Client, status *bambulan.Prin
 				}
 				fmt.Fprintf(w, "Unit %d Humidity:\t%s\n", i, hum)
 				for j, tray := range unit.Tray {
-					if tray == nil {
-						continue
-					}
 					filament := tray.TrayType
 					if filament == "" {
 						filament = "Empty"

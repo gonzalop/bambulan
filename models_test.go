@@ -2,6 +2,7 @@ package bambulan
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -67,4 +68,53 @@ func TestAMSEntryUnmarshalling(t *testing.T) {
 	if unit1.HumidityRaw != "80" {
 		t.Errorf("Unit 1: Expected HumidityRaw '80', got '%s'", unit1.HumidityRaw)
 	}
+}
+
+func TestHMSDecoding(t *testing.T) {
+	t.Run("Valid Code", func(t *testing.T) {
+		status := PrinterStatus{
+			Hms: []HMSEvent{
+				{Code: 0x03000100, Attr: 0x00010003},
+			},
+		}
+		msg := status.HMSMessage()
+		expected := "0300-0100-0001-0003: The heatbed temperature is abnormal; the heater is over temperature."
+		if msg != expected {
+			t.Errorf("Expected HMS message '%s', got '%s'", expected, msg)
+		}
+	})
+
+	t.Run("Empty HMS", func(t *testing.T) {
+		status := PrinterStatus{Hms: []HMSEvent{}}
+		if msg := status.HMSMessage(); msg != "" {
+			t.Errorf("Expected empty message for no HMS, got '%s'", msg)
+		}
+	})
+
+	t.Run("Unknown Code", func(t *testing.T) {
+		status := PrinterStatus{
+			Hms: []HMSEvent{
+				{Code: 0xDEADBEEF, Attr: 0xCAFEBABE},
+			},
+		}
+		msg := status.HMSMessage()
+		// Should return just the code if description is missing
+		expected := "DEAD-BEEF-CAFE-BABE"
+		if msg != expected {
+			t.Errorf("Expected HMS code only, got '%s'", msg)
+		}
+	})
+
+	t.Run("Multiple Codes", func(t *testing.T) {
+		status := PrinterStatus{
+			Hms: []HMSEvent{
+				{Code: 0x03000100, Attr: 0x00010003},
+				{Code: 0x03001200, Attr: 0x00020001},
+			},
+		}
+		msg := status.HMSMessage()
+		if !strings.Contains(msg, "heatbed temperature") || !strings.Contains(msg, "front cover") {
+			t.Errorf("Message should contain both errors, got: %s", msg)
+		}
+	})
 }

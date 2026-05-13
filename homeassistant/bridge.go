@@ -515,6 +515,10 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 	// Binary Sensors
 	configs = append(configs, entry{factory.BinarySensor("online", "Online", "connectivity", "mdi:printer-check", "diagnostic"), "binary_sensor"})
+	configs = append(configs, entry{factory.BinarySensor("hms_active", "HMS Error Active", "problem", "mdi:alert-circle", ""), "binary_sensor"})
+
+	// Diagnostic Sensors
+	configs = append(configs, entry{factory.Sensor("hms_description", "HMS Error Description", "", "", "", "mdi:text-box-search", ""), "sensor"})
 
 	// Switches
 	configs = append(configs, entry{factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""), "switch"})
@@ -608,6 +612,7 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 		"speed_profile":      speed,
 		"target_nozzle_temp": int(status.NozzleTargetTemp),
 		"target_bed_temp":    int(status.BedTargetTemp),
+		"hms_description":    status.HMSMessage(),
 	}
 
 	if caps.HasChamberTemp {
@@ -703,6 +708,14 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 			b.lastLight = lightState
 		}
 	}
+
+	// 3. HMS Active Binary Sensor (separate topic per DiscoveryFactory.BinarySensor)
+	hmsActive := "OFF"
+	if len(status.Hms) > 0 {
+		hmsActive = "ON"
+	}
+	hmsTopic := fmt.Sprintf("%s/%s/hms_active/state", b.prefix, tag)
+	b.ha.Publish(hmsTopic, []byte(hmsActive))
 
 	return nil
 }
