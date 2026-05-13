@@ -29,7 +29,6 @@ import (
 	"github.com/gonzalop/bambulan"
 	"github.com/gonzalop/bambulan/homeassistant"
 	"github.com/gonzalop/bambulan/internal/bambu3mf"
-	"github.com/gonzalop/bambulan/octoprint"
 )
 
 //go:embed templates/*
@@ -38,8 +37,6 @@ var templateFS embed.FS
 type WebCmd struct {
 	Bind        string   `help:"Address to bind to" default:"127.0.0.1:8080"`
 	Secret      string   `help:"Secret for session encryption (optional, random default)" env:"BAMBULAN_SECRET"`
-	Octoprint   bool     `help:"Enable OctoPrint compatibility layer (slicer integration)" env:"BAMBULAN_OCTOPRINT"`
-	APIKey      string   `help:"API Key for Slicer integration (optional, random default)" env:"BAMBULAN_API_KEY"`
 	CertFile    string   `help:"TLS certificate file (enables HTTPS)"`
 	KeyFile     string   `help:"TLS private key file (enables HTTPS)"`
 	MaxFileSize ByteSize `help:"Maximum allowed size for 3MF file entries" default:"50MB"`
@@ -91,8 +88,6 @@ type WebServer struct {
 	ActiveClients map[string]*bambulan.Client
 	ClientsMu     sync.Mutex
 	Key           []byte
-	EnableOcto    bool
-	OctoHandler   *octoprint.Handler
 	UseTLS        bool
 	CertFile      string
 	KeyFile       string
@@ -137,26 +132,9 @@ func (c *WebCmd) Run(ctx *Context) error {
 	keyHash := sha256.Sum256([]byte(secret))
 	key := keyHash[:]
 
-	var apiKey string
-	if c.Octoprint {
-		apiKey = c.APIKey
-		if apiKey == "" {
-			// Generate 16 bytes of random data for API key
-			b := make([]byte, 16)
-			if _, err := rand.Read(b); err != nil {
-				return fmt.Errorf("failed to generate random API key: %w", err)
-			}
-			apiKey = hex.EncodeToString(b)
-			fmt.Printf("OctoPrint compatibility enabled. Generated API key:\n\n\t%s\n\n", apiKey)
-			fmt.Println("Use this key in your slicer (OrcaSlicer/PrusaSlicer) with type 'OctoPrint'.")
-			fmt.Printf("\tbambulan web --octoprint --api-key \"%s\"\n\n", apiKey)
-		}
-	}
-
 	s := NewWebServer()
 	s.BindAddr = c.Bind
 	s.Key = key
-	s.EnableOcto = c.Octoprint
 	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
 	s.CertFile = c.CertFile
 	s.KeyFile = c.KeyFile
@@ -166,19 +144,10 @@ func (c *WebCmd) Run(ctx *Context) error {
 	s.MQTTPassword = c.MQTTPassword
 	s.MQTTPrefix = c.MQTTPrefix
 
-	if c.Octoprint {
-		s.OctoHandler = octoprint.NewHandler(s.octoSession, apiKey)
-	}
-
 	return s.Start()
 }
 
 func (s *WebServer) Start() error {
-	if s.EnableOcto {
-		slog.Info("OctoPrint compatibility enabled", "apiKey", "********")
-		s.OctoHandler.RegisterRoutes(http.DefaultServeMux)
-	}
-
 	http.HandleFunc("/", s.handleIndex)
 	http.HandleFunc("/files", s.handleFiles)
 	http.HandleFunc("/login", s.handleLogin)
@@ -1418,23 +1387,6 @@ func (s *WebServer) getSession(w http.ResponseWriter, r *http.Request) (*Session
 
 	// Session ID exists in cookie but not in memory (restart?). Try to restore.
 	return s.tryRestoreSession(w, r)
-}
-
-// octoSession implements octoprint.SessionFunc. It returns the client and
-// status from the first active session, giving the OctoPrint handler access
-// to the printer without depending on WebServer session internals.
-func (s *WebServer) octoSession() (*bambulan.Client, *bambulan.PrinterStatus, bool) {
-	s.Mu.RLock()
-	defer s.Mu.RUnlock()
-	for _, sess := range s.Sessions {
-		if sess.Client != nil {
-			sess.Mu.RLock()
-			st := sess.Status
-			sess.Mu.RUnlock()
-			return sess.Client, st, true
-		}
-	}
-	return nil, nil, false
 }
 
 func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*Session, bool) {

@@ -73,8 +73,6 @@ Start the web dashboard (default port 8080).
 **Options:**
 - `--bind`: Address to bind to (default: `127.0.0.1:8080`)
 - `--secret`: Secret for session encryption (optional, random default) (Env: `BAMBULAN_SECRET`)
-- `--octoprint`: Enable OctoPrint compatibility layer (slicer integration) (Env: `BAMBULAN_OCTOPRINT`)
-- `--api-key`: API Key for OctoPrint integration (optional, random default) (Env: `BAMBULAN_API_KEY`)
 - `--cert`: TLS certificate file (enables HTTPS)
 - `--key`: TLS private key file (enables HTTPS)
 - `--max-file-size`: Maximum allowed size for 3MF file entries (default: `50MB`). Supports human-readable formats like `100MB`, `1GB`, `500KB`.
@@ -98,27 +96,11 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 
 When using HTTPS, cookies are automatically marked with the `Secure` flag for enhanced security.
 
-**Slicer Integration (OrcaSlicer / PrusaSlicer / Cura):**
-
-BambuLAN can emulate an **OctoPrint** server, allowing you to send files and control your printer directly from your favorite slicer.
-
-1.  Start the web server with OctoPrint enabled:
-    ```bash
-    ./bambulan web --octoprint
-    ```
-2.  Copy the generated **API Key** from the console output.
-3.  In your Slicer (e.g. OrcaSlicer), add a new "Physical Printer":
-    *   **Host Type**: OctoPrint
-    *   **Hostname**: `http://localhost:8080` (or your server's IP)
-    *   **API Key**: Paste the key from step 2.
-4.  You can now monitor temperatures and use "Send and Print" directly!
-
 **Features:**
 - **Dashboard**: Real-time status monitoring with high-performance Server-Sent Events (SSE).
 - **Connection Indicator**: Visual badge showing real-time health of the dashboard-to-server connection.
 - **Delta Updates**: Intelligent status synchronization that only sends changed fields to reduce bandwidth.
 - **Dark Mode**: Native theme support for low-light environments.
-- **Slicer Integration**: Standard OctoPrint API compatibility for seamless 'One-Click Print' workflows.
 - **Login**: Secure access with printer credentials.
 - **File Manager**: Browse files, download, and print directly.
 - **Print Start**: Upload and start prints with options.

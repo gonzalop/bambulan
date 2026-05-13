@@ -10,7 +10,6 @@ It provides a robust developer library, a powerful CLI tool, and a modern, real-
 
 - **Real-time Monitoring**: Receive updates on temperatures, fans, print progress, and detailed printer states via high-performance SSE.
 - **Connection Health**: Visual status indicator for the dashboard-to-server link.
-- **Slicer Integration**: Emulates OctoPrint API to allow one-click printing from OrcaSlicer, PrusaSlicer, and others.
 - **Full Printer Control**:
     - Manage print jobs (`start`, `pause`, `resume`, `stop`, `skip objects`).
     - Set print speed profiles (`silent`, `standard`, `sport`, `ludicrous`).
@@ -58,19 +57,6 @@ bambulan web --bind :9000
 ```
 
 See the [CLI Documentation](cmd/bambulan/README.md) for detailed usage and configuration options.
-
----
-
-### Slicer Integration (OctoPrint Compatibility)
-
-BambuLAN can emulate an **OctoPrint** server, allowing you to send files and control your printer directly from **OrcaSlicer**, **Bambu Studio**, or **PrusaSlicer**.
-
-1.  **Enable Integration**: Start the server with the `--octoprint` flag:
-    ```bash
-    bambulan web --octoprint --api-key my-secret-key
-    ```
-2.  **Configure Slicer**: In your slicer, add a "Physical Printer" using the **OctoPrint** host type.
-3.  **One-Click Print**: You can now monitor temperatures and use "Send and Print" directly from your workspace!
 
 ---
 
