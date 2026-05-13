@@ -3,212 +3,173 @@ package homeassistant
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
-// Device represents the Home Assistant device information.
+// Device represents the Home Assistant device information using abbreviations.
 type Device struct {
-	Identifiers  []string `json:"identifiers"`
-	Name         string   `json:"name"`
-	Model        string   `json:"model,omitempty"`
-	Manufacturer string   `json:"manufacturer,omitempty"`
-	SwVersion    string   `json:"sw_version,omitempty"`
+	Identifiers  []string `json:"ids"`
+	Name         string   `json:"name,omitempty"`
+	Model        string   `json:"mdl,omitempty"`
+	Manufacturer string   `json:"mf,omitempty"`
+	SwVersion    string   `json:"sw,omitempty"`
+	SerialNumber string   `json:"sn,omitempty"`
 }
 
-// DiscoveryConfig is the base structure for HA MQTT discovery.
+// DiscoveryConfig is the base structure for HA MQTT discovery using abbreviated keys.
 type DiscoveryConfig struct {
-	Name                string   `json:"name"`
-	UniqueID            string   `json:"unique_id"`
-	StateTopic          string   `json:"state_topic,omitempty"`
-	CommandTopic        string   `json:"command_topic,omitempty"`
-	AvailabilityTopic   string   `json:"availability_topic,omitempty"`
-	PayloadAvailable    string   `json:"payload_available,omitempty"`
-	PayloadNotAvailable string   `json:"payload_not_available,omitempty"`
-	PayloadOn           string   `json:"payload_on,omitempty"`
-	PayloadOff          string   `json:"payload_off,omitempty"`
-	ValueTemplate       string   `json:"value_template,omitempty"`
-	UnitOfMeasurement   string   `json:"unit_of_measurement,omitempty"`
-	DeviceClass         string   `json:"device_class,omitempty"`
-	StateClass          string   `json:"state_class,omitempty"`
-	Icon                string   `json:"icon,omitempty"`
-	Device              *Device  `json:"device,omitempty"`
-	EntityCategory      string   `json:"entity_category,omitempty"`
-	Options             []string `json:"options,omitempty"`
+	BaseTopic           string   `json:"~,omitempty"`
+	Name                string   `json:"name,omitempty"`
+	ObjectID            string   `json:"obj_id,omitempty"`
+	UniqueID            string   `json:"uniq_id"`
+	StateTopic          string   `json:"stat_t,omitempty"`
+	CommandTopic        string   `json:"cmd_t,omitempty"`
+	AvailabilityTopic   string   `json:"avty_t,omitempty"`
+	PayloadAvailable    string   `json:"pl_avail,omitempty"`
+	PayloadNotAvailable string   `json:"pl_not_avail,omitempty"`
+	PayloadOn           string   `json:"pl_on,omitempty"`
+	PayloadOff          string   `json:"pl_off,omitempty"`
+	ValueTemplate       string   `json:"val_tpl,omitempty"`
+	UnitOfMeasurement   string   `json:"unit_of_meas,omitempty"`
+	DeviceClass         string   `json:"dev_cla,omitempty"`
+	StateClass          string   `json:"stat_cla,omitempty"`
+	Icon                string   `json:"ic,omitempty"`
+	Device              *Device  `json:"dev,omitempty"`
+	EntityCategory      string   `json:"ent_cat,omitempty"`
+	Options             []string `json:"ops,omitempty"`
 	Min                 *float64 `json:"min,omitempty"`
 	Max                 *float64 `json:"max,omitempty"`
 	Step                *float64 `json:"step,omitempty"`
-	Mode                string   `json:"mode,omitempty"`  // "auto", "box" or "slider"
-	Topic               string   `json:"topic,omitempty"` // For Camera
+	Mode                string   `json:"mode,omitempty"`
+	Topic               string   `json:"t,omitempty"` // For Camera
 }
 
 func (d *DiscoveryConfig) ToJSON() ([]byte, error) {
 	return json.Marshal(d)
 }
 
-// Entity mapping helpers
-
-func createSensorConfig(prefix, serial, model, displayName, entityID, name, unit, deviceClass, stateClass, icon, category, host string) *DiscoveryConfig {
-	return createSensorConfigCustom(prefix, serial, model, displayName, entityID, name, unit, deviceClass, stateClass, icon, category, host, fmt.Sprintf("{{ value_json.%s }}", entityID))
+// DiscoveryFactory helps create discovery configurations with shared device info.
+type DiscoveryFactory struct {
+	Prefix      string
+	Serial      string
+	Model       string
+	DisplayName string
+	Device      *Device
 }
 
-func createSensorConfigCustom(prefix, serial, model, displayName, entityID, name, unit, deviceClass, stateClass, icon, category, host, valueTemplate string) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
+func NewDiscoveryFactory(prefix, serial, model, displayName string) *DiscoveryFactory {
+	return &DiscoveryFactory{
+		Prefix:      prefix,
+		Serial:      serial,
+		Model:       model,
+		DisplayName: displayName,
+		Device: &Device{
+			Identifiers:  []string{fmt.Sprintf("bambu_%s", serial)},
+			Name:         displayName,
+			Model:        model,
+			Manufacturer: "Bambu Lab",
+		},
+	}
+}
+
+func (f *DiscoveryFactory) tag() string {
+	return fmt.Sprintf("bambu_%s", f.Serial)
+}
+
+func (f *DiscoveryFactory) entitySlug(entityID string) string {
+	// Slugify the display name (e.g. "Bambu Lab P1S 1267" -> "bambu_lab_p1s_1267")
+	slug := strings.ToLower(f.DisplayName)
+	slug = strings.ReplaceAll(slug, " ", "_")
+	return fmt.Sprintf("%s_%s", slug, entityID)
+}
+
+func (f *DiscoveryFactory) baseConfig(entityID, name string) *DiscoveryConfig {
 	return &DiscoveryConfig{
+		BaseTopic:           fmt.Sprintf("%s/%s", f.Prefix, f.tag()),
 		Name:                name,
-		UniqueID:            fmt.Sprintf("%s_%s", tag, entityID),
-		StateTopic:          fmt.Sprintf("%s/%s/state", prefix, tag),
-		AvailabilityTopic:   fmt.Sprintf("%s/%s/online/state", prefix, tag),
+		ObjectID:            f.entitySlug(entityID),
+		UniqueID:            fmt.Sprintf("%s_%s", f.tag(), entityID),
+		AvailabilityTopic:   "~/online/state",
 		PayloadAvailable:    "ON",
 		PayloadNotAvailable: "OFF",
-		ValueTemplate:       valueTemplate,
-		UnitOfMeasurement:   unit,
-		DeviceClass:         deviceClass,
-		StateClass:          stateClass,
-		Icon:                icon,
-		EntityCategory:      category,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
+		Device:              f.Device,
 	}
 }
 
-func createBinarySensorConfig(prefix, serial, model, displayName, entityID, name, deviceClass, icon, category, host string) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
-	cfg := &DiscoveryConfig{
-		Name:           name,
-		UniqueID:       fmt.Sprintf("%s_%s", tag, entityID),
-		StateTopic:     fmt.Sprintf("%s/%s/%s/state", prefix, tag, entityID),
-		PayloadOn:      "ON",
-		PayloadOff:     "OFF",
-		DeviceClass:    deviceClass,
-		Icon:           icon,
-		EntityCategory: category,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
-	}
-	// Don't set availability for the online sensor itself
-	if entityID != "online" {
-		cfg.AvailabilityTopic = fmt.Sprintf("%s/%s/online/state", prefix, tag)
-		cfg.PayloadAvailable = "ON"
-		cfg.PayloadNotAvailable = "OFF"
+func (f *DiscoveryFactory) Sensor(entityID, name, unit, devClass, statClass, icon, category string) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.StateTopic = "~/state"
+	cfg.ValueTemplate = fmt.Sprintf("{{ value_json.%s }}", entityID)
+	cfg.UnitOfMeasurement = unit
+	cfg.DeviceClass = devClass
+	cfg.StateClass = statClass
+	cfg.Icon = icon
+	cfg.EntityCategory = category
+	return cfg
+}
+
+func (f *DiscoveryFactory) BinarySensor(entityID, name, devClass, icon, category string) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.StateTopic = fmt.Sprintf("~/%s/state", entityID)
+	cfg.PayloadOn = "ON"
+	cfg.PayloadOff = "OFF"
+	cfg.DeviceClass = devClass
+	cfg.Icon = icon
+	cfg.EntityCategory = category
+	if entityID == "online" {
+		cfg.AvailabilityTopic = "" // Self-availability
 	}
 	return cfg
 }
 
-func createSwitchConfig(prefix, serial, model, displayName, entityID, name, icon, category, host string) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
-	return &DiscoveryConfig{
-		Name:                name,
-		UniqueID:            fmt.Sprintf("%s_%s", tag, entityID),
-		StateTopic:          fmt.Sprintf("%s/%s/%s/state", prefix, tag, entityID),
-		CommandTopic:        fmt.Sprintf("%s/%s/%s/set", prefix, tag, entityID),
-		AvailabilityTopic:   fmt.Sprintf("%s/%s/online/state", prefix, tag),
-		PayloadAvailable:    "ON",
-		PayloadNotAvailable: "OFF",
-		PayloadOn:           "ON",
-		PayloadOff:          "OFF",
-		Icon:                icon,
-		EntityCategory:      category,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
-	}
+func (f *DiscoveryFactory) Switch(entityID, name, icon, category string) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.StateTopic = fmt.Sprintf("~/%s/state", entityID)
+	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
+	cfg.PayloadOn = "ON"
+	cfg.PayloadOff = "OFF"
+	cfg.Icon = icon
+	cfg.EntityCategory = category
+	return cfg
 }
 
-func createButtonConfig(prefix, serial, model, displayName, entityID, name, icon, category, host string) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
-	return &DiscoveryConfig{
-		Name:                name,
-		UniqueID:            fmt.Sprintf("%s_%s", tag, entityID),
-		CommandTopic:        fmt.Sprintf("%s/%s/%s/set", prefix, tag, entityID),
-		AvailabilityTopic:   fmt.Sprintf("%s/%s/online/state", prefix, tag),
-		PayloadAvailable:    "ON",
-		PayloadNotAvailable: "OFF",
-		Icon:                icon,
-		EntityCategory:      category,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
-	}
+func (f *DiscoveryFactory) Button(entityID, name, icon, category string) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
+	cfg.Icon = icon
+	cfg.EntityCategory = category
+	return cfg
 }
 
-func createSelectConfig(prefix, serial, model, displayName, entityID, name, icon, category, host string, options []string) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
-	return &DiscoveryConfig{
-		Name:                name,
-		UniqueID:            fmt.Sprintf("%s_%s", tag, entityID),
-		StateTopic:          fmt.Sprintf("%s/%s/state", prefix, tag),
-		ValueTemplate:       fmt.Sprintf("{{ value_json.%s }}", entityID),
-		CommandTopic:        fmt.Sprintf("%s/%s/%s/set", prefix, tag, entityID),
-		AvailabilityTopic:   fmt.Sprintf("%s/%s/online/state", prefix, tag),
-		PayloadAvailable:    "ON",
-		PayloadNotAvailable: "OFF",
-		Icon:                icon,
-		EntityCategory:      category,
-		Options:             options,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
-	}
+func (f *DiscoveryFactory) Select(entityID, name, icon, category string, options []string) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.StateTopic = "~/state"
+	cfg.ValueTemplate = fmt.Sprintf("{{ value_json.%s }}", entityID)
+	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
+	cfg.Icon = icon
+	cfg.EntityCategory = category
+	cfg.Options = options
+	return cfg
 }
 
-func createNumberConfig(prefix, serial, model, displayName, entityID, name, unit, deviceClass, icon, category, host string, min, max, step float64) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
-	return &DiscoveryConfig{
-		Name:                name,
-		UniqueID:            fmt.Sprintf("%s_%s", tag, entityID),
-		StateTopic:          fmt.Sprintf("%s/%s/state", prefix, tag),
-		ValueTemplate:       fmt.Sprintf("{{ value_json.%s }}", entityID),
-		CommandTopic:        fmt.Sprintf("%s/%s/%s/set", prefix, tag, entityID),
-		AvailabilityTopic:   fmt.Sprintf("%s/%s/online/state", prefix, tag),
-		PayloadAvailable:    "ON",
-		PayloadNotAvailable: "OFF",
-		UnitOfMeasurement:   unit,
-		DeviceClass:         deviceClass,
-		Icon:                icon,
-		EntityCategory:      category,
-		Min:                 &min,
-		Max:                 &max,
-		Step:                &step,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
-	}
+func (f *DiscoveryFactory) Number(entityID, name, unit, devClass, icon, category string, min, max, step float64) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.StateTopic = "~/state"
+	cfg.ValueTemplate = fmt.Sprintf("{{ value_json.%s }}", entityID)
+	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
+	cfg.UnitOfMeasurement = unit
+	cfg.DeviceClass = devClass
+	cfg.Icon = icon
+	cfg.EntityCategory = category
+	cfg.Min = &min
+	cfg.Max = &max
+	cfg.Step = &step
+	return cfg
 }
 
-func createCameraConfig(prefix, serial, model, displayName, entityID, name, category, host string) *DiscoveryConfig {
-	tag := fmt.Sprintf("bambu_%s", serial)
-	return &DiscoveryConfig{
-		Name:                name,
-		UniqueID:            fmt.Sprintf("%s_%s", tag, entityID),
-		Topic:               fmt.Sprintf("%s/%s/%s/image", prefix, tag, entityID),
-		AvailabilityTopic:   fmt.Sprintf("%s/%s/online/state", prefix, tag),
-		PayloadAvailable:    "ON",
-		PayloadNotAvailable: "OFF",
-		EntityCategory:      category,
-		Device: &Device{
-			Identifiers:  []string{tag},
-			Name:         displayName,
-			Model:        model,
-			Manufacturer: "Bambu Lab",
-		},
-	}
+func (f *DiscoveryFactory) Camera(entityID, name, category string) *DiscoveryConfig {
+	cfg := f.baseConfig(entityID, name)
+	cfg.Topic = fmt.Sprintf("~/%s/image", entityID)
+	cfg.EntityCategory = category
+	return cfg
 }

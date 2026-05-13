@@ -1,0 +1,149 @@
+title: Bambu Printer
+views:
+  - title: Overview
+    path: bambu-overview
+    type: sections
+    max_columns: 3
+    sections:
+      - cards:
+          - type: heading
+            heading: Media
+            heading_style: title
+          - type: tile
+            entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_streaming
+            name: Camera Stream
+            icon: mdi:video
+            color: green
+            vertical: false
+            features_position: bottom
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_streaming
+                state: 'on'
+            card:
+              show_state: false
+              show_name: false
+              camera_view: live
+              fit_mode: cover
+              type: picture-entity
+              entity: camera.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera
+              name: Live Feed
+            grid_options:
+              columns: full
+              rows: auto
+        column_span: 3
+        background:
+          opacity: 33
+      - cards:
+          - type: heading
+            heading: Printing Status
+          - type: tile
+            entity: sensor.<MODEL>_<LAST_4_SERIAL>_print_stage
+            name: Current Stage
+            icon: mdi:printer-3d
+            color: blue
+            vertical: false
+            features_position: bottom
+            grid_options:
+              columns: 12
+              rows: 1
+          - type: gauge
+            entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_progress
+            name: Progress
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 80
+              yellow: 20
+              red: 0
+          - type: tile
+            entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_remaining_time
+            name: Time Left
+            icon: mdi:timer-sand
+            hide_state: false
+            grid_options:
+              columns: 12
+              rows: 1
+          - type: grid
+            columns: 3
+            square: false
+            cards:
+              - type: button
+                entity: button.bambu_lab_<MODEL>_<LAST_4_SERIAL>_pause_print
+                name: Pause
+                icon: mdi:pause
+              - type: button
+                entity: button.bambu_lab_<MODEL>_<LAST_4_SERIAL>_resume_print
+                name: Resume
+                icon: mdi:play
+              - type: button
+                entity: button.bambu_lab_<MODEL>_<LAST_4_SERIAL>_stop_print
+                name: Stop
+                icon: mdi:stop
+                color: red
+      - cards:
+          - type: heading
+            heading: System Info
+          - type: entities
+            entities:
+              - entity: binary_sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_online
+              - entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_wifi_signal
+              - entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_ip_address
+                icon: mdi:ip-network
+          - type: grid
+            columns: 2
+            square: false
+            cards:
+              - type: gauge
+                entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_nozzle_temperature
+                name: Nozzle
+                min: 0
+                max: 300
+                unit: °C
+              - type: gauge
+                entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_bed_temperature
+                name: Bed
+                min: 0
+                max: 110
+                unit: °C
+      - cards:
+          - type: entities
+            entities:
+              - type: section
+                label: Nozzles
+              - entity: number.bambu_lab_<MODEL>_<LAST_4_SERIAL>_target_nozzle_temperature
+                name: Set Nozzle
+                icon: mdi:thermometer-chevron-up
+              - entity: number.bambu_lab_<MODEL>_<LAST_4_SERIAL>_target_bed_temperature
+                name: Set Bed
+                icon: mdi:thermometer-chevron-up
+              - type: section
+                label: Fans
+              - entity: number.bambu_lab_<MODEL>_<LAST_4_SERIAL>_part_cooling_fan
+                name: Part Fan
+              - entity: number.bambu_lab_<MODEL>_<LAST_4_SERIAL>_aux_fan
+                name: Aux Fan
+              - entity: number.bambu_lab_<MODEL>_<LAST_4_SERIAL>_chamber_fan
+                name: Chamber Fan
+            title: Controls
+          - type: tile
+            entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_chamber_light
+            name: Chamber Light
+            icon: mdi:lightbulb
+            color: amber
+          - type: tile
+            entity: select.bambu_lab_<MODEL>_<LAST_4_SERIAL>_speed_profile
+            name: Speed Profile
+            icon: mdi:speedometer
+          - type: tile
+            grid_options:
+              columns: 12
+              rows: 1
+            entity: select.bambu_lab_<MODEL>_<LAST_4_SERIAL>_print_file
+            name: Select SD Card file to print
+            icon: mdi:printer-3d
+            vertical: false
+            features_position: bottom
+

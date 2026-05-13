@@ -43,6 +43,7 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 	opts := []mq.Option{
 		mq.WithCredentials(user, pass),
 		mq.WithProtocolVersion(mq.ProtocolV50),
+		mq.WithTopicAliasMaximum(100),
 		mq.WithKeepAlive(30 * time.Second),
 		mq.WithAutoReconnect(true),
 		mq.WithLogger(slog.Default()),
@@ -236,16 +237,14 @@ func (b *Bridge) Start(ctx context.Context) error {
 				b.haModel = strings.TrimPrefix(b.haModel, "Bambu ")
 
 				// Determine a unique display name for Home Assistant
-				// If DevName is empty or just the internal model ID, use the friendly name + serial suffix
-				b.displayName = status.DevName
-				if b.displayName == "" || b.displayName == b.model || b.displayName == "Printer" {
-					// Use last 4 digits of serial for uniqueness
-					suffix := b.serial
-					if len(suffix) > 4 {
-						suffix = suffix[len(suffix)-4:]
-					}
-					b.displayName = fmt.Sprintf("%s %s", b.haModel, suffix)
+				// Format: <manufacturer> <model> <last 4 of serial>
+				suffix := b.serial
+				if len(suffix) > 4 {
+					suffix = suffix[len(suffix)-4:]
 				}
+
+				manufacturer := "Bambu Lab"
+				b.displayName = fmt.Sprintf("%s %s %s", manufacturer, b.haModel, suffix)
 
 				if err := b.publishDiscovery(b.haModel); err != nil {
 					slog.Error("Failed to publish HA discovery", "error", err)
@@ -279,6 +278,7 @@ func (b *Bridge) publishAMSDiscovery(status *bambulan.PrinterStatus) error {
 		return nil
 	}
 
+	factory := NewDiscoveryFactory(b.prefix, b.serial, b.haModel, b.displayName)
 	caps := bambulan.GetPrinterCapabilities(b.model)
 	var configs []*DiscoveryConfig
 
@@ -289,7 +289,7 @@ func (b *Bridge) publishAMSDiscovery(status *bambulan.PrinterStatus) error {
 
 		unitID := fmt.Sprintf("ams_%d", i)
 		if !b.entitiesOk[unitID+"_humidity"] {
-			configs = append(configs, createSensorConfig(b.prefix, b.serial, b.haModel, b.displayName, unitID+"_humidity", fmt.Sprintf("AMS %d Humidity", i), "", "", "measurement", "mdi:water-percent", "", b.host))
+			configs = append(configs, factory.Sensor(unitID+"_humidity", fmt.Sprintf("AMS %d Humidity", i), "", "", "measurement", "mdi:water-percent", ""))
 			b.entitiesOk[unitID+"_humidity"] = true
 		}
 
@@ -301,14 +301,14 @@ func (b *Bridge) publishAMSDiscovery(status *bambulan.PrinterStatus) error {
 
 			// Always discover filament type
 			if !b.entitiesOk[trayID+"_filament"] {
-				configs = append(configs, createSensorConfigCustom(b.prefix, b.serial, b.haModel, b.displayName, trayID+"_filament", fmt.Sprintf("AMS %d Slot %d Filament", i, j+1), "", "", "", "mdi:format-list-bulleted-type", "", b.host, fmt.Sprintf("{{ value_json.%s }}", trayID+"_filament")))
+				configs = append(configs, factory.Sensor(trayID+"_filament", fmt.Sprintf("AMS %d Slot %d Filament", i, j+1), "", "", "", "mdi:format-list-bulleted-type", ""))
 				b.entitiesOk[trayID+"_filament"] = true
 			}
 
 			// Only discover 'remain' if the printer supports it AND it reports a valid value (>=0)
 			if caps.HasAMSCapacityReporting && tray.Remain >= 0 {
 				if !b.entitiesOk[trayID+"_remain"] {
-					configs = append(configs, createSensorConfigCustom(b.prefix, b.serial, b.haModel, b.displayName, trayID+"_remain", fmt.Sprintf("AMS %d Slot %d Remaining", i, j+1), "%", "", "measurement", "mdi:gauge", "", b.host, fmt.Sprintf("{{ value_json.%s }}", trayID+"_remain")))
+					configs = append(configs, factory.Sensor(trayID+"_remain", fmt.Sprintf("AMS %d Slot %d Remaining", i, j+1), "%", "", "measurement", "mdi:gauge", ""))
 					b.entitiesOk[trayID+"_remain"] = true
 				}
 			}
@@ -316,8 +316,9 @@ func (b *Bridge) publishAMSDiscovery(status *bambulan.PrinterStatus) error {
 	}
 
 	for _, cfg := range configs {
-		// Standard flat discovery topic: prefix/component/unique_id/config
-		topic := fmt.Sprintf("%s/sensor/%s/config", b.prefix, cfg.UniqueID)
+		// Topic format: prefix/component/unique_id/config
+		component := "sensor"
+		topic := fmt.Sprintf("%s/%s/%s/config", b.prefix, component, cfg.UniqueID)
 		payload, err := cfg.ToJSON()
 		if err != nil {
 			return err
@@ -488,81 +489,80 @@ func (b *Bridge) syncFiles(ctx context.Context) error {
 func (b *Bridge) publishDiscovery(model string) error {
 	slog.Debug("HA Bridge: Publishing entity discovery configurations", "serial", b.serial)
 	caps := bambulan.GetPrinterCapabilities(b.model)
+	factory := NewDiscoveryFactory(b.prefix, b.serial, model, b.displayName)
 
 	type entry struct {
 		cfg       *DiscoveryConfig
-		objectID  string
 		component string
 	}
 	var configs []entry
 
 	// Base Sensors
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "print_stage", "Print Stage", "", "", "", "mdi:printer-3d", "", b.host), "print_stage", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "print_progress", "Progress", "%", "", "measurement", "mdi:progress-clock", "", b.host), "print_progress", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "remaining_time", "Remaining Time", "min", "duration", "measurement", "mdi:timer-sand", "", b.host), "remaining_time", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "nozzle_temp", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", "", b.host), "nozzle_temp", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "nozzle_target_temp", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic", b.host), "nozzle_target_temp", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "bed_temp", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", "", b.host), "bed_temp", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "bed_target_temp", "Bed Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic", b.host), "bed_target_temp", "sensor"})
+	configs = append(configs, entry{factory.Sensor("print_stage", "Print Stage", "", "", "", "mdi:printer-3d", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("print_progress", "Progress", "%", "", "measurement", "mdi:progress-clock", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("remaining_time", "Remaining Time", "min", "duration", "measurement", "mdi:timer-sand", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("nozzle_temp", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("nozzle_target_temp", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
+	configs = append(configs, entry{factory.Sensor("bed_temp", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("bed_target_temp", "Bed Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
 
 	if caps.HasChamberTemp {
-		configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "chamber_temp", "Chamber Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", "", b.host), "chamber_temp", "sensor"})
+		configs = append(configs, entry{factory.Sensor("chamber_temp", "Chamber Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
 	}
 
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi", "diagnostic", b.host), "wifi_signal", "sensor"})
-	configs = append(configs, entry{createSensorConfig(b.prefix, b.serial, model, b.displayName, "ip_address", "IP Address", "", "", "", "mdi:ip-network", "diagnostic", b.host), "ip_address", "sensor"})
+	configs = append(configs, entry{factory.Sensor("wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi", "diagnostic"), "sensor"})
+	configs = append(configs, entry{factory.Sensor("ip_address", "IP Address", "", "", "", "mdi:ip-network", "diagnostic"), "sensor"})
 
 	// Binary Sensors
-	configs = append(configs, entry{createBinarySensorConfig(b.prefix, b.serial, model, b.displayName, "online", "Online", "connectivity", "mdi:printer-check", "diagnostic", b.host), "online", "binary_sensor"})
+	configs = append(configs, entry{factory.BinarySensor("online", "Online", "connectivity", "mdi:printer-check", "diagnostic"), "binary_sensor"})
 
 	// Switches
-	configs = append(configs, entry{createSwitchConfig(b.prefix, b.serial, model, b.displayName, "chamber_light", "Chamber Light", "mdi:lightbulb-outline", "", b.host), "chamber_light", "switch"})
-	configs = append(configs, entry{createSwitchConfig(b.prefix, b.serial, model, b.displayName, "camera_enable", "Camera Streaming", "mdi:video-outline", "diagnostic", b.host), "camera_enable", "switch"})
+	configs = append(configs, entry{factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""), "switch"})
+	configs = append(configs, entry{factory.Switch("camera_enable", "Camera Streaming", "mdi:video-outline", "diagnostic"), "switch"})
 
 	// Buttons
-	configs = append(configs, entry{b.createActionButtonConfig(model, "pause_print", "Pause Print", "mdi:pause"), "pause_print", "button"})
-	configs = append(configs, entry{b.createActionButtonConfig(model, "resume_print", "Resume Print", "mdi:play"), "resume_print", "button"})
-	configs = append(configs, entry{b.createActionButtonConfig(model, "stop_print", "Stop Print", "mdi:stop"), "stop_print", "button"})
-	configs = append(configs, entry{createButtonConfig(b.prefix, b.serial, model, b.displayName, "refresh_files", "Refresh Files", "mdi:refresh", "", b.host), "refresh_files", "button"})
+	configs = append(configs, entry{b.createActionButtonConfig(factory, "pause_print", "Pause Print", "mdi:pause"), "button"})
+	configs = append(configs, entry{b.createActionButtonConfig(factory, "resume_print", "Resume Print", "mdi:play"), "button"})
+	configs = append(configs, entry{b.createActionButtonConfig(factory, "stop_print", "Stop Print", "mdi:stop"), "button"})
+	configs = append(configs, entry{factory.Button("refresh_files", "Refresh Files", "mdi:refresh", ""), "button"})
 
 	// Selects
-	configs = append(configs, entry{createSelectConfig(b.prefix, b.serial, model, b.displayName, "speed_profile", "Speed Profile", "mdi:speedometer", "", b.host, []string{"Silent", "Standard", "Sport", "Ludicrous"}), "speed_profile", "select"})
-	configs = append(configs, entry{createSelectConfig(b.prefix, b.serial, model, b.displayName, "print_file", "Print File", "mdi:file-send", "", b.host, b.files), "print_file", "select"})
+	configs = append(configs, entry{factory.Select("speed_profile", "Speed Profile", "mdi:speedometer", "", []string{"Silent", "Standard", "Sport", "Ludicrous"}), "select"})
+	configs = append(configs, entry{factory.Select("print_file", "Print File", "mdi:file-send", "", b.files), "select"})
 
 	// Numbers
-	configs = append(configs, entry{createNumberConfig(b.prefix, b.serial, model, b.displayName, "target_nozzle_temp", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", b.host, 0, float64(caps.MaxNozzleTemp), 1), "target_nozzle_temp", "number"})
-	configs = append(configs, entry{createNumberConfig(b.prefix, b.serial, model, b.displayName, "target_bed_temp", "Target Bed Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", b.host, 0, float64(caps.MaxBedTemp), 1), "target_bed_temp", "number"})
+	configs = append(configs, entry{factory.Number("target_nozzle_temp", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxNozzleTemp), 1), "number"})
+	configs = append(configs, entry{factory.Number("target_bed_temp", "Target Bed Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxBedTemp), 1), "number"})
 
 	if caps.HasChamberHeater {
-		configs = append(configs, entry{createNumberConfig(b.prefix, b.serial, model, b.displayName, "target_chamber_temp", "Target Chamber Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", b.host, 0, float64(caps.MaxChamberTemp), 1), "target_chamber_temp", "number"})
+		configs = append(configs, entry{factory.Number("target_chamber_temp", "Target Chamber Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxChamberTemp), 1), "number"})
 	}
 
-	configs = append(configs, entry{createNumberConfig(b.prefix, b.serial, model, b.displayName, "fan_part", "Part Cooling Fan", "", "", "mdi:fan", "", b.host, 0, 15, 1), "fan_part", "number"})
+	configs = append(configs, entry{factory.Number("fan_part", "Part Cooling Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
 	if caps.HasAuxFan {
-		configs = append(configs, entry{createNumberConfig(b.prefix, b.serial, model, b.displayName, "fan_aux", "Aux Fan", "", "", "mdi:fan", "", b.host, 0, 15, 1), "fan_aux", "number"})
+		configs = append(configs, entry{factory.Number("fan_aux", "Aux Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
 	}
 	if caps.HasChamberFan {
-		configs = append(configs, entry{createNumberConfig(b.prefix, b.serial, model, b.displayName, "fan_chamber", "Chamber Fan", "", "", "mdi:fan", "", b.host, 0, 15, 1), "fan_chamber", "number"})
+		configs = append(configs, entry{factory.Number("fan_chamber", "Chamber Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
 	}
 
 	// Camera
-	configs = append(configs, entry{createCameraConfig(b.prefix, b.serial, model, b.displayName, "camera", "Camera", "", b.host), "camera", "camera"})
+	configs = append(configs, entry{factory.Camera("camera", "Camera", ""), "camera"})
 
 	for _, entry := range configs {
-		// Flat discovery topic structure for maximum compatibility: prefix/component/unique_id/config
 		topic := fmt.Sprintf("%s/%s/%s/config", b.prefix, entry.component, entry.cfg.UniqueID)
 		payload, err := entry.cfg.ToJSON()
 		if err != nil {
 			return err
 		}
 
-		slog.Debug("HA Bridge: Publishing entity discovery", "component", entry.component, "objectID", entry.objectID, "topic", topic)
+		slog.Debug("HA Bridge: Publishing entity discovery", "component", entry.component, "topic", topic)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		token := b.ha.Publish(topic, payload, mq.WithRetain(true))
 		err = token.Wait(ctx)
 		cancel()
 		if err != nil {
-			slog.Error("HA Bridge: Failed to publish discovery for entity", "objectID", entry.objectID, "error", err)
+			slog.Error("HA Bridge: Failed to publish discovery for entity", "topic", topic, "error", err)
 			return err
 		}
 	}
@@ -570,8 +570,8 @@ func (b *Bridge) publishDiscovery(model string) error {
 	return nil
 }
 
-func (b *Bridge) createActionButtonConfig(model, entityID, name, icon string) *DiscoveryConfig {
-	cfg := createButtonConfig(b.prefix, b.serial, model, b.displayName, entityID, name, icon, "", b.host)
+func (b *Bridge) createActionButtonConfig(factory *DiscoveryFactory, entityID, name, icon string) *DiscoveryConfig {
+	cfg := factory.Button(entityID, name, icon, "")
 	tag := fmt.Sprintf("bambu_%s", b.serial)
 	// Use a dedicated availability topic for the action
 	cfg.AvailabilityTopic = fmt.Sprintf("%s/%s/%s/availability", b.prefix, tag, entityID)
@@ -594,6 +594,8 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 		speed = "Ludicrous"
 	}
 
+	caps := bambulan.GetPrinterCapabilities(b.model)
+
 	state := map[string]any{
 		"print_stage":        status.GetPrintStageName(),
 		"print_progress":     status.McPercent,
@@ -602,21 +604,28 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 		"nozzle_target_temp": status.NozzleTargetTemp,
 		"bed_temp":           status.BedTemp,
 		"bed_target_temp":    status.BedTargetTemp,
-		"chamber_temp":       status.ChamberTemp,
 		"ip_address":         b.host,
 		"speed_profile":      speed,
 		"target_nozzle_temp": int(status.NozzleTargetTemp),
 		"target_bed_temp":    int(status.BedTargetTemp),
 	}
 
+	if caps.HasChamberTemp {
+		state["chamber_temp"] = status.ChamberTemp
+	}
+
 	if status.ChamberTargetTemp > 0 {
 		state["target_chamber_temp"] = int(status.ChamberTargetTemp)
 	}
 
-	// Parse fan speeds (they come as strings like "100" or percentage)
+	// Parse fan speeds
 	state["fan_part"] = parseFanSpeed(status.CoolingFanSpeed)
-	state["fan_aux"] = parseFanSpeed(status.BigFan1Speed)
-	state["fan_chamber"] = parseFanSpeed(status.BigFan2Speed)
+	if caps.HasAuxFan {
+		state["fan_aux"] = parseFanSpeed(status.BigFan1Speed)
+	}
+	if caps.HasChamberFan {
+		state["fan_chamber"] = parseFanSpeed(status.BigFan2Speed)
+	}
 
 	wifi := strings.TrimSpace(strings.TrimSuffix(status.WifiSignal, "dBm"))
 	if wifi != "" {
@@ -639,7 +648,9 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 					filament = "Empty"
 				}
 				state[fmt.Sprintf("ams_%d_slot_%d_filament", i, j)] = filament
-				state[fmt.Sprintf("ams_%d_slot_%d_remain", i, j)] = tray.Remain
+				if caps.HasAMSCapacityReporting && tray.Remain >= 0 {
+					state[fmt.Sprintf("ams_%d_slot_%d_remain", i, j)] = tray.Remain
+				}
 			}
 		}
 	}

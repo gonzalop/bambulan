@@ -22,7 +22,7 @@ It provides a robust developer library, a powerful CLI tool, and a modern, real-
 - **3MF Project Inspection**: Deep extraction of metadata, plate info, thumbnails, and filament requirements via the `bambu3mf` package.
 - **Filament Management**: Resolve filament inheritance, profiles, and compatibility via the `filament` package.
 - **Hardware Intelligence**: Automatic model detection (X1, P1, A1 series) to enforce hardware-specific safety limits and capabilities.
-- **Home Assistant Integration**: Expose printer status and controls to Home Assistant via MQTT Discovery (automatic setup).
+- **Home Assistant Integration**: Expose printer status and controls to Home Assistant via MQTT Discovery (automatic setup, template dashboard provided).
 - **Camera Streaming**: Access live MJPEG streams and capture static frames.
 - **File Management**: Full FTPS support for listing, downloading, uploading, and managing files/directories on the SD card.
 
@@ -63,6 +63,10 @@ See the [CLI Documentation](cmd/bambulan/README.md) for detailed usage and confi
 ### Home Assistant Integration
 
 BambuLAN can bridge your printer status to **Home Assistant** using **MQTT Discovery**.
+
+![BambuLAN Home Assistant Dashboard](assets/bambulan-homeassistant.png)
+
+A [Modern Dashboard Template](homeassistant/dashboard.yaml) is available to get you started quickly.
 
 1.  **Enable Integration**: Start the web server or the dedicated bridge with your MQTT broker details. You can use flags or environment variables:
     ```bash
