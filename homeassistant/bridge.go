@@ -96,13 +96,13 @@ func (b *Bridge) publishOnline(online bool) {
 	slog.Debug("HA Bridge: Publishing printer online status", "topic", topic, "state", state)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	token := b.ha.Publish(topic, []byte(state), mq.WithRetain(true))
+	token := b.ha.Publish(ctx, topic, []byte(state), mq.WithRetain(true))
 	if err := token.Wait(ctx); err != nil {
 		slog.Error("HA Bridge: Failed to publish online status", "error", err)
 	}
 }
 
-func (b *Bridge) publishCameraState() {
+func (b *Bridge) publishCameraState(ctx context.Context) {
 	if b.serial == "" {
 		return
 	}
@@ -114,7 +114,7 @@ func (b *Bridge) publishCameraState() {
 		state = "ON"
 	}
 	slog.Debug("HA Bridge: Publishing camera state", "topic", topic, "state", state)
-	_ = b.ha.Publish(topic, []byte(state), mq.WithRetain(true))
+	_ = b.ha.Publish(ctx, topic, []byte(state), mq.WithRetain(true))
 }
 
 // Start runs the bridge event loop.
@@ -132,7 +132,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	if b.serial != "" {
 		slog.Debug("Printer serial known on start", "serial", b.serial)
 		_ = b.setupSubscriptions(ctx)
-		b.publishCameraState()
+		b.publishCameraState(ctx)
 		if b.bambu.MQTT.IsConnected() {
 			b.publishOnline(true)
 		}
@@ -184,7 +184,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 					if err == nil {
 						tag := fmt.Sprintf("bambu_%s", b.serial)
 						topic := fmt.Sprintf("%s/%s/camera/image", b.prefix, tag)
-						_ = b.ha.Publish(topic, img)
+						_ = b.ha.Publish(ctx, topic, img)
 					} else {
 						slog.Debug("Failed to capture camera frame for HA", "error", err)
 					}
@@ -207,7 +207,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 				b.serial = b.bambu.MQTT.Serial
 				slog.Debug("Printer serial discovered from status", "serial", b.serial)
 				_ = b.setupSubscriptions(ctx)
-				b.publishCameraState()
+				b.publishCameraState(ctx)
 				if b.bambu.MQTT.IsConnected() {
 					b.publishOnline(true)
 				}
@@ -262,10 +262,10 @@ func (b *Bridge) Start(ctx context.Context) error {
 			if b.discoveryOk {
 				// Dynamic AMS discovery
 				if status.Ams != nil {
-					_ = b.publishAMSDiscovery(status)
+					_ = b.publishAMSDiscovery(ctx, status)
 				}
 
-				if err := b.publishState(status); err != nil {
+				if err := b.publishState(ctx, status); err != nil {
 					slog.Error("Failed to publish HA state", "error", err)
 				}
 			}
@@ -273,7 +273,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	}
 }
 
-func (b *Bridge) publishAMSDiscovery(status *bambulan.PrinterStatus) error {
+func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.PrinterStatus) error {
 	if status.Ams == nil {
 		return nil
 	}
@@ -324,8 +324,8 @@ func (b *Bridge) publishAMSDiscovery(status *bambulan.PrinterStatus) error {
 			return err
 		}
 		slog.Debug("Publishing AMS discovery", "topic", topic)
-		token := b.ha.Publish(topic, payload, mq.WithRetain(true))
-		_ = token.Wait(context.Background())
+		token := b.ha.Publish(ctx, topic, payload, mq.WithRetain(true))
+		_ = token.Wait(ctx)
 	}
 
 	return nil
@@ -337,7 +337,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 
 	subscribe := func(topic string, cb func(*mq.Client, mq.Message)) error {
 		slog.Debug("Subscribing to HA topic", "topic", topic)
-		token := b.ha.Subscribe(topic, 0, cb)
+		token := b.ha.Subscribe(ctx, topic, 0, cb)
 		if err := token.Wait(ctx); err != nil {
 			return err
 		}
@@ -378,7 +378,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		on := strings.ToUpper(string(msg.Payload)) == "ON"
 		slog.Debug("HA Command received: Camera Enable", "on", on)
 		b.cameraEnabled = on
-		b.publishCameraState()
+		b.publishCameraState(ctx)
 	})
 
 	// Speed Profile
@@ -562,7 +562,7 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 		slog.Debug("HA Bridge: Publishing entity discovery", "component", entry.component, "topic", topic)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		token := b.ha.Publish(topic, payload, mq.WithRetain(true))
+		token := b.ha.Publish(ctx, topic, payload, mq.WithRetain(true))
 		err = token.Wait(ctx)
 		cancel()
 		if err != nil {
@@ -584,7 +584,7 @@ func (b *Bridge) createActionButtonConfig(factory *DiscoveryFactory, entityID, n
 	return cfg
 }
 
-func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
+func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatus) error {
 	tag := fmt.Sprintf("bambu_%s", b.serial)
 	speed := "Standard"
 	switch status.SpdLvl {
@@ -667,8 +667,8 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 
 	topic := fmt.Sprintf("%s/%s/state", b.prefix, tag)
 	slog.Debug("HA Bridge: Publishing consolidated state", "topic", topic)
-	token := b.ha.Publish(topic, payload)
-	if err := token.Wait(context.Background()); err != nil {
+	token := b.ha.Publish(ctx, topic, payload)
+	if err := token.Wait(ctx); err != nil {
 		return err
 	}
 
@@ -688,9 +688,9 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 		stopAvail = "online"
 	}
 
-	b.publishActionAvailability("pause_print", pauseAvail)
-	b.publishActionAvailability("resume_print", resumeAvail)
-	b.publishActionAvailability("stop_print", stopAvail)
+	b.publishActionAvailability(ctx, "pause_print", pauseAvail)
+	b.publishActionAvailability(ctx, "resume_print", resumeAvail)
+	b.publishActionAvailability(ctx, "stop_print", stopAvail)
 
 	// Chamber Light
 	if len(status.LightsReport) > 0 {
@@ -704,7 +704,7 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 		if lightState != b.lastLight {
 			lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
 			slog.Debug("HA Bridge: Publishing light state update", "topic", lightTopic, "state", lightState)
-			b.ha.Publish(lightTopic, []byte(lightState))
+			b.ha.Publish(ctx, lightTopic, []byte(lightState))
 			b.lastLight = lightState
 		}
 	}
@@ -715,15 +715,15 @@ func (b *Bridge) publishState(status *bambulan.PrinterStatus) error {
 		hmsActive = "ON"
 	}
 	hmsTopic := fmt.Sprintf("%s/%s/hms_active/state", b.prefix, tag)
-	b.ha.Publish(hmsTopic, []byte(hmsActive))
+	b.ha.Publish(ctx, hmsTopic, []byte(hmsActive))
 
 	return nil
 }
 
-func (b *Bridge) publishActionAvailability(entityID, state string) {
+func (b *Bridge) publishActionAvailability(ctx context.Context, entityID, state string) {
 	tag := fmt.Sprintf("bambu_%s", b.serial)
 	topic := fmt.Sprintf("%s/%s/%s/availability", b.prefix, tag, entityID)
-	_ = b.ha.Publish(topic, []byte(state), mq.WithRetain(true))
+	_ = b.ha.Publish(ctx, topic, []byte(state), mq.WithRetain(true))
 }
 
 func (b *Bridge) Close() {

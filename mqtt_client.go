@@ -180,7 +180,7 @@ func (m *MQTTClient) onConnect(client *mq.Client) {
 		m.OnConnect()
 	}
 	topic := fmt.Sprintf("device/%s/report", m.Serial)
-	token := client.Subscribe(topic, BambuQoS, m.onMessage)
+	token := client.Subscribe(context.Background(), topic, BambuQoS, m.onMessage)
 	if err := token.Wait(context.Background()); err != nil {
 		slog.Error("Error subscribing to topic", "topic", topic, "error", err)
 	} else if token.Error() != nil {
@@ -261,7 +261,7 @@ func (m *MQTTClient) Publish(ctx context.Context, command any) error {
 
 	// Use QoS 0 for fire-and-forget sending.
 	// We rely on application-level response (Sequence ID) for confirmation.
-	token := m.client.Publish(topic, payload, mq.WithQoS(BambuQoS))
+	token := m.client.Publish(ctx, topic, payload, mq.WithQoS(BambuQoS))
 	// Pass ctx to Wait so we can cancel if needed
 	if err := token.Wait(ctx); err != nil {
 		return err
