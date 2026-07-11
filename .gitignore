@@ -1,5 +1,10 @@
 GEMINI.md
 /bambulan
 test
-resources/
+resources/*
+!resources/3mf-decompression/
+resources/3mf-decompression/*
+!resources/3mf-decompression/hinge/
+resources/3mf-decompression/hinge/*
+!resources/3mf-decompression/hinge/hinge_right.gcode.3mf
 
