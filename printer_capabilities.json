@@ -143,6 +143,22 @@
     "max_chamber_temp": 0,
     "num_extruders": 1
   },
+  "N9": {
+    "display_name": "Bambu Lab A2L",
+    "max_nozzle_temp": 300,
+    "max_bed_temp": 80,
+    "has_chamber_fan": false,
+    "has_aux_fan": false,
+    "has_ams_humidity": false,
+    "has_ams_capacity_reporting": false,
+    "has_timelapse": true,
+    "has_bed_leveling": true,
+    "has_chamber_heater": false,
+    "has_chamber_temp": false,
+    "min_chamber_temp": 0,
+    "max_chamber_temp": 0,
+    "num_extruders": 1
+  },
   "O1C": {
     "display_name": "Bambu Lab H2C",
     "max_nozzle_temp": 350,

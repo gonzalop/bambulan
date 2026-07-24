@@ -22,13 +22,13 @@ func TestCapabilities(t *testing.T) {
 		t.Error("expected X1C to support AMS capacity reporting")
 	}
 
-	// Test A1 Mini
-	a1m := GetPrinterCapabilities("N1")
-	if a1m.DisplayName != "Bambu Lab A1 mini" {
-		t.Errorf("Expected A1 mini, got %s", a1m.DisplayName)
+	// Test A2L
+	a2l := GetPrinterCapabilities("N9")
+	if a2l.DisplayName != "Bambu Lab A2L" {
+		t.Errorf("Expected A2L, got %s", a2l.DisplayName)
 	}
-	if a1m.HasChamberFan {
-		t.Error("A1 mini should NOT have chamber fan")
+	if a2l.MaxNozzleTemp != 300 {
+		t.Errorf("expected max nozzle temp 300, got %d", a2l.MaxNozzleTemp)
 	}
 
 	fmt.Println("Capabilities test passed")
