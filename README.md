@@ -85,6 +85,26 @@ A [Modern Dashboard Template](homeassistant/dashboard.yaml) is available to get 
     bambulan ha --bind :9000
     ```
 2.  **Automatic Discovery**: Home Assistant will automatically detect your printer as a new device with sensors for temperatures, progress, print stage, and a switch for the chamber light.
+3.  **Generate & Import Dashboard**: Import [homeassistant/dashboard.yaml](homeassistant/dashboard.yaml) into your Home Assistant Raw Dashboard Editor. Replace `<MODEL>` with your printer model in lowercase (e.g. `x1c`) and `<LAST_4_SERIAL>` with the last 4 digits of your serial number (e.g. `5678`).
+
+    You can generate your custom dashboard YAML file directly from the command line:
+    ```bash
+    sed -e 's/<MODEL>/x1c/g' -e 's/<LAST_4_SERIAL>/5678/g' homeassistant/dashboard.yaml > dashboard_x1c_5678.yaml
+    ```
+
+#### Operating Modes & Environment Variable Behavior
+
+BambuLAN supports two ways to run the Home Assistant bridge:
+
+- **Standalone CLI Mode (`bambulan ha`)**:
+  - Designed for headless servers, systemd services, or Docker containers.
+  - Connects directly to the printer using `BAMBULAN_HOST`, `BAMBULAN_CODE`, and `BAMBULAN_SERIAL` (or CLI flags `-H`, `-c`, `-s`) and to your MQTT broker (`BAMBULAN_MQTT_BROKER`, `BAMBULAN_MQTT_USER`, `BAMBULAN_MQTT_PASSWORD`).
+  - Immediately connects to the printer and publishes entities to Home Assistant on startup.
+
+- **Web Dashboard Mode (`bambulan web`)**:
+  - Serves the web interface and concurrently runs the Home Assistant bridge when `BAMBULAN_MQTT_BROKER` is set (along with `BAMBULAN_MQTT_USER` and `BAMBULAN_MQTT_PASSWORD` or `--mqtt-user` / `--mqtt-password` flags if the broker requires authentication).
+  - **With Printer Environment Variables**: If `BAMBULAN_HOST`, `BAMBULAN_CODE`, and `BAMBULAN_SERIAL` are set, both the web server and Home Assistant bridge auto-connect on startup.
+  - **Without Printer Environment Variables**: The web server starts with a login page. Home Assistant updates automatically begin as soon as a user logs in with printer credentials via the browser.
 
 ---
 

@@ -63,12 +63,24 @@ Start a standalone MQTT bridge for Home Assistant discovery and monitoring.
 ./bambulan ha --broker tcp://192.168.1.100:1883 --user myuser --password mypass
 ```
 
+- **Standalone CLI Mode (`ha`)**: Connects directly to the printer using `BAMBULAN_HOST`, `BAMBULAN_CODE`, and `BAMBULAN_SERIAL` (or CLI flags) and streams telemetry to Home Assistant via MQTT on startup.
+
+**Dashboard Customization:**
+To generate a customized Home Assistant dashboard YAML for your printer, substitute `<MODEL>` (e.g. `x1c`) and `<LAST_4_SERIAL>` (e.g. `5678`):
+```bash
+sed -e 's/<MODEL>/x1c/g' -e 's/<LAST_4_SERIAL>/5678/g' homeassistant/dashboard.yaml > dashboard_x1c_5678.yaml
+```
+
 #### Web Interface
 Start the web dashboard (default port 8080).
 ```bash
 ./bambulan web
 # Access at http://localhost:8080
 ```
+
+- **Web Mode Home Assistant Bridge**: Pass `--mqtt-broker` (or `BAMBULAN_MQTT_BROKER`), plus username/password if authentication is required (`BAMBULAN_MQTT_USER` / `BAMBULAN_MQTT_PASSWORD` or `--mqtt-user` / `--mqtt-password`), to run the Home Assistant bridge concurrently with the web dashboard.
+  - If `BAMBULAN_HOST`, `BAMBULAN_CODE`, and `BAMBULAN_SERIAL` are set, both web and HA bridge auto-connect on startup.
+  - If printer credentials are not provided via environment variables, the web server prompts for login, and Home Assistant updates begin automatically once a user logs in with printer credentials.
 
 **Options:**
 - `--bind`: Address to bind to (default: `127.0.0.1:8080`)
