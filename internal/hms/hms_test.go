@@ -27,6 +27,13 @@ func TestLookup(t *testing.T) {
 			wantOk:   true,
 		},
 		{
+			name:     "Newly Imported Chamber Heating Error",
+			code:     0x03009000,
+			attr:     0x00010005,
+			wantDesc: "Chamber heating failed. The thermal resistance is too high.",
+			wantOk:   true,
+		},
+		{
 			name:     "Non-existent Code",
 			code:     0xFFFFFFFF,
 			attr:     0xFFFFFFFF,
