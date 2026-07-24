@@ -414,7 +414,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 	})
 
 	// Temperatures
-	_ = subscribe(fmt.Sprintf("%s/%s/target_nozzle_temp/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe(fmt.Sprintf("%s/%s/target_nozzle_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Nozzle Temp", "value", temp)
 		caps := bambulan.GetPrinterCapabilities(b.model)
@@ -423,7 +423,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		}
 		_, _ = b.bambu.MQTT.SetNozzleTemperature(context.Background(), temp, 0)
 	})
-	_ = subscribe(fmt.Sprintf("%s/%s/target_bed_temp/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe(fmt.Sprintf("%s/%s/target_bed_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Bed Temp", "value", temp)
 		caps := bambulan.GetPrinterCapabilities(b.model)
@@ -432,7 +432,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		}
 		_, _ = b.bambu.MQTT.SetBedTemperature(context.Background(), temp)
 	})
-	_ = subscribe(fmt.Sprintf("%s/%s/target_chamber_temp/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe(fmt.Sprintf("%s/%s/target_chamber_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Chamber Temp", "value", temp)
 		caps := bambulan.GetPrinterCapabilities(b.model)
@@ -445,21 +445,21 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 	})
 
 	// Fans
-	_ = subscribe(fmt.Sprintf("%s/%s/fan_part/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe(fmt.Sprintf("%s/%s/part_cooling_fan/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		val, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Fan Part", "value", val)
 		// Scale 0-15 to 0-100%
 		percent := (val * 100) / 15
 		_, _ = b.bambu.MQTT.SetFanSpeed(context.Background(), "part", percent)
 	})
-	_ = subscribe(fmt.Sprintf("%s/%s/fan_aux/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe(fmt.Sprintf("%s/%s/aux_fan/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		val, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Fan Aux", "value", val)
 		// Scale 0-15 to 0-100%
 		percent := (val * 100) / 15
 		_, _ = b.bambu.MQTT.SetFanSpeed(context.Background(), "aux", percent)
 	})
-	_ = subscribe(fmt.Sprintf("%s/%s/fan_chamber/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe(fmt.Sprintf("%s/%s/chamber_fan/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		val, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Fan Chamber", "value", val)
 		// Scale 0-15 to 0-100%
@@ -499,15 +499,16 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 	// Base Sensors
 	configs = append(configs, entry{factory.Sensor("print_stage", "Print Stage", "", "", "", "mdi:printer-3d", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("print_progress", "Progress", "%", "", "measurement", "mdi:progress-clock", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("subtask_name", "Subtask Name", "", "", "", "mdi:file-text-outline", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("progress", "Progress", "%", "", "measurement", "mdi:progress-clock", ""), "sensor"})
 	configs = append(configs, entry{factory.Sensor("remaining_time", "Remaining Time", "min", "duration", "measurement", "mdi:timer-sand", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("nozzle_temp", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("nozzle_target_temp", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
-	configs = append(configs, entry{factory.Sensor("bed_temp", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("bed_target_temp", "Bed Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
+	configs = append(configs, entry{factory.Sensor("nozzle_temperature", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("nozzle_target_temperature", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
+	configs = append(configs, entry{factory.Sensor("bed_temperature", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("bed_target_temperature", "Bed Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
 
 	if caps.HasChamberTemp {
-		configs = append(configs, entry{factory.Sensor("chamber_temp", "Chamber Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
+		configs = append(configs, entry{factory.Sensor("chamber_temperature", "Chamber Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
 	}
 
 	configs = append(configs, entry{factory.Sensor("wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi", "diagnostic"), "sensor"})
@@ -515,10 +516,10 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 	// Binary Sensors
 	configs = append(configs, entry{factory.BinarySensor("online", "Online", "connectivity", "mdi:printer-check", "diagnostic"), "binary_sensor"})
-	configs = append(configs, entry{factory.BinarySensor("hms_active", "HMS Error Active", "problem", "mdi:alert-circle", ""), "binary_sensor"})
+	configs = append(configs, entry{factory.BinarySensor("hms_error_active", "HMS Error Active", "problem", "mdi:alert-circle", ""), "binary_sensor"})
 
 	// Diagnostic Sensors
-	configs = append(configs, entry{factory.Sensor("hms_description", "HMS Error Description", "", "", "", "mdi:text-box-search", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("hms_error_description", "HMS Error Description", "", "", "", "mdi:text-box-search", ""), "sensor"})
 
 	// Switches
 	configs = append(configs, entry{factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""), "switch"})
@@ -535,19 +536,19 @@ func (b *Bridge) publishDiscovery(model string) error {
 	configs = append(configs, entry{factory.Select("print_file", "Print File", "mdi:file-send", "", b.files), "select"})
 
 	// Numbers
-	configs = append(configs, entry{factory.Number("target_nozzle_temp", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxNozzleTemp), 1), "number"})
-	configs = append(configs, entry{factory.Number("target_bed_temp", "Target Bed Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxBedTemp), 1), "number"})
+	configs = append(configs, entry{factory.Number("target_nozzle_temperature", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxNozzleTemp), 1), "number"})
+	configs = append(configs, entry{factory.Number("target_bed_temperature", "Target Bed Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxBedTemp), 1), "number"})
 
 	if caps.HasChamberHeater {
-		configs = append(configs, entry{factory.Number("target_chamber_temp", "Target Chamber Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxChamberTemp), 1), "number"})
+		configs = append(configs, entry{factory.Number("target_chamber_temperature", "Target Chamber Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxChamberTemp), 1), "number"})
 	}
 
-	configs = append(configs, entry{factory.Number("fan_part", "Part Cooling Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
+	configs = append(configs, entry{factory.Number("part_cooling_fan", "Part Cooling Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
 	if caps.HasAuxFan {
-		configs = append(configs, entry{factory.Number("fan_aux", "Aux Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
+		configs = append(configs, entry{factory.Number("aux_fan", "Aux Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
 	}
 	if caps.HasChamberFan {
-		configs = append(configs, entry{factory.Number("fan_chamber", "Chamber Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
+		configs = append(configs, entry{factory.Number("chamber_fan", "Chamber Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
 	}
 
 	// Camera
@@ -600,36 +601,45 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 
 	caps := bambulan.GetPrinterCapabilities(b.model)
 
+	subtask := status.SubtaskName
+	if subtask == "" {
+		subtask = status.GcodeFile
+	}
+	if subtask == "" {
+		subtask = "Idle"
+	}
+
 	state := map[string]any{
-		"print_stage":        status.GetPrintStageName(),
-		"print_progress":     status.McPercent,
-		"remaining_time":     status.McRemainingTime,
-		"nozzle_temp":        status.NozzleTemp,
-		"nozzle_target_temp": status.NozzleTargetTemp,
-		"bed_temp":           status.BedTemp,
-		"bed_target_temp":    status.BedTargetTemp,
-		"ip_address":         b.host,
-		"speed_profile":      speed,
-		"target_nozzle_temp": int(status.NozzleTargetTemp),
-		"target_bed_temp":    int(status.BedTargetTemp),
-		"hms_description":    status.HMSMessage(),
+		"print_stage":               status.GetPrintStageName(),
+		"subtask_name":              subtask,
+		"progress":                  status.McPercent,
+		"remaining_time":            status.McRemainingTime,
+		"nozzle_temperature":        status.NozzleTemp,
+		"nozzle_target_temperature": status.NozzleTargetTemp,
+		"bed_temperature":           status.BedTemp,
+		"bed_target_temperature":    status.BedTargetTemp,
+		"ip_address":                b.host,
+		"speed_profile":             speed,
+		"target_nozzle_temperature": int(status.NozzleTargetTemp),
+		"target_bed_temperature":    int(status.BedTargetTemp),
+		"hms_error_description":     status.HMSMessage(),
 	}
 
 	if caps.HasChamberTemp {
-		state["chamber_temp"] = status.ChamberTemp
+		state["chamber_temperature"] = status.ChamberTemp
 	}
 
 	if status.ChamberTargetTemp > 0 {
-		state["target_chamber_temp"] = int(status.ChamberTargetTemp)
+		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
 	}
 
 	// Parse fan speeds
-	state["fan_part"] = parseFanSpeed(status.CoolingFanSpeed)
+	state["part_cooling_fan"] = parseFanSpeed(status.CoolingFanSpeed)
 	if caps.HasAuxFan {
-		state["fan_aux"] = parseFanSpeed(status.BigFan1Speed)
+		state["aux_fan"] = parseFanSpeed(status.BigFan1Speed)
 	}
 	if caps.HasChamberFan {
-		state["fan_chamber"] = parseFanSpeed(status.BigFan2Speed)
+		state["chamber_fan"] = parseFanSpeed(status.BigFan2Speed)
 	}
 
 	wifi := strings.TrimSpace(strings.TrimSuffix(status.WifiSignal, "dBm"))
@@ -714,7 +724,7 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 	if len(status.Hms) > 0 {
 		hmsActive = "ON"
 	}
-	hmsTopic := fmt.Sprintf("%s/%s/hms_active/state", b.prefix, tag)
+	hmsTopic := fmt.Sprintf("%s/%s/hms_error_active/state", b.prefix, tag)
 	b.ha.Publish(ctx, hmsTopic, []byte(hmsActive))
 
 	return nil

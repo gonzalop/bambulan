@@ -22,13 +22,14 @@ views:
                 entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_streaming
                 state: 'on'
             card:
-              show_state: false
-              show_name: false
+              show_state: true
+              show_name: true
               camera_view: live
               fit_mode: cover
               type: picture-entity
               entity: camera.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera
               name: Live Feed
+              show_entity_picture: false
             grid_options:
               columns: full
               rows: auto
@@ -48,16 +49,21 @@ views:
             grid_options:
               columns: 12
               rows: 1
+          - type: tile
+            entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_subtask_name
+            name: File Name
+            icon: mdi:file-text-outline
+            color: indigo
+            vertical: false
+            grid_options:
+              columns: 12
+              rows: 1
           - type: gauge
             entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_progress
             name: Progress
             min: 0
             max: 100
-            needle: true
-            severity:
-              green: 80
-              yellow: 20
-              red: 0
+            needle: false
           - type: tile
             entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_remaining_time
             name: Time Left
@@ -92,6 +98,8 @@ views:
               - entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_wifi_signal
               - entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_ip_address
                 icon: mdi:ip-network
+              - entity: binary_sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_hms_error_active
+              - entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_hms_error_description
           - type: grid
             columns: 2
             square: false
@@ -146,4 +154,3 @@ views:
             icon: mdi:printer-3d
             vertical: false
             features_position: bottom
-
