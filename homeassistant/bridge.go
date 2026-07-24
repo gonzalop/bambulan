@@ -613,33 +613,50 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		"print_stage":               status.GetPrintStageName(),
 		"subtask_name":              subtask,
 		"progress":                  status.McPercent,
+		"print_progress":            status.McPercent,
 		"remaining_time":            status.McRemainingTime,
+		"nozzle_temp":               status.NozzleTemp,
 		"nozzle_temperature":        status.NozzleTemp,
+		"nozzle_target_temp":        status.NozzleTargetTemp,
 		"nozzle_target_temperature": status.NozzleTargetTemp,
+		"bed_temp":                  status.BedTemp,
 		"bed_temperature":           status.BedTemp,
+		"bed_target_temp":           status.BedTargetTemp,
 		"bed_target_temperature":    status.BedTargetTemp,
 		"ip_address":                b.host,
 		"speed_profile":             speed,
+		"target_nozzle_temp":        int(status.NozzleTargetTemp),
 		"target_nozzle_temperature": int(status.NozzleTargetTemp),
+		"target_bed_temp":           int(status.BedTargetTemp),
 		"target_bed_temperature":    int(status.BedTargetTemp),
+		"hms_description":           status.HMSMessage(),
 		"hms_error_description":     status.HMSMessage(),
 	}
 
 	if caps.HasChamberTemp {
+		state["chamber_temp"] = status.ChamberTemp
 		state["chamber_temperature"] = status.ChamberTemp
 	}
 
 	if status.ChamberTargetTemp > 0 {
+		state["target_chamber_temp"] = int(status.ChamberTargetTemp)
 		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
 	}
 
-	// Parse fan speeds
-	state["part_cooling_fan"] = parseFanSpeed(status.CoolingFanSpeed)
+	// Parse fan speeds (both short and long keys for compatibility)
+	partFanSpeed := parseFanSpeed(status.CoolingFanSpeed)
+	state["fan_part"] = partFanSpeed
+	state["part_cooling_fan"] = partFanSpeed
+
 	if caps.HasAuxFan {
-		state["aux_fan"] = parseFanSpeed(status.BigFan1Speed)
+		auxFanSpeed := parseFanSpeed(status.BigFan1Speed)
+		state["fan_aux"] = auxFanSpeed
+		state["aux_fan"] = auxFanSpeed
 	}
 	if caps.HasChamberFan {
-		state["chamber_fan"] = parseFanSpeed(status.BigFan2Speed)
+		chamberFanSpeed := parseFanSpeed(status.BigFan2Speed)
+		state["fan_chamber"] = chamberFanSpeed
+		state["chamber_fan"] = chamberFanSpeed
 	}
 
 	wifi := strings.TrimSpace(strings.TrimSuffix(status.WifiSignal, "dBm"))
@@ -719,13 +736,13 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		}
 	}
 
-	// 3. HMS Active Binary Sensor (separate topic per DiscoveryFactory.BinarySensor)
+	// 3. HMS Active Binary Sensor (publish to both topics for compatibility)
 	hmsActive := "OFF"
 	if len(status.Hms) > 0 {
 		hmsActive = "ON"
 	}
-	hmsTopic := fmt.Sprintf("%s/%s/hms_error_active/state", b.prefix, tag)
-	b.ha.Publish(ctx, hmsTopic, []byte(hmsActive))
+	b.ha.Publish(ctx, fmt.Sprintf("%s/%s/hms_error_active/state", b.prefix, tag), []byte(hmsActive))
+	b.ha.Publish(ctx, fmt.Sprintf("%s/%s/hms_active/state", b.prefix, tag), []byte(hmsActive))
 
 	return nil
 }

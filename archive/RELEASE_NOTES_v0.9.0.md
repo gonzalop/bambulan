@@ -24,6 +24,7 @@ This release expands BambuLAN's printer capabilities and error code database, ad
 
 ## 🏠 Home Assistant Integration & Documentation
 * **Print File Name Sensor**: Added `subtask_name` sensor to MQTT discovery and telemetry state to expose the active print file name (with `"Idle"` state when no job is active).
+* **Dual-Key State Compatibility**: Added dual-key payload publishing (`progress`/`print_progress`, `nozzle_temp`/`nozzle_temperature`, etc.) so that existing entities registered under older discovery schemas continue updating live in real-time without getting stuck.
 * **Dashboard Template**: Updated `homeassistant/dashboard.yaml` to include a dedicated File Name tile card and synchronized entity schemas.
 * **Bridge Documentation**: Documented standalone CLI (`bambulan ha`) vs. web mode (`bambulan web`) bridge behaviors, MQTT authentication requirements, and dashboard template customization helpers.
 
