@@ -45,7 +45,12 @@ func TestCapabilities(t *testing.T) {
 	// Test Serial Lookup
 	p1sSerial := GetPrinterCapabilities("01S00A12345678")
 	if p1sSerial.DisplayName != "Bambu Lab P1S" {
-		t.Errorf("Expected P1S via serial prefix, got %s", p1sSerial.DisplayName)
+		t.Errorf("Expected P1S via 01S serial prefix, got %s", p1sSerial.DisplayName)
+	}
+
+	p1sComboSerial := GetPrinterCapabilities("01C00A12345678")
+	if p1sComboSerial.DisplayName != "Bambu Lab P1S" {
+		t.Errorf("Expected P1S via 01C serial prefix, got %s", p1sComboSerial.DisplayName)
 	}
 
 	// Test Fallback

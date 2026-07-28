@@ -40,6 +40,8 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 		prefix = "homeassistant"
 	}
 
+	serial := bambu.MQTT.Serial
+
 	opts := []mq.Option{
 		mq.WithCredentials(user, pass),
 		mq.WithProtocolVersion(mq.ProtocolV50),
@@ -47,6 +49,11 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 		mq.WithKeepAlive(30 * time.Second),
 		mq.WithAutoReconnect(true),
 		mq.WithLogger(slog.Default()),
+	}
+
+	if serial != "" {
+		lwtTopic := fmt.Sprintf("%s/%s/online/state", prefix, DeviceTag(serial))
+		opts = append(opts, mq.WithWill(lwtTopic, []byte("OFF"), 0, true))
 	}
 
 	client, err := mq.Dial(broker, opts...)
@@ -59,7 +66,7 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 		ha:         client,
 		prefix:     prefix,
 		host:       bambu.MQTT.Hostname,
-		serial:     bambu.MQTT.Serial,
+		serial:     serial,
 		entitiesOk: make(map[string]bool),
 		files:      []string{"None"},
 		lastLight:  "UNKNOWN",
@@ -82,12 +89,15 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 	return b, nil
 }
 
+func (b *Bridge) tag() string {
+	return DeviceTag(b.serial)
+}
+
 func (b *Bridge) publishOnline(online bool) {
 	if b.serial == "" {
 		return
 	}
-	tag := fmt.Sprintf("bambu_%s", b.serial)
-	topic := fmt.Sprintf("%s/%s/online/state", b.prefix, tag)
+	topic := fmt.Sprintf("%s/%s/online/state", b.prefix, b.tag())
 
 	state := "OFF"
 	if online {
@@ -106,8 +116,7 @@ func (b *Bridge) publishCameraState(ctx context.Context) {
 	if b.serial == "" {
 		return
 	}
-	tag := fmt.Sprintf("bambu_%s", b.serial)
-	topic := fmt.Sprintf("%s/%s/camera_enable/state", b.prefix, tag)
+	topic := fmt.Sprintf("%s/%s/camera_streaming/state", b.prefix, b.tag())
 
 	state := "OFF"
 	if b.cameraEnabled {
@@ -182,8 +191,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 				if b.discoveryOk && b.cameraEnabled {
 					img, err := b.bambu.Camera.CaptureFrame()
 					if err == nil {
-						tag := fmt.Sprintf("bambu_%s", b.serial)
-						topic := fmt.Sprintf("%s/%s/camera/image", b.prefix, tag)
+						topic := fmt.Sprintf("%s/%s/camera/image", b.prefix, b.tag())
 						_ = b.ha.Publish(ctx, topic, img)
 					} else {
 						slog.Debug("Failed to capture camera frame for HA", "error", err)
@@ -223,12 +231,30 @@ func (b *Bridge) Start(ctx context.Context) error {
 			if newModel == "" {
 				newModel = bambulan.InferModelFromSerial(b.serial)
 			}
+			// Promote C11 (P1-series base) to C12 (P1S) if Aux Fan, Chamber Fan, Chamber Temp, or Chamber Light telemetry is present
+			hasTelemetry := status.BigFan1Speed != "" || status.BigFan2Speed != "" || status.ChamberTemp > 0 || len(status.LightsReport) > 0 || status.NozzleTemp > 0 || status.BedTemp > 0
+			if (newModel == "" || newModel == "C11") && hasTelemetry {
+				if status.BigFan1Speed != "" || status.BigFan2Speed != "" || status.ChamberTemp > 0 || len(status.LightsReport) > 0 {
+					newModel = "C12"
+				}
+			}
+
+			// Sticky model: Never downgrade from C12 (P1S) back to C11 (P1P) on incremental updates
+			if (b.model == "C12" || b.model == "p1s" || b.model == "Bambu Lab P1S") && (newModel == "C11" || newModel == "") {
+				newModel = b.model
+			}
+
+			// For C11 (P1-series base), defer initial discovery until status payload with telemetry arrives
+			if !b.discoveryOk && (newModel == "C11" || newModel == "") && !hasTelemetry {
+				continue
+			}
+
 			if newModel == "" {
 				newModel = "Printer" // Placeholder
 			}
 
-			// If discovery hasn't run OR if model was upgraded from placeholder
-			if !b.discoveryOk || (b.model == "Printer" && newModel != "Printer") {
+			// If discovery hasn't run OR if model was updated
+			if !b.discoveryOk || (b.model == "Printer" && newModel != "Printer") || (b.model != newModel && newModel != "Printer") {
 				b.model = newModel
 				caps := bambulan.GetPrinterCapabilities(b.model)
 				modelName := caps.DisplayName
@@ -335,7 +361,7 @@ func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.Print
 }
 
 func (b *Bridge) setupSubscriptions(ctx context.Context) error {
-	tag := fmt.Sprintf("bambu_%s", b.serial)
+	tag := fmt.Sprintf("bambu_lab_%s", b.serial)
 	slog.Debug("Setting up Home Assistant command subscriptions", "tag", tag)
 
 	subscribe := func(topic string, cb func(*mq.Client, mq.Message)) error {
@@ -352,6 +378,14 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		on := strings.ToUpper(string(msg.Payload)) == "ON"
 		slog.Debug("HA Command received: Chamber Light", "on", on)
 		_, _ = b.bambu.MQTT.SetChamberLight(context.Background(), on)
+
+		state := "OFF"
+		if on {
+			state = "ON"
+		}
+		lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
+		b.ha.Publish(context.Background(), lightTopic, []byte(state), mq.WithRetain(true))
+		b.lastLight = state
 	}); err != nil {
 		return err
 	}
@@ -376,8 +410,8 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		_ = b.syncFiles(ctx)
 	})
 
-	// Camera Enable
-	_ = subscribe(fmt.Sprintf("%s/%s/camera_enable/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	// Camera Streaming
+	_ = subscribe(fmt.Sprintf("%s/%s/camera_streaming/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		on := strings.ToUpper(string(msg.Payload)) == "ON"
 		slog.Debug("HA Command received: Camera Enable", "on", on)
 		b.cameraEnabled = on
@@ -529,7 +563,7 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 	// Switches
 	configs = append(configs, entry{factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""), "switch"})
-	configs = append(configs, entry{factory.Switch("camera_enable", "Camera Streaming", "mdi:video-outline", "diagnostic"), "switch"})
+	configs = append(configs, entry{factory.Switch("camera_streaming", "Camera Streaming", "mdi:video-outline", "diagnostic"), "switch"})
 
 	// Buttons
 	configs = append(configs, entry{b.createActionButtonConfig(factory, "pause_print", "Pause Print", "mdi:pause"), "button"})
@@ -583,16 +617,27 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 func (b *Bridge) createActionButtonConfig(factory *DiscoveryFactory, entityID, name, icon string) *DiscoveryConfig {
 	cfg := factory.Button(entityID, name, icon, "")
-	tag := fmt.Sprintf("bambu_%s", b.serial)
-	// Use a dedicated availability topic for the action
-	cfg.AvailabilityTopic = fmt.Sprintf("%s/%s/%s/availability", b.prefix, tag, entityID)
-	cfg.PayloadAvailable = "online"
-	cfg.PayloadNotAvailable = "offline"
+	cfg.AvailabilityTopic = ""
+	cfg.PayloadAvailable = ""
+	cfg.PayloadNotAvailable = ""
+	cfg.Availability = []AvailabilityConfig{
+		{
+			Topic:               "~/online/state",
+			PayloadAvailable:    "ON",
+			PayloadNotAvailable: "OFF",
+		},
+		{
+			Topic:               fmt.Sprintf("~/%s/availability", entityID),
+			PayloadAvailable:    "online",
+			PayloadNotAvailable: "offline",
+		},
+	}
+	cfg.AvailabilityMode = "all"
 	return cfg
 }
 
 func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatus) error {
-	tag := fmt.Sprintf("bambu_%s", b.serial)
+	tag := b.tag()
 	speed := "Standard"
 	switch status.SpdLvl {
 	case 1:
@@ -747,7 +792,7 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		if lightState != b.lastLight {
 			lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
 			slog.Debug("HA Bridge: Publishing light state update", "topic", lightTopic, "state", lightState)
-			b.ha.Publish(ctx, lightTopic, []byte(lightState))
+			b.ha.Publish(ctx, lightTopic, []byte(lightState), mq.WithRetain(true))
 			b.lastLight = lightState
 		}
 	}
@@ -764,12 +809,14 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 }
 
 func (b *Bridge) publishActionAvailability(ctx context.Context, entityID, state string) {
-	tag := fmt.Sprintf("bambu_%s", b.serial)
-	topic := fmt.Sprintf("%s/%s/%s/availability", b.prefix, tag, entityID)
+	topic := fmt.Sprintf("%s/%s/%s/availability", b.prefix, b.tag(), entityID)
 	_ = b.ha.Publish(ctx, topic, []byte(state), mq.WithRetain(true))
 }
 
 func (b *Bridge) Close() {
+	if b.serial != "" {
+		b.publishOnline(false)
+	}
 	if b.ha != nil {
 		_ = b.ha.Disconnect(context.Background())
 	}

@@ -16,32 +16,41 @@ type Device struct {
 	SerialNumber string   `json:"sn,omitempty"`
 }
 
+// AvailabilityConfig allows specifying multiple availability topics using abbreviated keys.
+type AvailabilityConfig struct {
+	Topic               string `json:"t"`
+	PayloadAvailable    string `json:"pl_avail,omitempty"`
+	PayloadNotAvailable string `json:"pl_not_avail,omitempty"`
+}
+
 // DiscoveryConfig is the base structure for HA MQTT discovery using abbreviated keys.
 type DiscoveryConfig struct {
-	BaseTopic           string   `json:"~,omitempty"`
-	Name                string   `json:"name,omitempty"`
-	ObjectID            string   `json:"obj_id,omitempty"`
-	UniqueID            string   `json:"uniq_id"`
-	StateTopic          string   `json:"stat_t,omitempty"`
-	CommandTopic        string   `json:"cmd_t,omitempty"`
-	AvailabilityTopic   string   `json:"avty_t,omitempty"`
-	PayloadAvailable    string   `json:"pl_avail,omitempty"`
-	PayloadNotAvailable string   `json:"pl_not_avail,omitempty"`
-	PayloadOn           string   `json:"pl_on,omitempty"`
-	PayloadOff          string   `json:"pl_off,omitempty"`
-	ValueTemplate       string   `json:"val_tpl,omitempty"`
-	UnitOfMeasurement   string   `json:"unit_of_meas,omitempty"`
-	DeviceClass         string   `json:"dev_cla,omitempty"`
-	StateClass          string   `json:"stat_cla,omitempty"`
-	Icon                string   `json:"ic,omitempty"`
-	Device              *Device  `json:"dev,omitempty"`
-	EntityCategory      string   `json:"ent_cat,omitempty"`
-	Options             []string `json:"ops,omitempty"`
-	Min                 *float64 `json:"min,omitempty"`
-	Max                 *float64 `json:"max,omitempty"`
-	Step                *float64 `json:"step,omitempty"`
-	Mode                string   `json:"mode,omitempty"`
-	Topic               string   `json:"t,omitempty"` // For Camera
+	BaseTopic           string               `json:"~,omitempty"`
+	Name                string               `json:"name,omitempty"`
+	ObjectID            string               `json:"obj_id,omitempty"`
+	UniqueID            string               `json:"uniq_id"`
+	StateTopic          string               `json:"stat_t,omitempty"`
+	CommandTopic        string               `json:"cmd_t,omitempty"`
+	Availability        []AvailabilityConfig `json:"avty,omitempty"`
+	AvailabilityMode    string               `json:"avty_mode,omitempty"`
+	AvailabilityTopic   string               `json:"avty_t,omitempty"`
+	PayloadAvailable    string               `json:"pl_avail,omitempty"`
+	PayloadNotAvailable string               `json:"pl_not_avail,omitempty"`
+	PayloadOn           string               `json:"pl_on,omitempty"`
+	PayloadOff          string               `json:"pl_off,omitempty"`
+	ValueTemplate       string               `json:"val_tpl,omitempty"`
+	UnitOfMeasurement   string               `json:"unit_of_meas,omitempty"`
+	DeviceClass         string               `json:"dev_cla,omitempty"`
+	StateClass          string               `json:"stat_cla,omitempty"`
+	Icon                string               `json:"ic,omitempty"`
+	Device              *Device              `json:"dev,omitempty"`
+	EntityCategory      string               `json:"ent_cat,omitempty"`
+	Options             []string             `json:"ops,omitempty"`
+	Min                 *float64             `json:"min,omitempty"`
+	Max                 *float64             `json:"max,omitempty"`
+	Step                *float64             `json:"step,omitempty"`
+	Mode                string               `json:"mode,omitempty"`
+	Topic               string               `json:"t,omitempty"` // For Camera
 }
 
 func (d *DiscoveryConfig) ToJSON() ([]byte, error) {
@@ -57,6 +66,11 @@ type DiscoveryFactory struct {
 	Device      *Device
 }
 
+// DeviceTag returns the standardized MQTT topic tag for a printer serial (e.g. "bambu_lab_01S...").
+func DeviceTag(serial string) string {
+	return fmt.Sprintf("bambu_lab_%s", serial)
+}
+
 func NewDiscoveryFactory(prefix, serial, model, displayName string) *DiscoveryFactory {
 	return &DiscoveryFactory{
 		Prefix:      prefix,
@@ -64,7 +78,7 @@ func NewDiscoveryFactory(prefix, serial, model, displayName string) *DiscoveryFa
 		Model:       model,
 		DisplayName: displayName,
 		Device: &Device{
-			Identifiers:  []string{fmt.Sprintf("bambu_%s", serial)},
+			Identifiers:  []string{DeviceTag(serial)},
 			Name:         displayName,
 			Model:        model,
 			Manufacturer: "Bambu Lab",
@@ -73,7 +87,7 @@ func NewDiscoveryFactory(prefix, serial, model, displayName string) *DiscoveryFa
 }
 
 func (f *DiscoveryFactory) tag() string {
-	return fmt.Sprintf("bambu_%s", f.Serial)
+	return DeviceTag(f.Serial)
 }
 
 func (f *DiscoveryFactory) entitySlug(entityID string) string {

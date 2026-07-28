@@ -230,8 +230,17 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 			slog.Error("Error updating status", "error", err)
 			return
 		}
-		// Update derived fields
-		m.status.PrintStageDesc = m.status.GetPrintStageName()
+		prevModel := m.status.DeviceModel
+
+		// Automatically promote C11 (P1-series base) to C12 (P1S) if Aux Fan, Chamber Fan, Chamber Temp, or Chamber Light telemetry is present
+		if (m.status.DeviceModel == "" || m.status.DeviceModel == "C11") &&
+			(m.status.BigFan1Speed != "" || m.status.BigFan2Speed != "" || m.status.ChamberTemp > 0 || len(m.status.LightsReport) > 0) {
+			m.status.DeviceModel = "C12"
+			m.status.BedTempLimit = getBedTempLimit("C12")
+			m.status.NozzleTempLimit = getNozzleTempLimit("C12")
+		} else if prevModel == "C12" && (m.status.DeviceModel == "" || m.status.DeviceModel == "C11") {
+			m.status.DeviceModel = "C12"
+		}
 
 		slog.Debug("Message received", "raw", printRaw)
 		m.broadcastStatus()
@@ -377,6 +386,13 @@ func (m *MQTTClient) SetChamberLight(ctx context.Context, on bool) (string, erro
 	if on {
 		mode = "on"
 	}
+
+	m.mu.Lock()
+	m.status.LightsReport = []*LightsReport{
+		{Node: "chamber_light", Mode: mode},
+	}
+	m.mu.Unlock()
+
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"system": map[string]any{
@@ -886,18 +902,28 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 	// Store all modules in status for CLI display
 	m.status.Modules = info.Module
 
-	// Try to find model from OTA module
-	for _, mod := range info.Module {
-		if mod.Name == "ota" && mod.Project != "" {
-			model = mod.Project
-			break
+	// Extract serial number from module if m.Serial is empty
+	if m.Serial == "" {
+		for _, mod := range info.Module {
+			if mod.Sn != "" {
+				m.Serial = mod.Sn
+				break
+			}
 		}
 	}
 
-	if model == "" && len(m.Serial) >= 3 {
+	// 1. Try serial prefix first (authoritative for P1S vs P1P, which share OTA project "C11")
+	if len(m.Serial) >= 3 {
 		model = InferModelFromSerial(m.Serial)
-		if model == "" && len(m.Serial) >= 3 {
-			slog.Info("Unknown serial prefix", "prefix", m.Serial[:3])
+	}
+
+	// 2. Fall back to OTA module project if serial prefix didn't match
+	if model == "" {
+		for _, mod := range info.Module {
+			if mod.Name == "ota" && mod.Project != "" {
+				model = mod.Project
+				break
+			}
 		}
 	}
 

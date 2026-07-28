@@ -57,7 +57,7 @@ func TestDashboardEntitiesMatchPublishedDiscovery(t *testing.T) {
 	addEntity("binary_sensor", factory.BinarySensor("hms_error_active", "HMS Error Active", "problem", "mdi:alert-circle", ""))
 	addEntity("sensor", factory.Sensor("hms_error_description", "HMS Error Description", "", "", "", "mdi:text-box-search", ""))
 	addEntity("switch", factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""))
-	addEntity("switch", factory.Switch("camera_enable", "Camera Streaming", "mdi:video-outline", "diagnostic"))
+	addEntity("switch", factory.Switch("camera_streaming", "Camera Streaming", "mdi:video-outline", "diagnostic"))
 	addEntity("button", factory.Button("pause_print", "Pause Print", "mdi:pause", ""))
 	addEntity("button", factory.Button("resume_print", "Resume Print", "mdi:play", ""))
 	addEntity("button", factory.Button("stop_print", "Stop Print", "mdi:stop", ""))

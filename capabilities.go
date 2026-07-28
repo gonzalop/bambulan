@@ -59,7 +59,7 @@ func InferModelFromSerial(serial string) string {
 		return "BL-P001" // X1C
 	case "001":
 		return "BL-P002" // X1
-	case "01S":
+	case "01S", "01C":
 		return "C12" // P1S
 	case "01P":
 		return "C11" // P1P
