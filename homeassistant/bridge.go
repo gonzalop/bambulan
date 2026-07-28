@@ -1,10 +1,12 @@
 package homeassistant
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +34,17 @@ type Bridge struct {
 	onlineTopic string
 
 	cameraEnabled bool
+
+	lastStatePayload []byte
+	lastStateTime    time.Time
+	lastActionAvail  map[string]string // entityID -> state
+	lastHMSActive    string
+
+	lastPubNozzleTemp  float64
+	lastPubBedTemp     float64
+	lastPubChamberTemp float64
+	lastPubWifiSignal  int
+	hasLastPubState    bool
 }
 
 // NewBridge creates a new Home Assistant MQTT bridge.
@@ -62,14 +75,16 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 	}
 
 	b := &Bridge{
-		bambu:      bambu,
-		ha:         client,
-		prefix:     prefix,
-		host:       bambu.MQTT.Hostname,
-		serial:     serial,
-		entitiesOk: make(map[string]bool),
-		files:      []string{"None"},
-		lastLight:  "UNKNOWN",
+		bambu:           bambu,
+		ha:              client,
+		prefix:          prefix,
+		host:            bambu.MQTT.Hostname,
+		serial:          serial,
+		entitiesOk:      make(map[string]bool),
+		lastActionAvail: make(map[string]string),
+		files:           []string{"None"},
+		lastLight:       "UNKNOWN",
+		lastHMSActive:   "UNKNOWN",
 	}
 
 	// Setup connection callbacks
@@ -665,6 +680,34 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		layerProgress = fmt.Sprintf("%d / %d", status.LayerNum, status.TotalLayerNum)
 	}
 
+	nozzleTemp, updated := filterHysteresisFloat(status.NozzleTemp, b.lastPubNozzleTemp, 0.5, b.hasLastPubState)
+	if updated {
+		b.lastPubNozzleTemp = nozzleTemp
+	}
+
+	bedTemp, updated := filterHysteresisFloat(status.BedTemp, b.lastPubBedTemp, 0.5, b.hasLastPubState)
+	if updated {
+		b.lastPubBedTemp = bedTemp
+	}
+
+	chamberTemp, updated := filterHysteresisFloat(status.ChamberTemp, b.lastPubChamberTemp, 0.5, b.hasLastPubState)
+	if updated {
+		b.lastPubChamberTemp = chamberTemp
+	}
+
+	wifiVal := 0
+	wifiRaw := strings.TrimSpace(strings.TrimSuffix(status.WifiSignal, "dBm"))
+	if wifiRaw != "" {
+		wifiVal, _ = strconv.Atoi(wifiRaw)
+	}
+
+	wifiSignal, updated := filterHysteresisInt(wifiVal, b.lastPubWifiSignal, 3, b.hasLastPubState)
+	if updated {
+		b.lastPubWifiSignal = wifiSignal
+	}
+
+	b.hasLastPubState = true
+
 	state := map[string]any{
 		"print_stage":               status.GetPrintStageName(),
 		"subtask_name":              subtask,
@@ -676,12 +719,12 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		"total_layer_num":           status.TotalLayerNum,
 		"total_layers":              status.TotalLayerNum,
 		"layer_progress":            layerProgress,
-		"nozzle_temp":               status.NozzleTemp,
-		"nozzle_temperature":        status.NozzleTemp,
+		"nozzle_temp":               nozzleTemp,
+		"nozzle_temperature":        nozzleTemp,
 		"nozzle_target_temp":        status.NozzleTargetTemp,
 		"nozzle_target_temperature": status.NozzleTargetTemp,
-		"bed_temp":                  status.BedTemp,
-		"bed_temperature":           status.BedTemp,
+		"bed_temp":                  bedTemp,
+		"bed_temperature":           bedTemp,
 		"bed_target_temp":           status.BedTargetTemp,
 		"bed_target_temperature":    status.BedTargetTemp,
 		"ip_address":                b.host,
@@ -695,8 +738,8 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 	}
 
 	if caps.HasChamberTemp {
-		state["chamber_temp"] = status.ChamberTemp
-		state["chamber_temperature"] = status.ChamberTemp
+		state["chamber_temp"] = chamberTemp
+		state["chamber_temperature"] = chamberTemp
 	}
 
 	if status.ChamberTargetTemp > 0 {
@@ -720,9 +763,8 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		state["chamber_fan"] = chamberFanSpeed
 	}
 
-	wifi := strings.TrimSpace(strings.TrimSuffix(status.WifiSignal, "dBm"))
-	if wifi != "" {
-		state["wifi_signal"] = wifi
+	if wifiRaw != "" {
+		state["wifi_signal"] = strconv.Itoa(wifiSignal)
 	}
 
 	// AMS State
@@ -754,10 +796,14 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 	}
 
 	topic := fmt.Sprintf("%s/%s/state", b.prefix, tag)
-	slog.Debug("HA Bridge: Publishing consolidated state", "topic", topic)
-	token := b.ha.Publish(ctx, topic, payload)
-	if err := token.Wait(ctx); err != nil {
-		return err
+	if !bytes.Equal(payload, b.lastStatePayload) || time.Since(b.lastStateTime) >= 60*time.Second {
+		slog.Debug("HA Bridge: Publishing consolidated state", "topic", topic)
+		token := b.ha.Publish(ctx, topic, payload)
+		if err := token.Wait(ctx); err != nil {
+			return err
+		}
+		b.lastStatePayload = payload
+		b.lastStateTime = time.Now()
 	}
 
 	// Update action availability based on printer state
@@ -802,15 +848,25 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 	if len(status.Hms) > 0 {
 		hmsActive = "ON"
 	}
-	b.ha.Publish(ctx, fmt.Sprintf("%s/%s/hms_error_active/state", b.prefix, tag), []byte(hmsActive))
-	b.ha.Publish(ctx, fmt.Sprintf("%s/%s/hms_active/state", b.prefix, tag), []byte(hmsActive))
+	if hmsActive != b.lastHMSActive {
+		b.ha.Publish(ctx, fmt.Sprintf("%s/%s/hms_error_active/state", b.prefix, tag), []byte(hmsActive))
+		b.ha.Publish(ctx, fmt.Sprintf("%s/%s/hms_active/state", b.prefix, tag), []byte(hmsActive))
+		b.lastHMSActive = hmsActive
+	}
 
 	return nil
 }
 
 func (b *Bridge) publishActionAvailability(ctx context.Context, entityID, state string) {
+	if b.lastActionAvail != nil && b.lastActionAvail[entityID] == state {
+		return
+	}
 	topic := fmt.Sprintf("%s/%s/%s/availability", b.prefix, b.tag(), entityID)
 	_ = b.ha.Publish(ctx, topic, []byte(state), mq.WithRetain(true))
+	if b.lastActionAvail == nil {
+		b.lastActionAvail = make(map[string]string)
+	}
+	b.lastActionAvail[entityID] = state
 }
 
 func (b *Bridge) Close() {
@@ -820,6 +876,24 @@ func (b *Bridge) Close() {
 	if b.ha != nil {
 		_ = b.ha.Disconnect(context.Background())
 	}
+}
+
+func filterHysteresisFloat(val, lastVal, minDelta float64, initialized bool) (float64, bool) {
+	if !initialized || math.Abs(val-lastVal) >= minDelta {
+		return val, true
+	}
+	return lastVal, false
+}
+
+func filterHysteresisInt(val, lastVal, minDelta int, initialized bool) (int, bool) {
+	diff := val - lastVal
+	if diff < 0 {
+		diff = -diff
+	}
+	if !initialized || diff >= minDelta {
+		return val, true
+	}
+	return lastVal, false
 }
 
 func parseFanSpeed(s string) int {
