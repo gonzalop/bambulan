@@ -218,13 +218,18 @@ func (b *Bridge) Start(ctx context.Context) error {
 				continue
 			}
 
-			// 1. Discovery (only once when we have enough info OR after a timeout)
-			if !b.discoveryOk {
-				b.model = status.DeviceModel
-				if b.model == "" {
-					b.model = "Printer" // Placeholder
-				}
+			// 1. Discovery
+			newModel := status.DeviceModel
+			if newModel == "" {
+				newModel = bambulan.InferModelFromSerial(b.serial)
+			}
+			if newModel == "" {
+				newModel = "Printer" // Placeholder
+			}
 
+			// If discovery hasn't run OR if model was upgraded from placeholder
+			if !b.discoveryOk || (b.model == "Printer" && newModel != "Printer") {
+				b.model = newModel
 				caps := bambulan.GetPrinterCapabilities(b.model)
 				modelName := caps.DisplayName
 				if modelName == "" {
@@ -237,7 +242,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 				b.haModel = strings.TrimPrefix(b.haModel, "Bambu ")
 
 				// Determine a unique display name for Home Assistant
-				// Format: <manufacturer> <model> <last 4 of serial>
 				suffix := b.serial
 				if len(suffix) > 4 {
 					suffix = suffix[len(suffix)-4:]
@@ -251,7 +255,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 				} else {
 					b.discoveryOk = true
 					slog.Debug("Home Assistant discovery published successfully", "device", b.displayName, "model", b.haModel)
-					// Initial file sync now that discovery is ok
 					go func() {
 						_ = b.syncFiles(ctx)
 					}()
@@ -502,6 +505,9 @@ func (b *Bridge) publishDiscovery(model string) error {
 	configs = append(configs, entry{factory.Sensor("subtask_name", "Subtask Name", "", "", "", "mdi:file-text-outline", ""), "sensor"})
 	configs = append(configs, entry{factory.Sensor("progress", "Progress", "%", "", "measurement", "mdi:progress-clock", ""), "sensor"})
 	configs = append(configs, entry{factory.Sensor("remaining_time", "Remaining Time", "min", "duration", "measurement", "mdi:timer-sand", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("layer_progress", "Layer Progress", "", "", "", "mdi:layers-triple", ""), "sensor"})
+	configs = append(configs, entry{factory.Sensor("current_layer", "Current Layer", "", "", "", "mdi:layers-triple", "diagnostic"), "sensor"})
+	configs = append(configs, entry{factory.Sensor("total_layers", "Total Layers", "", "", "", "mdi:layers-triple-outline", "diagnostic"), "sensor"})
 	configs = append(configs, entry{factory.Sensor("nozzle_temperature", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
 	configs = append(configs, entry{factory.Sensor("nozzle_target_temperature", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
 	configs = append(configs, entry{factory.Sensor("bed_temperature", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
@@ -609,12 +615,22 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		subtask = "Idle"
 	}
 
+	layerProgress := "Idle"
+	if status.TotalLayerNum > 0 {
+		layerProgress = fmt.Sprintf("%d / %d", status.LayerNum, status.TotalLayerNum)
+	}
+
 	state := map[string]any{
 		"print_stage":               status.GetPrintStageName(),
 		"subtask_name":              subtask,
 		"progress":                  status.McPercent,
 		"print_progress":            status.McPercent,
 		"remaining_time":            status.McRemainingTime,
+		"layer_num":                 status.LayerNum,
+		"current_layer":             status.LayerNum,
+		"total_layer_num":           status.TotalLayerNum,
+		"total_layers":              status.TotalLayerNum,
+		"layer_progress":            layerProgress,
 		"nozzle_temp":               status.NozzleTemp,
 		"nozzle_temperature":        status.NozzleTemp,
 		"nozzle_target_temp":        status.NozzleTargetTemp,

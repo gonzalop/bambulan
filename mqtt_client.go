@@ -894,25 +894,10 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 		}
 	}
 
-	// Fallback: Derive from Serial Number
 	if model == "" && len(m.Serial) >= 3 {
-		prefix := m.Serial[:3]
-		// Map known prefixes to Model IDs used in getBedTempLimit
-		switch prefix {
-		case "00M", "00W":
-			model = "BL-P001" // X1C
-		case "001":
-			model = "BL-P002" // X1
-		case "01S":
-			model = "C11" // P1P
-		case "01P":
-			model = "C12" // P1S
-		case "030", "03N":
-			model = "N1" // A1 Mini
-		case "01N":
-			model = "N2S" // A1
-		default:
-			slog.Info("Unknown serial prefix", "prefix", prefix)
+		model = InferModelFromSerial(m.Serial)
+		if model == "" && len(m.Serial) >= 3 {
+			slog.Info("Unknown serial prefix", "prefix", m.Serial[:3])
 		}
 	}
 

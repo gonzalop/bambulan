@@ -31,5 +31,28 @@ func TestCapabilities(t *testing.T) {
 		t.Errorf("expected max nozzle temp 300, got %d", a2l.MaxNozzleTemp)
 	}
 
+	// Test Aliases
+	p1s := GetPrinterCapabilities("P1S")
+	if p1s.DisplayName != "Bambu Lab P1S" || !p1s.HasAuxFan || !p1s.HasChamberFan {
+		t.Errorf("Expected P1S with fans, got %+v", p1s)
+	}
+
+	p1sLower := GetPrinterCapabilities("p1s")
+	if p1sLower.DisplayName != "Bambu Lab P1S" {
+		t.Errorf("Expected P1S via lowercase alias, got %s", p1sLower.DisplayName)
+	}
+
+	// Test Serial Lookup
+	p1sSerial := GetPrinterCapabilities("01S00A12345678")
+	if p1sSerial.DisplayName != "Bambu Lab P1S" {
+		t.Errorf("Expected P1S via serial prefix, got %s", p1sSerial.DisplayName)
+	}
+
+	// Test Fallback
+	fallback := GetPrinterCapabilities("Printer")
+	if !fallback.HasAuxFan || !fallback.HasChamberFan {
+		t.Errorf("Expected default fallback with fans enabled, got %+v", fallback)
+	}
+
 	fmt.Println("Capabilities test passed")
 }

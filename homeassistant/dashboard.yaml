@@ -10,7 +10,7 @@ views:
             heading: Media
             heading_style: title
           - type: tile
-            entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_streaming
+            entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_enable
             name: Camera Stream
             icon: mdi:video
             color: green
@@ -19,7 +19,7 @@ views:
           - type: conditional
             conditions:
               - condition: state
-                entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_streaming
+                entity: switch.bambu_lab_<MODEL>_<LAST_4_SERIAL>_camera_enable
                 state: 'on'
             card:
               show_state: true
@@ -40,7 +40,7 @@ views:
           - type: heading
             heading: Printing Status
           - type: tile
-            entity: sensor.<MODEL>_<LAST_4_SERIAL>_print_stage
+            entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_print_stage
             name: Current Stage
             icon: mdi:printer-3d
             color: blue
@@ -54,6 +54,15 @@ views:
             name: File Name
             icon: mdi:file-text-outline
             color: indigo
+            vertical: false
+            grid_options:
+              columns: 12
+              rows: 1
+          - type: tile
+            entity: sensor.bambu_lab_<MODEL>_<LAST_4_SERIAL>_layer_progress
+            name: Layers
+            icon: mdi:layers-triple
+            color: teal
             vertical: false
             grid_options:
               columns: 12
