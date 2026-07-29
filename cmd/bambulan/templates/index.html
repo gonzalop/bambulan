@@ -893,8 +893,6 @@
                                 bedTempLimit = p.bed_temp_limit;
                             }
 
-                            safeSetText('stage', p.print_stage_desc || p.mc_print_stage || "--");
-
                             // File Name
                             // Prefer sanitized filename from metadata if available
                             const subtask = (data.metadata && data.metadata.filename) ? data.metadata.filename : (p.subtask_name || p.gcode_file || "");
