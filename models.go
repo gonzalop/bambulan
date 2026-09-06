@@ -208,16 +208,6 @@ func (ps *PrinterStatus) HMSDescription() string {
 	return hms.FormatCode(ps.Hms[0].Code, ps.Hms[0].Attr)
 }
 
-// FormatHMSCode returns the dash-separated hex string for a given code and attribute.
-func FormatHMSCode(code, attr uint32) string {
-	return hms.FormatCode(code, attr)
-}
-
-// LookupHMS returns the description for the given code and attribute.
-func LookupHMS(code, attr uint32) (string, bool) {
-	return hms.Lookup(code, attr)
-}
-
 // WikiURLs returns a list of troubleshooting Wiki URLs for all active HMS events.
 func (ps *PrinterStatus) WikiURLs() []string {
 	if len(ps.Hms) == 0 {

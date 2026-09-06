@@ -134,28 +134,9 @@ func ensureCapabilitiesLoaded() {
 			aliasCapabilitiesMap[normalizeModelKey(cap.DisplayName)] = cap
 		}
 
-		// Additional common aliases
-		if c12, ok := printerCapabilitiesMap["C12"]; ok {
-			aliasCapabilitiesMap["p1s"] = c12
-		}
-		if c11, ok := printerCapabilitiesMap["C11"]; ok {
-			aliasCapabilitiesMap["p1p"] = c11
-		}
+		// Aliases not naturally matched by DisplayName normalization
 		if blp001, ok := printerCapabilitiesMap["BL-P001"]; ok {
 			aliasCapabilitiesMap["x1c"] = blp001
-			aliasCapabilitiesMap["x1carbon"] = blp001
-		}
-		if blp002, ok := printerCapabilitiesMap["BL-P002"]; ok {
-			aliasCapabilitiesMap["x1"] = blp002
-		}
-		if c13, ok := printerCapabilitiesMap["C13"]; ok {
-			aliasCapabilitiesMap["x1e"] = c13
-		}
-		if n1, ok := printerCapabilitiesMap["N1"]; ok {
-			aliasCapabilitiesMap["a1mini"] = n1
-		}
-		if n2s, ok := printerCapabilitiesMap["N2S"]; ok {
-			aliasCapabilitiesMap["a1"] = n2s
 		}
 	})
 }

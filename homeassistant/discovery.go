@@ -110,80 +110,55 @@ func (f *DiscoveryFactory) baseConfig(entityID, name string) *DiscoveryConfig {
 	}
 }
 
+func (f *DiscoveryFactory) entity(id, name, icon, cat string) *DiscoveryConfig {
+	cfg := f.baseConfig(id, name)
+	cfg.Icon, cfg.EntityCategory = icon, cat
+	return cfg
+}
+
 func (f *DiscoveryFactory) Sensor(entityID, name, unit, devClass, statClass, icon, category string) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
-	cfg.StateTopic = "~/state"
-	cfg.ValueTemplate = fmt.Sprintf("{{ value_json.%s }}", entityID)
-	cfg.UnitOfMeasurement = unit
-	cfg.DeviceClass = devClass
-	cfg.StateClass = statClass
-	cfg.Icon = icon
-	cfg.EntityCategory = category
+	cfg := f.entity(entityID, name, icon, category)
+	cfg.StateTopic, cfg.ValueTemplate = "~/state", fmt.Sprintf("{{ value_json.%s }}", entityID)
+	cfg.UnitOfMeasurement, cfg.DeviceClass, cfg.StateClass = unit, devClass, statClass
 	return cfg
 }
 
 func (f *DiscoveryFactory) BinarySensor(entityID, name, devClass, icon, category string) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
-	cfg.StateTopic = fmt.Sprintf("~/%s/state", entityID)
-	cfg.PayloadOn = "ON"
-	cfg.PayloadOff = "OFF"
-	cfg.DeviceClass = devClass
-	cfg.Icon = icon
-	cfg.EntityCategory = category
+	cfg := f.entity(entityID, name, icon, category)
+	cfg.StateTopic, cfg.PayloadOn, cfg.PayloadOff, cfg.DeviceClass = fmt.Sprintf("~/%s/state", entityID), "ON", "OFF", devClass
 	if entityID == "online" {
-		cfg.AvailabilityTopic = "" // Self-availability
+		cfg.AvailabilityTopic = ""
 	}
 	return cfg
 }
 
 func (f *DiscoveryFactory) Switch(entityID, name, icon, category string) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
-	cfg.StateTopic = fmt.Sprintf("~/%s/state", entityID)
-	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
-	cfg.PayloadOn = "ON"
-	cfg.PayloadOff = "OFF"
-	cfg.Icon = icon
-	cfg.EntityCategory = category
+	cfg := f.entity(entityID, name, icon, category)
+	cfg.StateTopic, cfg.CommandTopic, cfg.PayloadOn, cfg.PayloadOff = fmt.Sprintf("~/%s/state", entityID), fmt.Sprintf("~/%s/set", entityID), "ON", "OFF"
 	return cfg
 }
 
 func (f *DiscoveryFactory) Button(entityID, name, icon, category string) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
+	cfg := f.entity(entityID, name, icon, category)
 	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
-	cfg.Icon = icon
-	cfg.EntityCategory = category
 	return cfg
 }
 
 func (f *DiscoveryFactory) Select(entityID, name, icon, category string, options []string) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
-	cfg.StateTopic = "~/state"
-	cfg.ValueTemplate = fmt.Sprintf("{{ value_json.%s }}", entityID)
-	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
-	cfg.Icon = icon
-	cfg.EntityCategory = category
-	cfg.Options = options
+	cfg := f.entity(entityID, name, icon, category)
+	cfg.StateTopic, cfg.ValueTemplate, cfg.CommandTopic, cfg.Options = "~/state", fmt.Sprintf("{{ value_json.%s }}", entityID), fmt.Sprintf("~/%s/set", entityID), options
 	return cfg
 }
 
 func (f *DiscoveryFactory) Number(entityID, name, unit, devClass, icon, category string, min, max, step float64) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
-	cfg.StateTopic = "~/state"
-	cfg.ValueTemplate = fmt.Sprintf("{{ value_json.%s }}", entityID)
-	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
-	cfg.UnitOfMeasurement = unit
-	cfg.DeviceClass = devClass
-	cfg.Icon = icon
-	cfg.EntityCategory = category
-	cfg.Min = &min
-	cfg.Max = &max
-	cfg.Step = &step
+	cfg := f.entity(entityID, name, icon, category)
+	cfg.StateTopic, cfg.ValueTemplate, cfg.CommandTopic = "~/state", fmt.Sprintf("{{ value_json.%s }}", entityID), fmt.Sprintf("~/%s/set", entityID)
+	cfg.UnitOfMeasurement, cfg.DeviceClass, cfg.Min, cfg.Max, cfg.Step = unit, devClass, &min, &max, &step
 	return cfg
 }
 
 func (f *DiscoveryFactory) Camera(entityID, name, category string) *DiscoveryConfig {
-	cfg := f.baseConfig(entityID, name)
+	cfg := f.entity(entityID, name, "", category)
 	cfg.Topic = fmt.Sprintf("~/%s/image", entityID)
-	cfg.EntityCategory = category
 	return cfg
 }

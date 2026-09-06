@@ -206,30 +206,15 @@ func (m *MQTTClient) onConnect(client *mq.Client) {
 }
 
 func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
-	var partial bambuMessage
-	// Unmarshal wrapper first
-	if err := json.Unmarshal(msg.Payload, &partial); err != nil {
+	msgWrapper := bambuMessage{
+		Print: m.status,
+	}
+	if err := json.Unmarshal(msg.Payload, &msgWrapper); err != nil {
 		slog.Error("Error unmarshalling message wrapper", "error", err)
 		return
 	}
 
-	if partial.Print == nil && partial.Info == nil {
-		return
-	}
-
-	// 1. Get the raw "print" object from JSON.
-	// 2. Unmarshal that raw JSON into m.status
-
-	var rawObj map[string]json.RawMessage
-	if err := json.Unmarshal(msg.Payload, &rawObj); err != nil {
-		return
-	}
-
-	if printRaw, ok := rawObj["print"]; ok {
-		if err := json.Unmarshal(printRaw, m.status); err != nil {
-			slog.Error("Error updating status", "error", err)
-			return
-		}
+	if msgWrapper.Print != nil {
 		prevModel := m.status.DeviceModel
 
 		// Automatically promote C11 (P1-series base) to C12 (P1S) if Aux Fan, Chamber Fan, Chamber Temp, or Chamber Light telemetry is present
@@ -242,20 +227,12 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 			m.status.DeviceModel = "C12"
 		}
 
-		slog.Debug("Message received", "raw", printRaw)
+		slog.Debug("Message received", "raw", msg.Payload)
 		m.broadcastStatus()
 	}
 
-	if infoRaw, ok := rawObj["info"]; ok {
-		var info InfoMessage
-		if err := json.Unmarshal(infoRaw, &info); err != nil {
-			slog.Error("Error parsing info message", "error", err)
-			return
-		}
-		// Process info to extract model and limits
-		m.processInfo(&info)
-
-		// We might want to notify update here too, so the UI gets the new limit immediately
+	if msgWrapper.Info != nil {
+		m.processInfo(msgWrapper.Info)
 		m.broadcastStatus()
 	}
 }

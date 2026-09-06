@@ -20,6 +20,7 @@ import (
 	"github.com/gonzalop/bambulan"
 	"github.com/gonzalop/bambulan/homeassistant"
 	"github.com/gonzalop/bambulan/internal/filament"
+	"github.com/gonzalop/bambulan/internal/hms"
 )
 
 var version = "dev"
@@ -193,8 +194,8 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 	if len(status.Hms) > 0 {
 		fmt.Println("\n--- ACTIVE ERRORS (HMS) ---")
 		for _, event := range status.Hms {
-			codeStr := bambulan.FormatHMSCode(event.Code, event.Attr)
-			desc, _ := bambulan.LookupHMS(event.Code, event.Attr)
+			codeStr := hms.FormatCode(event.Code, event.Attr)
+			desc, _ := hms.Lookup(event.Code, event.Attr)
 			if desc == "" {
 				desc = "Unknown Error"
 			}
@@ -1105,8 +1106,8 @@ func (c *SysInfoCmd) printSysInfo(client *bambulan.Client, status *bambulan.Prin
 	if len(status.Hms) > 0 {
 		fmt.Fprintln(w, "ACTIVE ERRORS (HMS)")
 		for _, event := range status.Hms {
-			codeStr := bambulan.FormatHMSCode(event.Code, event.Attr)
-			desc, _ := bambulan.LookupHMS(event.Code, event.Attr)
+			codeStr := hms.FormatCode(event.Code, event.Attr)
+			desc, _ := hms.Lookup(event.Code, event.Attr)
 			if desc == "" {
 				desc = "Unknown Error"
 			}
