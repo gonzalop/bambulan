@@ -4,9 +4,9 @@ github.com/alecthomas/kong v1.16.1 h1:ixhCt93XkJ98kGposQ54+bl0IK6XwqB40AsMynU7Z8
 github.com/alecthomas/kong v1.16.1/go.mod h1:wrlbXem1CWqUV5Vbmss5ISYhsVPkBb1Yo7YKJghju2I=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/gonzalop/ftp v1.6.1 h1:gDyxCAUg6y8j8cOBM0u8o+g7EkAhI3SI34ONfIu1Sc0=
-github.com/gonzalop/ftp v1.6.1/go.mod h1:izBQtKKPgdMCIKmaa+dnqWEYThHRME8rowu+Bcq3GW8=
-github.com/gonzalop/mq v0.9.12 h1:INpsUf9uir9VlNCTK5V+auFwPCo7pCYyO4r8aLlSSyI=
-github.com/gonzalop/mq v0.9.12/go.mod h1:QVPtaf408IuhzPJO4w2Q0sjzM+nP6FWHyfyXUjvY/PQ=
+github.com/gonzalop/ftp v1.7.0 h1:q0d0Jsu9wzih6HnzI4F+zfyrTrhoXrNs3yb3feV+moQ=
+github.com/gonzalop/ftp v1.7.0/go.mod h1:izBQtKKPgdMCIKmaa+dnqWEYThHRME8rowu+Bcq3GW8=
+github.com/gonzalop/mq v0.10.0 h1:IQE3vgoUjR97oJ2ua0RX5CJQO1sBKou/0yuoOOeRwkk=
+github.com/gonzalop/mq v0.10.0/go.mod h1:QVPtaf408IuhzPJO4w2Q0sjzM+nP6FWHyfyXUjvY/PQ=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
