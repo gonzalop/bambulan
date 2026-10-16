@@ -1,6 +1,7 @@
 package bambulan
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -8,10 +9,11 @@ import (
 )
 
 // bambuMessage represents the top-level JSON structure received from the printer.
-// It is used internally to unwrap the "print" object.
+// It is used internally to unwrap the "print" object. Print is kept raw so it can be
+// merged into the existing status only when the key is present.
 type bambuMessage struct {
-	Print *PrinterStatus `json:"print,omitempty"`
-	Info  *InfoMessage   `json:"info,omitempty"`
+	Print json.RawMessage `json:"print,omitempty"`
+	Info  *InfoMessage    `json:"info,omitempty"`
 }
 
 // InfoMessage represents a message containing system information or responses from the printer.
@@ -206,6 +208,16 @@ func (ps *PrinterStatus) HMSDescription() string {
 		return desc
 	}
 	return hms.FormatCode(ps.Hms[0].Code, ps.Hms[0].Attr)
+}
+
+// FormatHMSCode returns the dash-separated hex string for a given code and attribute.
+func FormatHMSCode(code, attr uint32) string {
+	return hms.FormatCode(code, attr)
+}
+
+// LookupHMS returns the description for the given code and attribute.
+func LookupHMS(code, attr uint32) (string, bool) {
+	return hms.Lookup(code, attr)
 }
 
 // WikiURLs returns a list of troubleshooting Wiki URLs for all active HMS events.

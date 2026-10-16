@@ -206,15 +206,17 @@ func (m *MQTTClient) onConnect(client *mq.Client) {
 }
 
 func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
-	msgWrapper := bambuMessage{
-		Print: m.status,
-	}
+	var msgWrapper bambuMessage
 	if err := json.Unmarshal(msg.Payload, &msgWrapper); err != nil {
 		slog.Error("Error unmarshalling message wrapper", "error", err)
 		return
 	}
 
-	if msgWrapper.Print != nil {
+	if len(msgWrapper.Print) > 0 && string(msgWrapper.Print) != "null" {
+		if err := json.Unmarshal(msgWrapper.Print, m.status); err != nil {
+			slog.Error("Error updating status", "error", err)
+			return
+		}
 		prevModel := m.status.DeviceModel
 
 		// Automatically promote C11 (P1-series base) to C12 (P1S) if Aux Fan, Chamber Fan, Chamber Temp, or Chamber Light telemetry is present
