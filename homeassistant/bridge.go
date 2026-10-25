@@ -317,7 +317,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 				b.displayName = fmt.Sprintf("%s %s %s", manufacturer, haModel, suffix)
 				b.mu.Unlock()
 
-				if err := b.publishDiscovery(b.haModel); err != nil {
+				if err := b.publishDiscovery(ctx, b.haModel); err != nil {
 					slog.Error("Failed to publish HA discovery", "error", err)
 				} else {
 					b.discoveryOk.Store(true)
@@ -564,10 +564,10 @@ func (b *Bridge) syncFiles(ctx context.Context) error {
 	slog.Debug("Synced files from SD card", "count", len(files))
 
 	// Re-publish discovery to update options
-	return b.publishDiscovery(haModel)
+	return b.publishDiscovery(ctx, haModel)
 }
 
-func (b *Bridge) publishDiscovery(model string) error {
+func (b *Bridge) publishDiscovery(ctx context.Context, model string) error {
 	slog.Debug("HA Bridge: Publishing entity discovery configurations", "serial", b.serial)
 	printerModel, _, displayName := b.identity()
 	b.mu.Lock()
@@ -643,6 +643,9 @@ func (b *Bridge) publishDiscovery(model string) error {
 	configs = append(configs, entry{factory.Camera("camera", "Camera", ""), "camera"})
 
 	for _, entry := range configs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		topic := fmt.Sprintf("%s/%s/%s/config", b.prefix, entry.component, entry.cfg.UniqueID)
 		payload, err := entry.cfg.ToJSON()
 		if err != nil {
@@ -650,9 +653,9 @@ func (b *Bridge) publishDiscovery(model string) error {
 		}
 
 		slog.Debug("HA Bridge: Publishing entity discovery", "component", entry.component, "topic", topic)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		token := b.ha.Publish(ctx, topic, payload, mq.WithRetain(true))
-		err = token.Wait(ctx)
+		pubCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		token := b.ha.Publish(pubCtx, topic, payload, mq.WithRetain(true))
+		err = token.Wait(pubCtx)
 		cancel()
 		if err != nil {
 			slog.Error("HA Bridge: Failed to publish discovery for entity", "topic", topic, "error", err)

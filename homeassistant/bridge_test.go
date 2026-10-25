@@ -1,6 +1,8 @@
 package homeassistant
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 )
@@ -40,6 +42,18 @@ func TestBridgeSharedStateConcurrentAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestPublishDiscoveryHonorsCancelledContext(t *testing.T) {
+	// ha is nil: any publish attempt would panic, so returning ctx.Err()
+	// proves the loop stops before touching the broker.
+	b := &Bridge{prefix: "homeassistant", serial: "01S00A12345678", model: "C12", files: []string{"None"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := b.publishDiscovery(ctx, "P1S"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("publishDiscovery with cancelled ctx = %v, want context.Canceled", err)
+	}
 }
 
 func TestSwapLastLight(t *testing.T) {
