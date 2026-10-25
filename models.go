@@ -479,6 +479,82 @@ func (ps *PrinterStatus) GetPrintStageName() string {
 	return fmt.Sprintf("Unknown (%d)", ps.StgCur)
 }
 
+// Clone creates a deep copy of PrinterStatus.
+func (ps *PrinterStatus) Clone() *PrinterStatus {
+	if ps == nil {
+		return nil
+	}
+	cp := *ps
+	if ps.Upload != nil {
+		u := *ps.Upload
+		cp.Upload = &u
+	}
+	if ps.Modules != nil {
+		cp.Modules = make([]ModuleInfo, len(ps.Modules))
+		copy(cp.Modules, ps.Modules)
+	}
+	if ps.Stg != nil {
+		cp.Stg = make([]any, len(ps.Stg))
+		copy(cp.Stg, ps.Stg)
+	}
+	if ps.SObj != nil {
+		cp.SObj = make([]any, len(ps.SObj))
+		copy(cp.SObj, ps.SObj)
+	}
+	if ps.Hms != nil {
+		cp.Hms = make([]HMSEvent, len(ps.Hms))
+		copy(cp.Hms, ps.Hms)
+	}
+	if ps.Online != nil {
+		o := *ps.Online
+		cp.Online = &o
+	}
+	if ps.IPCam != nil {
+		ipc := *ps.IPCam
+		cp.IPCam = &ipc
+	}
+	if ps.VtTray != nil {
+		vt := *ps.VtTray
+		cp.VtTray = &vt
+	}
+	if ps.LightsReport != nil {
+		cp.LightsReport = make([]*LightsReport, len(ps.LightsReport))
+		for i, lr := range ps.LightsReport {
+			if lr != nil {
+				lrcp := *lr
+				cp.LightsReport[i] = &lrcp
+			}
+		}
+	}
+	if ps.UpgradeState != nil {
+		us := *ps.UpgradeState
+		cp.UpgradeState = &us
+	}
+	if ps.Ams != nil {
+		amsCopy := *ps.Ams
+		if ps.Ams.Ams != nil {
+			amsCopy.Ams = make([]*AMSEntry, len(ps.Ams.Ams))
+			for i, entry := range ps.Ams.Ams {
+				if entry != nil {
+					entryCopy := *entry
+					if entry.Tray != nil {
+						entryCopy.Tray = make([]*VTTray, len(entry.Tray))
+						for j, tray := range entry.Tray {
+							if tray != nil {
+								trayCopy := *tray
+								entryCopy.Tray[j] = &trayCopy
+							}
+						}
+					}
+					amsCopy.Ams[i] = &entryCopy
+				}
+			}
+		}
+		cp.Ams = &amsCopy
+	}
+	return &cp
+}
+
 // PrintOptions configures the parameters for starting a print job.
 type PrintOptions struct {
 	BedType              string

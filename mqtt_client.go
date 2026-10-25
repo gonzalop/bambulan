@@ -61,9 +61,11 @@ func NewMQTTClient(hostname, accessCode, serial string) *MQTTClient {
 	return client
 }
 
-// GetPrinterStatus returns the current status pointer.
+// GetPrinterStatus returns a thread-safe deep copy of the current status.
 func (m *MQTTClient) GetPrinterStatus() *PrinterStatus {
-	return m.status
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.status.Clone()
 }
 
 func (m *MQTTClient) getNextSequenceID() string {
@@ -132,7 +134,7 @@ func (m *MQTTClient) Subscribe() *EventSubscription {
 	id := m.nextSubID
 	m.nextSubID++
 
-	ch := make(chan *PrinterStatus)
+	ch := make(chan *PrinterStatus, 16)
 	m.subscribers[id] = ch
 
 	return &EventSubscription{
@@ -153,14 +155,17 @@ func (m *MQTTClient) unsubscribe(id int64) {
 }
 
 func (m *MQTTClient) broadcastStatus() {
-	statusCopy := *m.status
-
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	statusCopy := m.status.Clone()
+	subscribers := make([]chan *PrinterStatus, 0, len(m.subscribers))
 	for _, ch := range m.subscribers {
+		subscribers = append(subscribers, ch)
+	}
+	m.mu.RUnlock()
+
+	for _, ch := range subscribers {
 		select {
-		case ch <- &statusCopy:
+		case ch <- statusCopy:
 		default:
 			// Client is too slow, drop the update. They will get the next one.
 		}
@@ -213,7 +218,9 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 	}
 
 	if len(msgWrapper.Print) > 0 && string(msgWrapper.Print) != "null" {
+		m.mu.Lock()
 		if err := json.Unmarshal(msgWrapper.Print, m.status); err != nil {
+			m.mu.Unlock()
 			slog.Error("Error updating status", "error", err)
 			return
 		}
@@ -228,6 +235,7 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 		} else if prevModel == "C12" && (m.status.DeviceModel == "" || m.status.DeviceModel == "C11") {
 			m.status.DeviceModel = "C12"
 		}
+		m.mu.Unlock()
 
 		slog.Debug("Message received", "raw", msg.Payload)
 		m.broadcastStatus()
@@ -241,6 +249,9 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 
 // Publish sends a JSON command to the printer request topic.
 func (m *MQTTClient) Publish(ctx context.Context, command any) error {
+	if m.client == nil {
+		return fmt.Errorf("MQTT client not connected")
+	}
 	payload, err := json.Marshal(command)
 	if err != nil {
 		return err
@@ -804,7 +815,9 @@ func (m *MQTTClient) SetFanSpeed(ctx context.Context, fan string, percent int) (
 //
 //	client.MQTT.SetBedTemperature(ctx, 60) // Set bed to 60°C
 func (m *MQTTClient) SetBedTemperature(ctx context.Context, temp int) (string, error) {
+	m.mu.RLock()
 	limit := m.status.BedTempLimit
+	m.mu.RUnlock()
 	if limit == 0 {
 		limit = 100 // Default safe limit if unknown
 	}
@@ -830,7 +843,9 @@ func (m *MQTTClient) SetBedTemperature(ctx context.Context, temp int) (string, e
 //
 //	client.MQTT.SetNozzleTemperature(ctx, 220, 0) // Set nozzle 1 to 220°C
 func (m *MQTTClient) SetNozzleTemperature(ctx context.Context, temp int, toolIdx int) (string, error) {
+	m.mu.RLock()
 	limit := m.status.NozzleTempLimit
+	m.mu.RUnlock()
 	if limit == 0 {
 		limit = 300 // Default safe limit
 	}
@@ -859,7 +874,10 @@ func (m *MQTTClient) SetNozzleTemperature(ctx context.Context, temp int, toolIdx
 //
 //	client.MQTT.SetChamberTemperature(ctx, 50) // Set chamber to 50°C
 func (m *MQTTClient) SetChamberTemperature(ctx context.Context, temp int) (string, error) {
-	caps := GetPrinterCapabilities(m.status.DeviceModel)
+	m.mu.RLock()
+	model := m.status.DeviceModel
+	m.mu.RUnlock()
+	caps := GetPrinterCapabilities(model)
 	if !caps.HasChamberHeater {
 		return "", fmt.Errorf("printer does not support chamber heating")
 	}
@@ -877,9 +895,6 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 	}
 
 	var model string
-
-	// Store all modules in status for CLI display
-	m.status.Modules = info.Module
 
 	// Extract serial number from module if m.Serial is empty
 	if m.Serial == "" {
@@ -906,12 +921,15 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 		}
 	}
 
+	m.mu.Lock()
+	m.status.Modules = info.Module
 	if model != "" {
 		m.status.DeviceModel = model
 		m.status.BedTempLimit = getBedTempLimit(model)
 		m.status.NozzleTempLimit = getNozzleTempLimit(model)
 		slog.Debug("Device detected", "model", model, "bed_limit", m.status.BedTempLimit)
 	}
+	m.mu.Unlock()
 }
 
 func getBedTempLimit(model string) int {
