@@ -322,9 +322,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 				} else {
 					b.discoveryOk.Store(true)
 					slog.Debug("Home Assistant discovery published successfully", "device", b.displayName, "model", b.haModel)
-					go func() {
-						_ = b.syncFiles(ctx)
-					}()
 				}
 			}
 
@@ -348,8 +345,15 @@ func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.Print
 		return nil
 	}
 
-	factory := NewDiscoveryFactory(b.prefix, b.serial, b.haModel, b.displayName)
-	caps := bambulan.GetPrinterCapabilities(b.model)
+	printerModel, haModel, displayName := b.identity()
+	caps := bambulan.GetPrinterCapabilities(printerModel)
+	var factory *DiscoveryFactory
+	getFactory := func() *DiscoveryFactory {
+		if factory == nil {
+			factory = NewDiscoveryFactory(b.prefix, b.serial, haModel, displayName)
+		}
+		return factory
+	}
 	var configs []*DiscoveryConfig
 
 	for i, unit := range status.Ams.Ams {
@@ -359,7 +363,7 @@ func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.Print
 
 		unitID := fmt.Sprintf("ams_%d", i)
 		if !b.entitiesOk[unitID+"_humidity"] {
-			configs = append(configs, factory.Sensor(unitID+"_humidity", fmt.Sprintf("AMS %d Humidity", i), "", "", "measurement", "mdi:water-percent", ""))
+			configs = append(configs, getFactory().Sensor(unitID+"_humidity", fmt.Sprintf("AMS %d Humidity", i), "", "", "measurement", "mdi:water-percent", ""))
 			b.entitiesOk[unitID+"_humidity"] = true
 		}
 
@@ -371,14 +375,14 @@ func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.Print
 
 			// Always discover filament type
 			if !b.entitiesOk[trayID+"_filament"] {
-				configs = append(configs, factory.Sensor(trayID+"_filament", fmt.Sprintf("AMS %d Slot %d Filament", i, j+1), "", "", "", "mdi:format-list-bulleted-type", ""))
+				configs = append(configs, getFactory().Sensor(trayID+"_filament", fmt.Sprintf("AMS %d Slot %d Filament", i, j+1), "", "", "", "mdi:format-list-bulleted-type", ""))
 				b.entitiesOk[trayID+"_filament"] = true
 			}
 
 			// Only discover 'remain' if the printer supports it AND it reports a valid value (>=0)
 			if caps.HasAMSCapacityReporting && tray.Remain >= 0 {
 				if !b.entitiesOk[trayID+"_remain"] {
-					configs = append(configs, factory.Sensor(trayID+"_remain", fmt.Sprintf("AMS %d Slot %d Remaining", i, j+1), "%", "", "measurement", "mdi:gauge", ""))
+					configs = append(configs, getFactory().Sensor(trayID+"_remain", fmt.Sprintf("AMS %d Slot %d Remaining", i, j+1), "%", "", "measurement", "mdi:gauge", ""))
 					b.entitiesOk[trayID+"_remain"] = true
 				}
 			}
@@ -778,7 +782,7 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		state["chamber_temperature"] = chamberTemp
 	}
 
-	if status.ChamberTargetTemp > 0 {
+	if caps.HasChamberHeater {
 		state["target_chamber_temp"] = int(status.ChamberTargetTemp)
 		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
 	}

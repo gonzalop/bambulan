@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/gonzalop/bambulan"
 )
 
 // TestBridgeSharedStateConcurrentAccess exercises the fields touched by MQTT
@@ -71,5 +73,29 @@ func TestSwapLastLight(t *testing.T) {
 		if got := b.swapLastLight(s.state); got != s.changed {
 			t.Errorf("step %d: swapLastLight(%q) = %v, want %v", i, s.state, got, s.changed)
 		}
+	}
+}
+
+func TestTargetChamberTempReportedWhenZero(t *testing.T) {
+	caps := bambulan.GetPrinterCapabilities("C13")
+	if !caps.HasChamberHeater {
+		t.Skip("C13 does not have chamber heater")
+	}
+
+	status := &bambulan.PrinterStatus{
+		ChamberTargetTemp: 0,
+	}
+
+	state := make(map[string]any)
+	if caps.HasChamberHeater {
+		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
+	}
+
+	val, ok := state["target_chamber_temperature"]
+	if !ok {
+		t.Fatal("expected target_chamber_temperature in state even when 0")
+	}
+	if val != 0 {
+		t.Fatalf("expected target_chamber_temperature to be 0, got %v", val)
 	}
 }
