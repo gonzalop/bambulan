@@ -61,12 +61,7 @@ func (r *Reader) readFileBytes(name string) ([]byte, error) {
 	}
 	defer rc.Close()
 
-	// Use configured MaxFileSize or default
-	maxSize := r.MaxFileSize
-	if maxSize <= 0 {
-		maxSize = DefaultMaxFileSize
-	}
-
+	maxSize := r.maxFileSize()
 	lr := io.LimitReader(rc, maxSize+1)
 	data, err := io.ReadAll(lr)
 	if err != nil {
@@ -78,6 +73,22 @@ func (r *Reader) readFileBytes(name string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func (r *Reader) maxFileSize() int64 {
+	if r.MaxFileSize <= 0 {
+		return DefaultMaxFileSize
+	}
+	return r.MaxFileSize
+}
+
+func (r *Reader) fileExists(name string) bool {
+	for _, f := range r.z.File {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Reader) openFile(name string) (io.ReadCloser, error) {

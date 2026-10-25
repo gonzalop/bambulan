@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"strconv"
 )
 
@@ -59,28 +60,17 @@ func (r *Reader) ParseMetadata() (*Metadata, error) {
 			}
 		}
 
-		// Use map to avoid duplicates if filaments are repeated per plate
-		filamentMap := make(map[int]Filament)
+		// Append to global filaments maintaining slice order
 		for _, f := range p.Filaments {
-			filamentMap[f.ID] = Filament(f)
-		}
-		// In a real scenario we might want to aggregate these across plates?
-		// For now let's just append to global list if not exists
-		for _, f := range filamentMap {
 			found := false
 			for _, existing := range md.Filaments {
 				if existing.ID == f.ID {
-					// Aggregate usage? or just skip?
-					// The XML shows "used_g" per plate. So we should probably aggregate.
-					// But we can't easily modify the slice element.
-					// Let's just append for now and let the user handle it,
-					// OR better: use a map for the global metadata too.
 					found = true
 					break
 				}
 			}
 			if !found {
-				md.Filaments = append(md.Filaments, f)
+				md.Filaments = append(md.Filaments, Filament(f))
 			}
 		}
 
@@ -106,7 +96,8 @@ func (r *Reader) parseSliceInfo() (*sliceInfoConfig, error) {
 	defer rc.Close()
 
 	var config sliceInfoConfig
-	if err := xml.NewDecoder(rc).Decode(&config); err != nil {
+	lr := io.LimitReader(rc, r.maxFileSize()+1)
+	if err := xml.NewDecoder(lr).Decode(&config); err != nil {
 		return nil, err
 	}
 	return &config, nil
@@ -120,7 +111,8 @@ func (r *Reader) parsePlateName(filename string) (string, error) {
 	defer rc.Close()
 
 	var pi plateInfo
-	if err := json.NewDecoder(rc).Decode(&pi); err != nil {
+	lr := io.LimitReader(rc, r.maxFileSize()+1)
+	if err := json.NewDecoder(lr).Decode(&pi); err != nil {
 		return "", err
 	}
 	return pi.PlateName, nil
@@ -139,52 +131,48 @@ func (r *Reader) parseStandardMetadata(md *Metadata) error {
 	// For simplicity and speed, we check the default path first.
 	// If needed later we can implement full OPC relationships.
 
-	rc, err := r.openFile("3D/3dmodel.model")
-	if err != nil {
-		return err // Not found or error
-	}
-	defer rc.Close()
+	if rc, err := r.openFile("3D/3dmodel.model"); err == nil {
+		defer rc.Close()
 
-	// XML structure for <model> with <metadata> children
-	type metadataXML struct {
-		Name    string `xml:"name,attr"`
-		Content string `xml:",chardata"`
-	}
+		// XML structure for <model> with <metadata> children
+		type metadataXML struct {
+			Name    string `xml:"name,attr"`
+			Content string `xml:",chardata"`
+		}
 
-	type modelXML struct {
-		XMLName  xml.Name      `xml:"model"`
-		Metadata []metadataXML `xml:"metadata"`
-	}
+		type modelXML struct {
+			XMLName  xml.Name      `xml:"model"`
+			Metadata []metadataXML `xml:"metadata"`
+		}
 
-	var m modelXML
-	if err := xml.NewDecoder(rc).Decode(&m); err != nil {
-		return err
-	}
-
-	for _, meta := range m.Metadata {
-		switch meta.Name {
-		case "Title":
-			md.Title = meta.Content
-		case "Designer":
-			md.Designer = meta.Content
-		case "Description":
-			md.Description = meta.Content
-		case "Copyright":
-			md.Copyright = meta.Content
-		case "LicenseTerms":
-			md.LicenseTerms = meta.Content
-		case "CreationDate":
-			md.CreationDate = meta.Content
-		case "ModificationDate":
-			md.ModificationDate = meta.Content
-		case "Application":
-			md.Application = meta.Content
+		var m modelXML
+		lr := io.LimitReader(rc, r.maxFileSize()+1)
+		if err := xml.NewDecoder(lr).Decode(&m); err == nil {
+			for _, meta := range m.Metadata {
+				switch meta.Name {
+				case "Title":
+					md.Title = meta.Content
+				case "Designer":
+					md.Designer = meta.Content
+				case "Description":
+					md.Description = meta.Content
+				case "Copyright":
+					md.Copyright = meta.Content
+				case "LicenseTerms":
+					md.LicenseTerms = meta.Content
+				case "CreationDate":
+					md.CreationDate = meta.Content
+				case "ModificationDate":
+					md.ModificationDate = meta.Content
+				case "Application":
+					md.Application = meta.Content
+				}
+			}
 		}
 	}
 
-	// Check for standard package thumbnail
-	// TODO: Implement relationship-based lookup as per 3MF spec (OPC relationships)
-	if _, err := r.openFile("Metadata/thumbnail.png"); err == nil {
+	// Check for standard package thumbnail without opening reader
+	if r.fileExists("Metadata/thumbnail.png") {
 		md.ThumbnailPath = "Metadata/thumbnail.png"
 	}
 
