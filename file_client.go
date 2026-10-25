@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -207,11 +208,12 @@ func (f *FileClient) Download(ctx context.Context, remotePath string) (io.ReadCl
 	}
 
 	// If ctx is cancelled, close the dedicated connection to abort the in-flight transfer.
-	context.AfterFunc(ctx, func() { _ = c.Quit() })
+	stop := context.AfterFunc(ctx, func() { _ = c.Quit() })
 
 	// Create a pipe to stream the data
 	pr, pw := io.Pipe()
 	go func() {
+		defer stop()
 		defer pw.Close()
 		defer func() { _ = c.Quit() }()
 
@@ -276,8 +278,17 @@ func (f *FileClient) DownloadDirectory(ctx context.Context, remoteDir, localDir 
 			return ctx.Err()
 		}
 
+		cleanName := filepath.Clean(filepath.FromSlash(entry.Name))
+		if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+			continue
+		}
+		localPath := filepath.Join(localDir, cleanName)
+		rel, err := filepath.Rel(localDir, localPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("insecure path in directory entry: %s", entry.Name)
+		}
+
 		remotePath := path.Join(remoteDir, entry.Name)
-		localPath := filepath.Join(localDir, entry.Name)
 
 		if entry.Type == "dir" {
 			if recursive {
@@ -481,13 +492,13 @@ func (f *FileClient) RemoveAll(ctx context.Context, path string) error {
 	})
 }
 
-func (f *FileClient) removeAll(c *ftp.Client, path string) error {
+func (f *FileClient) removeAll(c *ftp.Client, targetPath string) error {
 	// Try to list the path to see if it's a directory
-	entries, err := c.List(path)
+	entries, err := c.List(targetPath)
 	if err != nil {
 		// If listing fails, it might be a file or not exist
 		// Try deleting as file
-		if delErr := c.Delete(path); delErr == nil {
+		if delErr := c.Delete(targetPath); delErr == nil {
 			return nil
 		}
 		// If delete failed, return the original list error or delete error?
@@ -495,12 +506,17 @@ func (f *FileClient) removeAll(c *ftp.Client, path string) error {
 		return err
 	}
 
+	base := path.Base(targetPath)
+	if len(entries) == 1 && (entries[0].Name == base || entries[0].Type == "file") {
+		return c.Delete(targetPath)
+	}
+
 	// It's a directory (or empty), iterate entries
 	for _, entry := range entries {
 		if entry.Name == "." || entry.Name == ".." {
 			continue
 		}
-		fullPath := filepath.Join(path, entry.Name)
+		fullPath := path.Join(targetPath, entry.Name)
 
 		if entry.Type == "dir" {
 			if err := f.removeAll(c, fullPath); err != nil {
@@ -514,5 +530,5 @@ func (f *FileClient) removeAll(c *ftp.Client, path string) error {
 	}
 
 	// usage of RemoveDir usually requires empty directory
-	return c.RemoveDir(path)
+	return c.RemoveDir(targetPath)
 }
