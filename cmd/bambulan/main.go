@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -517,6 +518,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		if err := client.Start(); err != nil {
 			return err
 		}
+		defer client.Stop()
 	} else {
 		// User didn't specify. Auto-detect.
 		fmt.Println("Checking for AMS presence...")
@@ -525,6 +527,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		if err := client.Start(); err != nil {
 			return err
 		}
+		defer client.Stop()
 
 		// Wait for AMS detection.
 		// Usually we get a few messages, the first ones might be partial.
@@ -563,7 +566,7 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 
 	if !c.SkipUpload {
 		// 1. Upload
-		remotePath = filepath.Join("/", filepath.Base(localPath))
+		remotePath = path.Join("/", filepath.Base(localPath))
 		fmt.Printf("Uploading %s to printer (remote: %s)...\n", localPath, remotePath)
 		uProgressFunc := func(current, total int64) {
 			if total > 0 {
@@ -604,7 +607,6 @@ func (c *PrintStartCmd) Run(ctx *Context) error {
 		return fmt.Errorf("failed to start print: %w", err)
 	}
 	fmt.Println("Print started!")
-	defer client.Stop()
 	return nil
 }
 
@@ -1167,16 +1169,16 @@ func (c *HACmd) Run(ctx *Context) error {
 	slog.Info("Starting Home Assistant bridge", "broker", c.Broker, "printer", client.MQTT.Hostname)
 
 	// Handle interrupt for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- bridge.Start(context.Background())
+		errChan <- bridge.Start(sigCtx)
 	}()
 
 	select {
-	case <-sigChan:
+	case <-sigCtx.Done():
 		fmt.Println("\nShutting down...")
 		return nil
 	case err := <-errChan:
