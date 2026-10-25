@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/gonzalop/bambulan"
@@ -90,5 +91,65 @@ func TestPathSanitization(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("Sanitization failed for %q: got %q, want %q", tt.input, result, tt.expected)
 		}
+	}
+}
+
+func TestHandleLogout_RevokesAuthCookie(t *testing.T) {
+	s := NewWebServer()
+	req := httptest.NewRequest("GET", "/logout", nil)
+	w := httptest.NewRecorder()
+
+	s.handleLogout(w, req)
+
+	cookies := w.Result().Cookies()
+	var authCleared, sessionCleared bool
+	for _, c := range cookies {
+		if c.Name == "bambulan_auth" && c.MaxAge < 0 {
+			authCleared = true
+		}
+		if c.Name == "bambulan_session" && c.MaxAge < 0 {
+			sessionCleared = true
+		}
+	}
+
+	if !authCleared {
+		t.Fatal("expected bambulan_auth cookie to be cleared with MaxAge < 0")
+	}
+	if !sessionCleared {
+		t.Fatal("expected bambulan_session cookie to be cleared with MaxAge < 0")
+	}
+}
+
+func TestUploadFilename_TraversalSanitization(t *testing.T) {
+	tests := []struct {
+		name       string
+		filename   string
+		expectBase string
+	}{
+		{"normal", "benchy.gcode", "benchy.gcode"},
+		{"unix traversal", "../../etc/passwd", "passwd"},
+		{"windows traversal", `..\..\windows\system32\calc.exe`, "calc.exe"},
+		{"nested traversal", `folder/../../../secret.3mf`, "secret.3mf"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := path.Base(strings.ReplaceAll(tc.filename, "\\", "/"))
+			if got != tc.expectBase {
+				t.Errorf("path.Base(%q) = %q, want %q", tc.filename, got, tc.expectBase)
+			}
+		})
+	}
+}
+
+func TestSessionID_RandomEntropy(t *testing.T) {
+	id1 := generateRandomString(32)
+	id2 := generateRandomString(32)
+
+	if len(id1) != 64 || len(id2) != 64 {
+		t.Fatalf("expected 64 character hex session IDs, got len=%d and len=%d", len(id1), len(id2))
+	}
+	if id1 == id2 {
+		t.Fatalf("expected cryptographically random unique session IDs, got duplicate %s", id1)
 	}
 }

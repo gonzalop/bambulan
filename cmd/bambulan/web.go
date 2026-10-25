@@ -86,6 +86,7 @@ type WebServer struct {
 	Mu       sync.RWMutex
 	// Connection pooling
 	ActiveClients map[string]*bambulan.Client
+	ActiveBridges map[string]context.CancelFunc
 	ClientsMu     sync.Mutex
 	Key           []byte
 	UseTLS        bool
@@ -104,6 +105,7 @@ func NewWebServer() *WebServer {
 	return &WebServer{
 		Sessions:      make(map[string]*Session),
 		ActiveClients: make(map[string]*bambulan.Client),
+		ActiveBridges: make(map[string]context.CancelFunc),
 		MaxFileSize:   bambu3mf.DefaultMaxFileSize,
 	}
 }
@@ -230,6 +232,10 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 		// Verify host hasn't changed (e.g. DHCP)
 		if client.MQTT.Hostname != host {
 			slog.Info("Host IP changed for serial, reconnecting", "serial", serial, "old_host", client.MQTT.Hostname, "new_host", host)
+			if cancelBridge, ok := s.ActiveBridges[key]; ok {
+				cancelBridge()
+				delete(s.ActiveBridges, key)
+			}
 			client.Stop()
 			exists = false
 		}
@@ -246,6 +252,8 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 
 		// Start HA Bridge if configured
 		if s.MQTTBroker != "" {
+			bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
+			s.ActiveBridges[key] = bridgeCancel
 			go func() {
 				slog.Info("Starting Home Assistant bridge for newly connected printer", "serial", serial, "broker", s.MQTTBroker)
 				bridge, err := homeassistant.NewBridge(client, s.MQTTBroker, s.MQTTUser, s.MQTTPassword, s.MQTTPrefix)
@@ -253,7 +261,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 					slog.Error("Failed to initialize Home Assistant bridge", "serial", serial, "error", err)
 					return
 				}
-				if err := bridge.Start(context.Background()); err != nil {
+				if err := bridge.Start(bridgeCtx); err != nil && bridgeCtx.Err() == nil {
 					slog.Error("Home Assistant bridge error", "serial", serial, "error", err)
 				}
 			}()
@@ -498,6 +506,10 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 			if !inUse {
 				s.ClientsMu.Lock()
+				if cancelBridge, exists := s.ActiveBridges[serial]; exists {
+					cancelBridge()
+					delete(s.ActiveBridges, serial)
+				}
 				if client, exists := s.ActiveClients[serial]; exists {
 					client.Stop()
 					delete(s.ActiveClients, serial)
@@ -514,6 +526,15 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   s.UseTLS,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "bambulan_auth",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   s.UseTLS,
+		SameSite: http.SameSiteStrictMode,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
@@ -729,7 +750,12 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
-		case <-sub.C:
+		case update := <-sub.C:
+			if update != nil {
+				session.Mu.Lock()
+				session.Status = update
+				session.Mu.Unlock()
+			}
 			payload := s.buildStatusPayload(session)
 			newJSON, _ := json.Marshal(payload)
 
@@ -1023,13 +1049,18 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	// Sanitize path and join using path (not filepath) for remote FTP
 	cleanDir := path.Clean("/" + pathParam)
-	remotePath := path.Join(cleanDir, header.Filename)
+	cleanFilename := path.Base(strings.ReplaceAll(header.Filename, "\\", "/"))
+	if cleanFilename == "." || cleanFilename == "/" || cleanFilename == ".." || cleanFilename == "" {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+	remotePath := path.Join(cleanDir, cleanFilename)
 
 	// Setup progress tracking
 	session.Mu.Lock()
 	session.UploadStatus = UploadStatus{
 		Uploading: true,
-		Filename:  header.Filename,
+		Filename:  cleanFilename,
 	}
 	session.Mu.Unlock()
 
@@ -1240,7 +1271,7 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 
 	// Start stream callback
 	stopChan := make(chan struct{})
-	defer close(stopChan)
+	var wg sync.WaitGroup
 
 	onImage := func(frame []byte) {
 		// This callback is executed in a separate goroutine.
@@ -1250,13 +1281,20 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 		case <-stopChan:
 			return
 		default:
-			// Construct MJPEG frame
-			header := fmt.Sprintf("\r\n--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame))
-			_, _ = w.Write([]byte(header))
-			_, _ = w.Write(frame)
-			_, _ = w.Write([]byte("\r\n"))
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
+			wg.Add(1)
+			defer wg.Done()
+			select {
+			case <-stopChan:
+				return
+			default:
+				// Construct MJPEG frame
+				header := fmt.Sprintf("\r\n--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame))
+				_, _ = w.Write([]byte(header))
+				_, _ = w.Write(frame)
+				_, _ = w.Write([]byte("\r\n"))
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
 			}
 		}
 	}
@@ -1266,7 +1304,11 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Camera busy", http.StatusServiceUnavailable)
 		return
 	}
-	defer session.Client.Camera.StopStream()
+	defer func() {
+		close(stopChan)
+		session.Client.Camera.StopStream()
+		wg.Wait()
+	}()
 
 	// Wait until client disconnects
 	<-r.Context().Done()
@@ -1427,7 +1469,7 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 	}
 
 	// Re-create session
-	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+	sessionID := generateRandomString(32)
 	session := &Session{
 		Status:         &bambulan.PrinterStatus{},
 		CSRFToken:      generateRandomString(32),
