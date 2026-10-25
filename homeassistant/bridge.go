@@ -9,6 +9,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gonzalop/mq"
@@ -22,18 +24,22 @@ type Bridge struct {
 	ha     *mq.Client
 	prefix string
 
-	host        string
-	serial      string
+	host   string
+	serial string
+
+	// mu guards model, haModel, displayName, files and lastLight, which are
+	// shared between the event loop, file sync goroutines and MQTT callbacks.
+	mu          sync.Mutex
 	model       string
 	haModel     string
 	displayName string
-	discoveryOk bool
-	entitiesOk  map[string]bool // unique_id -> bool
 	files       []string
 	lastLight   string
-	onlineTopic string
 
-	cameraEnabled bool
+	discoveryOk   atomic.Bool
+	cameraEnabled atomic.Bool
+
+	entitiesOk map[string]bool // unique_id -> bool; event loop only
 
 	lastStatePayload []byte
 	lastStateTime    time.Time
@@ -108,6 +114,24 @@ func (b *Bridge) tag() string {
 	return DeviceTag(b.serial)
 }
 
+// swapLastLight records the chamber light state and reports whether it changed.
+func (b *Bridge) swapLastLight(state string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.lastLight == state {
+		return false
+	}
+	b.lastLight = state
+	return true
+}
+
+// identity returns a consistent snapshot of the model/naming fields.
+func (b *Bridge) identity() (model, haModel, displayName string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.model, b.haModel, b.displayName
+}
+
 func (b *Bridge) publishOnline(online bool) {
 	if b.serial == "" {
 		return
@@ -134,7 +158,7 @@ func (b *Bridge) publishCameraState(ctx context.Context) {
 	topic := fmt.Sprintf("%s/%s/camera_streaming/state", b.prefix, b.tag())
 
 	state := "OFF"
-	if b.cameraEnabled {
+	if b.cameraEnabled.Load() {
 		state = "ON"
 	}
 	slog.Debug("HA Bridge: Publishing camera state", "topic", topic, "state", state)
@@ -166,7 +190,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	go func() {
 		slog.Debug("Starting file sync loop")
 		// Wait for discovery to be ready before first sync
-		for !b.discoveryOk {
+		for !b.discoveryOk.Load() {
 			time.Sleep(2 * time.Second)
 			if ctx.Err() != nil {
 				return
@@ -203,7 +227,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if b.discoveryOk && b.cameraEnabled {
+				if b.discoveryOk.Load() && b.cameraEnabled.Load() {
 					img, err := b.bambu.Camera.CaptureFrame()
 					if err == nil {
 						topic := fmt.Sprintf("%s/%s/camera/image", b.prefix, b.tag())
@@ -260,7 +284,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 			}
 
 			// For C11 (P1-series base), defer initial discovery until status payload with telemetry arrives
-			if !b.discoveryOk && (newModel == "C11" || newModel == "") && !hasTelemetry {
+			if !b.discoveryOk.Load() && (newModel == "C11" || newModel == "") && !hasTelemetry {
 				continue
 			}
 
@@ -269,18 +293,16 @@ func (b *Bridge) Start(ctx context.Context) error {
 			}
 
 			// If discovery hasn't run OR if model was updated
-			if !b.discoveryOk || (b.model == "Printer" && newModel != "Printer") || (b.model != newModel && newModel != "Printer") {
-				b.model = newModel
-				caps := bambulan.GetPrinterCapabilities(b.model)
+			if !b.discoveryOk.Load() || (b.model == "Printer" && newModel != "Printer") || (b.model != newModel && newModel != "Printer") {
+				caps := bambulan.GetPrinterCapabilities(newModel)
 				modelName := caps.DisplayName
 				if modelName == "" {
-					modelName = b.model
+					modelName = newModel
 				}
 
 				// Simplify model name for HA (e.g. "Bambu Lab P1S" -> "P1S")
-				b.haModel = modelName
-				b.haModel = strings.TrimPrefix(b.haModel, "Bambu Lab ")
-				b.haModel = strings.TrimPrefix(b.haModel, "Bambu ")
+				haModel := strings.TrimPrefix(modelName, "Bambu Lab ")
+				haModel = strings.TrimPrefix(haModel, "Bambu ")
 
 				// Determine a unique display name for Home Assistant
 				suffix := b.serial
@@ -289,12 +311,16 @@ func (b *Bridge) Start(ctx context.Context) error {
 				}
 
 				manufacturer := "Bambu Lab"
-				b.displayName = fmt.Sprintf("%s %s %s", manufacturer, b.haModel, suffix)
+				b.mu.Lock()
+				b.model = newModel
+				b.haModel = haModel
+				b.displayName = fmt.Sprintf("%s %s %s", manufacturer, haModel, suffix)
+				b.mu.Unlock()
 
 				if err := b.publishDiscovery(b.haModel); err != nil {
 					slog.Error("Failed to publish HA discovery", "error", err)
 				} else {
-					b.discoveryOk = true
+					b.discoveryOk.Store(true)
 					slog.Debug("Home Assistant discovery published successfully", "device", b.displayName, "model", b.haModel)
 					go func() {
 						_ = b.syncFiles(ctx)
@@ -303,7 +329,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 			}
 
 			// 2. State Update
-			if b.discoveryOk {
+			if b.discoveryOk.Load() {
 				// Dynamic AMS discovery
 				if status.Ams != nil {
 					_ = b.publishAMSDiscovery(ctx, status)
@@ -400,7 +426,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		}
 		lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
 		b.ha.Publish(context.Background(), lightTopic, []byte(state), mq.WithRetain(true))
-		b.lastLight = state
+		b.swapLastLight(state)
 	}); err != nil {
 		return err
 	}
@@ -429,7 +455,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 	_ = subscribe(fmt.Sprintf("%s/%s/camera_streaming/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		on := strings.ToUpper(string(msg.Payload)) == "ON"
 		slog.Debug("HA Command received: Camera Enable", "on", on)
-		b.cameraEnabled = on
+		b.cameraEnabled.Store(on)
 		b.publishCameraState(ctx)
 	})
 
@@ -531,17 +557,24 @@ func (b *Bridge) syncFiles(ctx context.Context) error {
 	if len(files) == 0 {
 		files = []string{"None"}
 	}
+	b.mu.Lock()
 	b.files = files
+	haModel := b.haModel
+	b.mu.Unlock()
 	slog.Debug("Synced files from SD card", "count", len(files))
 
 	// Re-publish discovery to update options
-	return b.publishDiscovery(b.haModel)
+	return b.publishDiscovery(haModel)
 }
 
 func (b *Bridge) publishDiscovery(model string) error {
 	slog.Debug("HA Bridge: Publishing entity discovery configurations", "serial", b.serial)
-	caps := bambulan.GetPrinterCapabilities(b.model)
-	factory := NewDiscoveryFactory(b.prefix, b.serial, model, b.displayName)
+	printerModel, _, displayName := b.identity()
+	b.mu.Lock()
+	files := b.files
+	b.mu.Unlock()
+	caps := bambulan.GetPrinterCapabilities(printerModel)
+	factory := NewDiscoveryFactory(b.prefix, b.serial, model, displayName)
 
 	type entry struct {
 		cfg       *DiscoveryConfig
@@ -588,7 +621,7 @@ func (b *Bridge) publishDiscovery(model string) error {
 
 	// Selects
 	configs = append(configs, entry{factory.Select("speed_profile", "Speed Profile", "mdi:speedometer", "", []string{"Silent", "Standard", "Sport", "Ludicrous"}), "select"})
-	configs = append(configs, entry{factory.Select("print_file", "Print File", "mdi:file-send", "", b.files), "select"})
+	configs = append(configs, entry{factory.Select("print_file", "Print File", "mdi:file-send", "", files), "select"})
 
 	// Numbers
 	configs = append(configs, entry{factory.Number("target_nozzle_temperature", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxNozzleTemp), 1), "number"})
@@ -835,11 +868,10 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 				break
 			}
 		}
-		if lightState != b.lastLight {
+		if b.swapLastLight(lightState) {
 			lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
 			slog.Debug("HA Bridge: Publishing light state update", "topic", lightTopic, "state", lightState)
 			b.ha.Publish(ctx, lightTopic, []byte(lightState), mq.WithRetain(true))
-			b.lastLight = lightState
 		}
 	}
 
