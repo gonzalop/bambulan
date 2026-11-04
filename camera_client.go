@@ -57,28 +57,34 @@ func (c *CameraClient) dial() (*tls.Conn, error) {
 
 // extractFrames calls emit with each complete JPEG frame in buf and returns
 // the bytes to keep for the next read: at most a partial start marker, or one
-// unfinished frame up to maxFrameSize.
-func extractFrames(buf []byte, emit func([]byte)) []byte {
+// unfinished frame up to maxFrameSize. scanned is the length extractFrames
+// returned last time; those bytes were already searched for the end marker,
+// so each byte is searched about once instead of on every read.
+func extractFrames(buf []byte, scanned int, emit func([]byte)) (rest []byte, nextScanned int) {
 	for {
 		start := bytes.Index(buf, jpegStart)
 		if start == -1 {
 			// Keep only what could be the beginning of a start marker.
 			keep := min(len(buf), len(jpegStart)-1)
-			return append([]byte(nil), buf[len(buf)-keep:]...)
+			return append([]byte(nil), buf[len(buf)-keep:]...), 0
 		}
-		buf = buf[start:]
-		end := bytes.Index(buf[len(jpegStart):], jpegEnd)
+		if start > 0 {
+			buf, scanned = buf[start:], 0
+		}
+		// Back up by one byte in case the end marker was split across reads.
+		from := max(len(jpegStart), scanned-len(jpegEnd)+1)
+		end := bytes.Index(buf[from:], jpegEnd)
 		if end == -1 {
 			if len(buf) > maxFrameSize {
-				return nil // no end in sight; drop it and resync on the next start marker
+				return nil, 0 // no end in sight; drop it and resync on the next start marker
 			}
-			return buf
+			return buf, len(buf)
 		}
-		total := len(jpegStart) + end + len(jpegEnd)
+		total := from + end + len(jpegEnd)
 		img := make([]byte, total)
 		copy(img, buf[:total])
 		emit(img)
-		buf = buf[total:]
+		buf, scanned = buf[total:], 0
 	}
 }
 
@@ -225,6 +231,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 
 	readBuf := make([]byte, 4096)
 	var buffer []byte
+	var scanned int
 
 	for {
 		select {
@@ -248,7 +255,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 				}
 				return
 			}
-			buffer = extractFrames(append(buffer, readBuf[:n]...), onImage)
+			buffer, scanned = extractFrames(append(buffer, readBuf[:n]...), scanned, onImage)
 		}
 	}
 }
@@ -288,6 +295,7 @@ func (c *CameraClient) CaptureFrame() ([]byte, error) {
 	}
 
 	var buffer []byte
+	var scanned int
 	var frame []byte
 	readBuf := make([]byte, 4096)
 
@@ -305,7 +313,7 @@ func (c *CameraClient) CaptureFrame() ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			buffer = extractFrames(append(buffer, readBuf[:n]...), func(img []byte) {
+			buffer, scanned = extractFrames(append(buffer, readBuf[:n]...), scanned, func(img []byte) {
 				if frame == nil {
 					frame = img
 				}

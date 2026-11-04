@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -239,9 +240,15 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 	if len(msgWrapper.Print) > 0 && string(msgWrapper.Print) != "null" {
 		m.mu.Lock()
 		if err := json.Unmarshal(msgWrapper.Print, m.status); err != nil {
-			m.mu.Unlock()
-			slog.Error("Error updating status", "error", err)
-			return
+			// A field with an unexpected type is skipped and the rest is still
+			// applied, so keep going and broadcast. Other errors apply nothing.
+			var typeErr *json.UnmarshalTypeError
+			if !errors.As(err, &typeErr) {
+				m.mu.Unlock()
+				slog.Error("Error updating status", "error", err)
+				return
+			}
+			slog.Warn("Status field has unexpected type", "error", err)
 		}
 		prevModel := m.status.DeviceModel
 
@@ -397,12 +404,6 @@ func (m *MQTTClient) SetChamberLight(ctx context.Context, on bool) (string, erro
 		mode = "on"
 	}
 
-	m.mu.Lock()
-	m.status.LightsReport = []*LightsReport{
-		{Node: "chamber_light", Mode: mode},
-	}
-	m.mu.Unlock()
-
 	seqID := m.getNextSequenceID()
 	cmd := map[string]any{
 		"system": map[string]any{
@@ -417,7 +418,27 @@ func (m *MQTTClient) SetChamberLight(ctx context.Context, on bool) (string, erro
 		},
 		"user_id": "1234567890", // dummy user ID required by the printer's MQTT protocol
 	}
-	return seqID, m.Publish(ctx, cmd)
+	if err := m.Publish(ctx, cmd); err != nil {
+		return seqID, err
+	}
+
+	// Show the new state right away, without waiting for the next report.
+	// Only touch the chamber light so other lights (e.g. work_light) keep their state.
+	m.mu.Lock()
+	m.status.LightsReport = setLightMode(m.status.LightsReport, "chamber_light", mode)
+	m.mu.Unlock()
+	return seqID, nil
+}
+
+// setLightMode sets node's mode in lights, adding the node if missing.
+func setLightMode(lights []*LightsReport, node, mode string) []*LightsReport {
+	for _, l := range lights {
+		if l != nil && l.Node == node {
+			l.Mode = mode
+			return lights
+		}
+	}
+	return append(lights, &LightsReport{Node: node, Mode: mode})
 }
 
 // PausePrint pauses the current print job.
@@ -915,16 +936,6 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 	}
 
 	var model string
-
-	// Extract serial number from module if m.Serial is empty
-	if m.Serial == "" {
-		for _, mod := range info.Module {
-			if mod.Sn != "" {
-				m.Serial = mod.Sn
-				break
-			}
-		}
-	}
 
 	// 1. Try serial prefix first (authoritative for P1S vs P1P, which share OTA project "C11")
 	if len(m.Serial) >= 3 {

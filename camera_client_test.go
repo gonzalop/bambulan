@@ -20,14 +20,17 @@ func TestExtractFrames(t *testing.T) {
 		{"junk then frame", [][]byte{append(bytes.Repeat([]byte{0x42}, 5000), jpeg...)}, 1, 0},
 		{"start marker split across reads", [][]byte{append([]byte{0x42}, jpeg[:2]...), jpeg[2:]}, 1, 0},
 		{"two frames in one read", [][]byte{append(append([]byte{}, jpeg...), jpeg...)}, 2, 0},
+		{"end marker split across reads", [][]byte{jpeg[:len(jpeg)-1], jpeg[len(jpeg)-1:]}, 1, 0},
+		{"frame body over several reads", [][]byte{jpeg[:5], jpeg[5:7], jpeg[7:]}, 1, 0},
 		{"unfinished frame over the limit is dropped", [][]byte{jpegStart, make([]byte, maxFrameSize)}, 0, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf []byte
+			var scanned int
 			frames := 0
 			for _, r := range tt.reads {
-				buf = extractFrames(append(buf, r...), func(img []byte) {
+				buf, scanned = extractFrames(append(buf, r...), scanned, func(img []byte) {
 					frames++
 					if !bytes.Equal(img, jpeg) {
 						t.Errorf("frame = %x, want %x", img, jpeg)

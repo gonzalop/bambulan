@@ -116,9 +116,16 @@ func (f *FileClient) withContext(ctx context.Context, fn func(*ftp.Client) error
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		_ = c.Quit()   // unblocks fn's goroutine by closing the TCP connection
-		f.client = nil // force a fresh reconnect on next call
-		<-errCh        // drain — fn returns an error from the now-closed conn
+		// Drop the client so the next call reconnects, and close it in the
+		// background: Quit closes any data connection (unblocking a transfer)
+		// but then waits for the client's lock, which a pending control command
+		// holds until its reply or the FTP timeout. Nothing reuses c, so fn
+		// finishing late is harmless.
+		f.client = nil
+		go func() {
+			_ = c.Quit()
+			<-errCh
+		}()
 		return ctx.Err()
 	}
 }
@@ -278,14 +285,10 @@ func (f *FileClient) DownloadDirectory(ctx context.Context, remoteDir, localDir 
 			return ctx.Err()
 		}
 
-		cleanName := filepath.Clean(filepath.FromSlash(entry.Name))
-		if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+		localPath, ok := localEntryPath(localDir, entry.Name)
+		if !ok {
+			slog.Warn("Skipping directory entry outside the target directory", "entry", entry.Name)
 			continue
-		}
-		localPath := filepath.Join(localDir, cleanName)
-		rel, err := filepath.Rel(localDir, localPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("insecure path in directory entry: %s", entry.Name)
 		}
 
 		remotePath := path.Join(remoteDir, entry.Name)
@@ -358,7 +361,7 @@ func (f *FileClient) Upload(ctx context.Context, remotePath string, content io.R
 					// Go to end
 					size, err := seeker.Seek(0, io.SeekEnd)
 					if err == nil {
-						total = size
+						total = size - current // only what's left gets uploaded
 						_, _ = seeker.Seek(current, io.SeekStart)
 					}
 				}
@@ -486,6 +489,22 @@ func (f *FileClient) RemoveAll(ctx context.Context, path string) error {
 // listingIsSingleFile reports whether a LIST of targetPath returned the file
 // itself. Some servers answer with the full path, so compare base names. A
 // directory holding one file must not match, or we'd Delete the directory.
+// localEntryPath maps a remote directory entry name to a path inside localDir.
+// It returns ok=false for names that would land outside it, such as "../x".
+// Names that merely start with dots, like "..cache", are fine.
+func localEntryPath(localDir, name string) (string, bool) {
+	clean := filepath.Clean(filepath.FromSlash(name))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	p := filepath.Join(localDir, clean)
+	rel, err := filepath.Rel(localDir, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return p, true
+}
+
 func listingIsSingleFile(targetPath string, entries []*ftp.Entry) bool {
 	return len(entries) == 1 && path.Base(entries[0].Name) == path.Base(targetPath)
 }
