@@ -328,21 +328,12 @@ func (f *FileClient) downloadFileInternal(ctx context.Context, remotePath, local
 			return err
 		}
 
-		outFile, err := os.Create(localPath)
-		if err != nil {
-			return err
-		}
-		defer outFile.Close()
-
-		if onProgress != nil {
-			pw := &progressWriter{
-				Writer:     outFile,
-				total:      total,
-				onProgress: onProgress,
+		return writeFileAtomically(localPath, func(w io.Writer) error {
+			if onProgress != nil {
+				w = &progressWriter{Writer: w, total: total, onProgress: onProgress}
 			}
-			return c.Retrieve(remotePath, pw)
-		}
-		return c.Retrieve(remotePath, outFile)
+			return c.Retrieve(remotePath, w)
+		})
 	})
 }
 
@@ -492,6 +483,13 @@ func (f *FileClient) RemoveAll(ctx context.Context, path string) error {
 	})
 }
 
+// listingIsSingleFile reports whether a LIST of targetPath returned the file
+// itself. Some servers answer with the full path, so compare base names. A
+// directory holding one file must not match, or we'd Delete the directory.
+func listingIsSingleFile(targetPath string, entries []*ftp.Entry) bool {
+	return len(entries) == 1 && path.Base(entries[0].Name) == path.Base(targetPath)
+}
+
 func (f *FileClient) removeAll(c *ftp.Client, targetPath string) error {
 	// Try to list the path to see if it's a directory
 	entries, err := c.List(targetPath)
@@ -506,8 +504,7 @@ func (f *FileClient) removeAll(c *ftp.Client, targetPath string) error {
 		return err
 	}
 
-	base := path.Base(targetPath)
-	if len(entries) == 1 && (entries[0].Name == base || entries[0].Type == "file") {
+	if listingIsSingleFile(targetPath, entries) {
 		return c.Delete(targetPath)
 	}
 
@@ -531,4 +528,30 @@ func (f *FileClient) removeAll(c *ftp.Client, targetPath string) error {
 
 	// usage of RemoveDir usually requires empty directory
 	return c.RemoveDir(targetPath)
+}
+
+// writeFileAtomically writes to a temporary file next to localPath and renames
+// it into place only on success, so a failed or cancelled download never
+// replaces an existing file with a partial one.
+func writeFileAtomically(localPath string, write func(io.Writer) error) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(localPath), "."+filepath.Base(localPath)+".*.part")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tmp.Close()
+			os.Remove(tmp.Name())
+		}
+	}()
+	if err = write(tmp); err != nil {
+		return err
+	}
+	if err = tmp.Chmod(0o644); err != nil { // CreateTemp uses 0600; os.Create gave 0644
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), localPath)
 }

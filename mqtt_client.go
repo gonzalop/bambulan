@@ -30,7 +30,9 @@ type MQTTClient struct {
 	// Serial is the printer's serial number, used to construct topic strings (device/<serial>/...).
 	Serial string
 
-	client *mq.Client
+	// client is set by Start and by onConnect. mq runs onConnect in its own
+	// goroutine before Dial returns, so plain field access would race.
+	client atomic.Pointer[mq.Client]
 	status *PrinterStatus
 	seq    atomic.Int64
 
@@ -102,25 +104,26 @@ func (m *MQTTClient) Start() error {
 		mq.WithOnConnectionLost(m.onConnectionLost),
 	}
 
-	var err error
-	m.client, err = mq.Dial(server, opts...)
+	client, err := mq.Dial(server, opts...)
 	if err != nil {
 		return err
 	}
+	m.client.Store(client)
 
 	return nil
 }
 
 // IsConnected returns true if the client is currently connected to the printer.
 func (m *MQTTClient) IsConnected() bool {
-	return m.client != nil && m.client.IsConnected()
+	c := m.client.Load()
+	return c != nil && c.IsConnected()
 }
 
 // Stop disconnects from the MQTT broker.
 func (m *MQTTClient) Stop() {
 	// Disconnect even when not connected: it also stops the auto-reconnect loop.
-	if m.client != nil {
-		_ = m.client.Disconnect(context.Background())
+	if c := m.client.Load(); c != nil {
+		_ = c.Disconnect(context.Background())
 	}
 }
 
@@ -193,6 +196,7 @@ func (m *MQTTClient) onConnectionLost(_ *mq.Client, err error) {
 
 func (m *MQTTClient) onConnect(client *mq.Client) {
 	slog.Info("Connection established")
+	m.client.Store(client) // so the requests below can publish before Dial returns
 	m.mu.RLock()
 	onConnect := m.OnConnect
 	m.mu.RUnlock()
@@ -264,7 +268,8 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 
 // Publish sends a JSON command to the printer request topic.
 func (m *MQTTClient) Publish(ctx context.Context, command any) error {
-	if m.client == nil {
+	client := m.client.Load()
+	if client == nil {
 		return fmt.Errorf("MQTT client not connected")
 	}
 	payload, err := json.Marshal(command)
@@ -275,7 +280,7 @@ func (m *MQTTClient) Publish(ctx context.Context, command any) error {
 
 	// Use QoS 0 for fire-and-forget sending.
 	// We rely on application-level response (Sequence ID) for confirmation.
-	token := m.client.Publish(ctx, topic, payload, mq.WithQoS(BambuQoS))
+	token := client.Publish(ctx, topic, payload, mq.WithQoS(BambuQoS))
 	// Pass ctx to Wait so we can cancel if needed
 	if err := token.Wait(ctx); err != nil {
 		return err

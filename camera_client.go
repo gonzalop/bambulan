@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +29,57 @@ type CameraClient struct {
 	streaming bool
 	stopChan  chan struct{}
 	mu        sync.Mutex
+}
+
+// maxFrameSize bounds the bytes kept while waiting for a frame to end, so a
+// stream that never completes a frame can't grow memory without limit. It is
+// kept small because each read rescans the unfinished frame for the end marker;
+// real frames are a few hundred KB.
+const maxFrameSize = 2 << 20
+
+// cameraDialTimeout covers TCP connect and TLS handshake. A var so tests can shorten it.
+var cameraDialTimeout = 5 * time.Second
+
+var (
+	jpegStart = []byte{0xff, 0xd8, 0xff, 0xe0}
+	jpegEnd   = []byte{0xff, 0xd9}
+)
+
+// dial connects to the camera. The timeout covers both TCP connect and the TLS
+// handshake, so a host that accepts but never answers can't block forever.
+func (c *CameraClient) dial() (*tls.Conn, error) {
+	return tls.DialWithDialer(&net.Dialer{Timeout: cameraDialTimeout}, "tcp",
+		net.JoinHostPort(c.Hostname, strconv.Itoa(c.Port)), &tls.Config{
+			// Bambu Lab printers use self-signed certificates for their camera stream.
+			InsecureSkipVerify: true,
+		})
+}
+
+// extractFrames calls emit with each complete JPEG frame in buf and returns
+// the bytes to keep for the next read: at most a partial start marker, or one
+// unfinished frame up to maxFrameSize.
+func extractFrames(buf []byte, emit func([]byte)) []byte {
+	for {
+		start := bytes.Index(buf, jpegStart)
+		if start == -1 {
+			// Keep only what could be the beginning of a start marker.
+			keep := min(len(buf), len(jpegStart)-1)
+			return append([]byte(nil), buf[len(buf)-keep:]...)
+		}
+		buf = buf[start:]
+		end := bytes.Index(buf[len(jpegStart):], jpegEnd)
+		if end == -1 {
+			if len(buf) > maxFrameSize {
+				return nil // no end in sight; drop it and resync on the next start marker
+			}
+			return buf
+		}
+		total := len(jpegStart) + end + len(jpegEnd)
+		img := make([]byte, total)
+		copy(img, buf[:total])
+		emit(img)
+		buf = buf[total:]
+	}
 }
 
 // NewCameraClient creates a new CameraClient.
@@ -158,10 +211,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 		c.mu.Unlock()
 	}()
 
-	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", c.Hostname, c.Port), &tls.Config{
-		// Bambu Lab printers use self-signed certificates for their camera stream.
-		InsecureSkipVerify: true,
-	})
+	conn, err := c.dial()
 	if err != nil {
 		slog.Error("Camera connection failed", "error", err)
 		return
@@ -172,9 +222,6 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 		slog.Error("Auth packet send failed", "error", err)
 		return
 	}
-
-	jpegStart := []byte{0xff, 0xd8, 0xff, 0xe0}
-	jpegEnd := []byte{0xff, 0xd9}
 
 	readBuf := make([]byte, 4096)
 	var buffer []byte
@@ -201,31 +248,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 				}
 				return
 			}
-			buffer = append(buffer, readBuf[:n]...)
-
-			for {
-				start := bytes.Index(buffer, jpegStart)
-				if start == -1 {
-					break
-				}
-
-				// Look for end *after* start
-				endSearch := buffer[start+len(jpegStart):]
-				end := bytes.Index(endSearch, jpegEnd)
-				if end == -1 {
-					break
-				}
-
-				// Found a frame
-				totalEnd := start + len(jpegStart) + end + len(jpegEnd)
-				img := make([]byte, totalEnd-start)
-				copy(img, buffer[start:totalEnd])
-
-				onImage(img)
-
-				// Advance buffer
-				buffer = buffer[totalEnd:]
-			}
+			buffer = extractFrames(append(buffer, readBuf[:n]...), onImage)
 		}
 	}
 }
@@ -254,10 +277,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 //	    }
 //	}
 func (c *CameraClient) CaptureFrame() ([]byte, error) {
-	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", c.Hostname, c.Port), &tls.Config{
-		// Bambu Lab printers use self-signed certificates for their camera stream.
-		InsecureSkipVerify: true,
-	})
+	conn, err := c.dial()
 	if err != nil {
 		return nil, err
 	}
@@ -267,9 +287,8 @@ func (c *CameraClient) CaptureFrame() ([]byte, error) {
 		return nil, err
 	}
 
-	jpegStart := []byte{0xff, 0xd8, 0xff, 0xe0}
-	jpegEnd := []byte{0xff, 0xd9}
 	var buffer []byte
+	var frame []byte
 	readBuf := make([]byte, 4096)
 
 	timeout := time.After(5 * time.Second)
@@ -286,16 +305,13 @@ func (c *CameraClient) CaptureFrame() ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			buffer = append(buffer, readBuf[:n]...)
-
-			start := bytes.Index(buffer, jpegStart)
-			if start != -1 {
-				endSearch := buffer[start+len(jpegStart):]
-				end := bytes.Index(endSearch, jpegEnd)
-				if end != -1 {
-					totalEnd := start + len(jpegStart) + end + len(jpegEnd)
-					return buffer[start:totalEnd], nil
+			buffer = extractFrames(append(buffer, readBuf[:n]...), func(img []byte) {
+				if frame == nil {
+					frame = img
 				}
+			})
+			if frame != nil {
+				return frame, nil
 			}
 		}
 	}
