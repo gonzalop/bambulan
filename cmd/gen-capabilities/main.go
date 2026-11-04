@@ -93,8 +93,15 @@ func main() {
 		caps.NumExtruders = 1 // Default to 1
 		var modelID string
 
-		// Iterate over all versions in the file
-		for _, data := range def {
+		// Iterate over all versions in sorted order so last-write-wins fields
+		// (model ID, display name) give the same output on every run.
+		versions := make([]string, 0, len(def))
+		for v := range def {
+			versions = append(versions, v)
+		}
+		sort.Strings(versions)
+		for _, v := range versions {
+			data := def[v]
 			// If we find a model ID, keep it. Usually in base version.
 			if data.ModelID != "" {
 				modelID = data.ModelID

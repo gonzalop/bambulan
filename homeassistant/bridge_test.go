@@ -76,26 +76,35 @@ func TestSwapLastLight(t *testing.T) {
 	}
 }
 
-func TestTargetChamberTempReportedWhenZero(t *testing.T) {
-	caps := bambulan.GetPrinterCapabilities("C13")
-	if !caps.HasChamberHeater {
-		t.Skip("C13 does not have chamber heater")
+func TestAddChamberState(t *testing.T) {
+	tests := []struct {
+		name       string
+		caps       bambulan.PrinterCapability
+		target     float64
+		wantTarget any // nil means the key must be absent
+		wantTemp   bool
+	}{
+		{"heater, target zero", bambulan.PrinterCapability{HasChamberHeater: true, HasChamberTemp: true}, 0, 0, true},
+		{"heater, target set", bambulan.PrinterCapability{HasChamberHeater: true}, 45, 45, false},
+		{"temp sensor only", bambulan.PrinterCapability{HasChamberTemp: true}, 45, nil, true},
+		{"no chamber", bambulan.PrinterCapability{}, 45, nil, false},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := map[string]any{}
+			addChamberState(state, tt.caps, &bambulan.PrinterStatus{ChamberTargetTemp: tt.target}, 30)
 
-	status := &bambulan.PrinterStatus{
-		ChamberTargetTemp: 0,
-	}
-
-	state := make(map[string]any)
-	if caps.HasChamberHeater {
-		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
-	}
-
-	val, ok := state["target_chamber_temperature"]
-	if !ok {
-		t.Fatal("expected target_chamber_temperature in state even when 0")
-	}
-	if val != 0 {
-		t.Fatalf("expected target_chamber_temperature to be 0, got %v", val)
+			got, ok := state["target_chamber_temperature"]
+			if tt.wantTarget == nil {
+				if ok {
+					t.Errorf("target_chamber_temperature = %v, want absent", got)
+				}
+			} else if !ok || got != tt.wantTarget {
+				t.Errorf("target_chamber_temperature = %v (present=%v), want %v", got, ok, tt.wantTarget)
+			}
+			if _, ok := state["chamber_temperature"]; ok != tt.wantTemp {
+				t.Errorf("chamber_temperature present = %v, want %v", ok, tt.wantTemp)
+			}
+		})
 	}
 }

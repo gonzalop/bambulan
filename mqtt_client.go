@@ -38,8 +38,19 @@ type MQTTClient struct {
 	subscribers map[int64]chan *PrinterStatus
 	nextSubID   int64
 
+	// OnConnect and OnDisconnect may be assigned directly before Start.
+	// Once the client is running, use SetConnectionHandlers instead.
 	OnConnect    func()
 	OnDisconnect func(error)
+}
+
+// SetConnectionHandlers sets OnConnect and OnDisconnect. It is safe to call
+// while the client is running.
+func (m *MQTTClient) SetConnectionHandlers(onConnect func(), onDisconnect func(error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.OnConnect = onConnect
+	m.OnDisconnect = onDisconnect
 }
 
 // NewMQTTClient creates a new MQTTClient.
@@ -107,7 +118,8 @@ func (m *MQTTClient) IsConnected() bool {
 
 // Stop disconnects from the MQTT broker.
 func (m *MQTTClient) Stop() {
-	if m.client != nil && m.client.IsConnected() {
+	// Disconnect even when not connected: it also stops the auto-reconnect loop.
+	if m.client != nil {
 		_ = m.client.Disconnect(context.Background())
 	}
 }
@@ -155,15 +167,12 @@ func (m *MQTTClient) unsubscribe(id int64) {
 }
 
 func (m *MQTTClient) broadcastStatus() {
+	// Hold the read lock while sending: unsubscribe closes channels under the
+	// write lock, so this prevents a send on a closed channel. Sends never block.
 	m.mu.RLock()
+	defer m.mu.RUnlock()
 	statusCopy := m.status.Clone()
-	subscribers := make([]chan *PrinterStatus, 0, len(m.subscribers))
 	for _, ch := range m.subscribers {
-		subscribers = append(subscribers, ch)
-	}
-	m.mu.RUnlock()
-
-	for _, ch := range subscribers {
 		select {
 		case ch <- statusCopy:
 		default:
@@ -174,15 +183,21 @@ func (m *MQTTClient) broadcastStatus() {
 
 func (m *MQTTClient) onConnectionLost(_ *mq.Client, err error) {
 	slog.Warn("Connection lost", "error", err)
-	if m.OnDisconnect != nil {
-		m.OnDisconnect(err)
+	m.mu.RLock()
+	onDisconnect := m.OnDisconnect
+	m.mu.RUnlock()
+	if onDisconnect != nil {
+		onDisconnect(err)
 	}
 }
 
 func (m *MQTTClient) onConnect(client *mq.Client) {
 	slog.Info("Connection established")
-	if m.OnConnect != nil {
-		m.OnConnect()
+	m.mu.RLock()
+	onConnect := m.OnConnect
+	m.mu.RUnlock()
+	if onConnect != nil {
+		onConnect()
 	}
 	topic := fmt.Sprintf("device/%s/report", m.Serial)
 	token := client.Subscribe(context.Background(), topic, BambuQoS, m.onMessage)

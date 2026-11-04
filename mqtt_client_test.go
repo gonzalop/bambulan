@@ -151,3 +151,17 @@ func TestPrinterStatus_Clone(t *testing.T) {
 		t.Errorf("original TrayColor mutated: got %v, want 'FF0000FF'", orig.Ams.Ams[0].Tray[0].TrayColor)
 	}
 }
+
+// Run with -race: a subscriber cancelling during a broadcast used to panic
+// with "send on closed channel".
+func TestBroadcastWhileUnsubscribing(_ *testing.T) {
+	m := NewMQTTClient("h", "c", "S")
+	var wg sync.WaitGroup
+	for i := 0; i < 500; i++ {
+		sub := m.Subscribe()
+		wg.Add(2)
+		go func() { defer wg.Done(); m.broadcastStatus() }()
+		go func() { defer wg.Done(); sub.Cancel() }()
+	}
+	wg.Wait()
+}

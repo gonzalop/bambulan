@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -16,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -24,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gonzalop/bambulan"
@@ -62,7 +66,18 @@ type Session struct {
 	Fetching                map[string]bool // Track active fetches to prevent thundering herd // key: filename/plate_id
 	PreviousGcodeState      string          // Track previous state to detect transitions
 	Mu                      sync.RWMutex
+
+	lastSeen atomic.Int64 // Unix seconds of the last request or live update
 }
+
+func (s *Session) touch() { s.lastSeen.Store(time.Now().Unix()) }
+
+const (
+	sessionIdleTimeout = 24 * time.Hour
+	maxSessions        = 256
+	loginRateWindow    = time.Minute
+	loginRateMax       = 10 // login attempts per client IP per window
+)
 
 type UploadStatus struct {
 	Uploading bool    `json:"uploading"`
@@ -99,6 +114,96 @@ type WebServer struct {
 	MQTTUser     string
 	MQTTPassword string
 	MQTTPrefix   string
+
+	loginMu       sync.Mutex
+	loginAttempts map[string]*loginWindow
+}
+
+type loginWindow struct {
+	start time.Time
+	count int
+}
+
+// allowLogin reports whether the client IP is under the login rate limit.
+func (s *WebServer) allowLogin(r *http.Request) bool {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	now := time.Now()
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	w, ok := s.loginAttempts[ip]
+	if !ok || now.Sub(w.start) > loginRateWindow {
+		s.loginAttempts[ip] = &loginWindow{start: now, count: 1}
+		return true
+	}
+	w.count++
+	return w.count <= loginRateMax
+}
+
+// addSession stores a new session. When the limit is reached it evicts the
+// least recently used one: real users keep their sessions active, so unused
+// sessions created just to fill the table go first.
+func (s *WebServer) addSession(id string, session *Session) {
+	session.touch()
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	if len(s.Sessions) >= maxSessions {
+		var oldestID string
+		var oldest int64
+		for sid, sess := range s.Sessions {
+			if seen := sess.lastSeen.Load(); oldestID == "" || seen < oldest {
+				oldestID, oldest = sid, seen
+			}
+		}
+		s.removeSessionLocked(oldestID)
+	}
+	s.Sessions[id] = session
+}
+
+// removeSessionLocked deletes a session and stops its printer client if no
+// other session uses it. s.Mu must be held.
+func (s *WebServer) removeSessionLocked(id string) {
+	session, ok := s.Sessions[id]
+	if !ok {
+		return
+	}
+	delete(s.Sessions, id)
+	if session.Client == nil {
+		return
+	}
+	serial := session.Client.MQTT.Serial
+	for _, sess := range s.Sessions {
+		if sess.Client != nil && sess.Client.MQTT.Serial == serial {
+			return
+		}
+	}
+	s.ClientsMu.Lock()
+	s.stopClientLocked(serial)
+	s.ClientsMu.Unlock()
+}
+
+// expireSessions removes sessions idle for longer than sessionIdleTimeout,
+// and forgets old login rate-limit windows.
+func (s *WebServer) expireSessions(now time.Time) {
+	cutoff := now.Add(-sessionIdleTimeout).Unix()
+	s.Mu.Lock()
+	for id, session := range s.Sessions {
+		if session.lastSeen.Load() < cutoff {
+			slog.Debug("Expiring idle session")
+			s.removeSessionLocked(id)
+		}
+	}
+	s.Mu.Unlock()
+
+	s.loginMu.Lock()
+	for ip, w := range s.loginAttempts {
+		if now.Sub(w.start) > loginRateWindow {
+			delete(s.loginAttempts, ip)
+		}
+	}
+	s.loginMu.Unlock()
 }
 
 func NewWebServer() *WebServer {
@@ -106,6 +211,7 @@ func NewWebServer() *WebServer {
 		Sessions:      make(map[string]*Session),
 		ActiveClients: make(map[string]*bambulan.Client),
 		ActiveBridges: make(map[string]context.CancelFunc),
+		loginAttempts: make(map[string]*loginWindow),
 		MaxFileSize:   bambu3mf.DefaultMaxFileSize,
 	}
 }
@@ -169,13 +275,28 @@ func (s *WebServer) Start() error {
 	http.HandleFunc("/api/b/thumbnail", s.handleAPIThumbnail)
 	http.HandleFunc("/camera", s.handleCamera)
 
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for now := range ticker.C {
+			s.expireSessions(now)
+		}
+	}()
+
+	// No ReadTimeout/WriteTimeout: uploads, SSE and the camera stream are long-lived.
+	srv := &http.Server{
+		Addr:              s.BindAddr,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
 	if s.UseTLS {
 		slog.Info("Starting web server with TLS", "addr", s.BindAddr, "cert", s.CertFile)
-		return http.ListenAndServeTLS(s.BindAddr, s.CertFile, s.KeyFile, nil)
+		return srv.ListenAndServeTLS(s.CertFile, s.KeyFile)
 	}
 
 	slog.Debug("Starting web server", "addr", s.BindAddr)
-	return http.ListenAndServe(s.BindAddr, nil)
+	return srv.ListenAndServe()
 }
 
 func encrypt(data []byte, key []byte) ([]byte, error) {
@@ -228,15 +349,31 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 	key := serial
 	client, exists := s.ActiveClients[key]
 
+	if exists && subtle.ConstantTimeCompare([]byte(client.MQTT.AccessCode), []byte(code)) != 1 {
+		// Never hand out a live connection to someone who doesn't know its code.
+		// A disconnected client may hold a stale code (changed on the printer), so
+		// let the new code replace it, but only if it actually connects.
+		if isConnected(client) {
+			slog.Warn("Login rejected: access code does not match active connection", "serial", serial)
+			return nil, errAccessCodeMismatch
+		}
+		slog.Info("Access code changed for disconnected printer, reconnecting", "serial", serial)
+		newClient := bambulan.NewClient(host, code, serial)
+		if err := newClient.Start(); err != nil {
+			return nil, err
+		}
+		s.stopClientLocked(key)
+		client = newClient
+		s.ActiveClients[key] = client
+		s.startBridgeLocked(key, client)
+		return client, nil
+	}
+
 	if exists {
 		// Verify host hasn't changed (e.g. DHCP)
 		if client.MQTT.Hostname != host {
 			slog.Info("Host IP changed for serial, reconnecting", "serial", serial, "old_host", client.MQTT.Hostname, "new_host", host)
-			if cancelBridge, ok := s.ActiveBridges[key]; ok {
-				cancelBridge()
-				delete(s.ActiveBridges, key)
-			}
-			client.Stop()
+			s.stopClientLocked(key)
 			exists = false
 		}
 	}
@@ -249,26 +386,51 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 			return nil, err
 		}
 		s.ActiveClients[key] = client
-
-		// Start HA Bridge if configured
-		if s.MQTTBroker != "" {
-			bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
-			s.ActiveBridges[key] = bridgeCancel
-			go func() {
-				slog.Info("Starting Home Assistant bridge for newly connected printer", "serial", serial, "broker", s.MQTTBroker)
-				bridge, err := homeassistant.NewBridge(client, s.MQTTBroker, s.MQTTUser, s.MQTTPassword, s.MQTTPrefix)
-				if err != nil {
-					slog.Error("Failed to initialize Home Assistant bridge", "serial", serial, "error", err)
-					return
-				}
-				if err := bridge.Start(bridgeCtx); err != nil && bridgeCtx.Err() == nil {
-					slog.Error("Home Assistant bridge error", "serial", serial, "error", err)
-				}
-			}()
-		}
+		s.startBridgeLocked(key, client)
 	}
 
 	return client, nil
+}
+
+var errAccessCodeMismatch = errors.New("access code does not match")
+
+// isConnected is a variable so tests can simulate a live printer connection.
+var isConnected = func(c *bambulan.Client) bool { return c.MQTT.IsConnected() }
+
+// startBridgeLocked starts the Home Assistant bridge for a client, if configured.
+// s.ClientsMu must be held.
+func (s *WebServer) startBridgeLocked(key string, client *bambulan.Client) {
+	if s.MQTTBroker == "" {
+		return
+	}
+	serial := client.MQTT.Serial
+	bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
+	s.ActiveBridges[key] = bridgeCancel
+	go func() {
+		slog.Info("Starting Home Assistant bridge for newly connected printer", "serial", serial, "broker", s.MQTTBroker)
+		bridge, err := homeassistant.NewBridge(client, s.MQTTBroker, s.MQTTUser, s.MQTTPassword, s.MQTTPrefix)
+		if err != nil {
+			slog.Error("Failed to initialize Home Assistant bridge", "serial", serial, "error", err)
+			return
+		}
+		defer bridge.Close()
+		if err := bridge.Start(bridgeCtx); err != nil && bridgeCtx.Err() == nil {
+			slog.Error("Home Assistant bridge error", "serial", serial, "error", err)
+		}
+	}()
+}
+
+// stopClientLocked stops the bridge and client for key and removes them.
+// s.ClientsMu must be held.
+func (s *WebServer) stopClientLocked(key string) {
+	if cancelBridge, ok := s.ActiveBridges[key]; ok {
+		cancelBridge()
+		delete(s.ActiveBridges, key)
+	}
+	if client, ok := s.ActiveClients[key]; ok {
+		client.Stop()
+		delete(s.ActiveClients, key)
+	}
 }
 
 // validateCSRF checks the request for a valid CSRF token against the session.
@@ -401,6 +563,11 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if !s.allowLogin(r) {
+			http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
+			return
+		}
+
 		// Create secure session ID
 		b := make([]byte, 32)
 		if _, err := rand.Read(b); err != nil {
@@ -421,7 +588,11 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		client, err := s.getClient(data.Host, data.Code, data.Serial)
 		if err != nil {
 			slog.Error("Connection failed during login", "host", data.Host, "error", err)
-			data.Error = fmt.Sprintf("Failed to connect: %v. Check IP and ensure printer is on.", err)
+			if errors.Is(err, errAccessCodeMismatch) {
+				data.Error = "Invalid access code."
+			} else {
+				data.Error = fmt.Sprintf("Failed to connect: %v. Check IP and ensure printer is on.", err)
+			}
 			renderLogin()
 			return
 		}
@@ -429,9 +600,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		session.Client = client
 		session.Status = client.GetPrinterStatus() // Shared Status pointer
 
-		s.Mu.Lock()
-		s.Sessions[sessionID] = session
-		s.Mu.Unlock()
+		s.addSession(sessionID, session)
 
 		http.SetCookie(w, &http.Cookie{
 			Name:     "bambulan_session",
@@ -491,32 +660,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if sessionID, ok := s.getSessionID(r); ok {
 		s.Mu.Lock()
-		if session, exists := s.Sessions[sessionID]; exists {
-			serial := session.Client.MQTT.Serial
-			delete(s.Sessions, sessionID)
-
-			// Check if any other session is still using this printer
-			inUse := false
-			for _, sess := range s.Sessions {
-				if sess.Client.MQTT.Serial == serial {
-					inUse = true
-					break
-				}
-			}
-
-			if !inUse {
-				s.ClientsMu.Lock()
-				if cancelBridge, exists := s.ActiveBridges[serial]; exists {
-					cancelBridge()
-					delete(s.ActiveBridges, serial)
-				}
-				if client, exists := s.ActiveClients[serial]; exists {
-					client.Stop()
-					delete(s.ActiveClients, serial)
-				}
-				s.ClientsMu.Unlock()
-			}
-		}
+		s.removeSessionLocked(sessionID)
 		s.Mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -539,24 +683,17 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
+var (
+	activeStates   = map[string]bool{"RUNNING": true, "PAUSE": true, "PREPARE": true}
+	terminalStates = map[string]bool{"FINISH": true, "FAILED": true, "IDLE": true}
+)
+
 func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 	session.Mu.Lock()
 
 	// Detect state transitions and clear metadata when print finishes/stops
 	currentState := session.Status.GcodeState
 	previousState := session.PreviousGcodeState
-
-	activeStates := map[string]bool{
-		"RUNNING": true,
-		"PAUSE":   true,
-		"PREPARE": true,
-	}
-
-	terminalStates := map[string]bool{
-		"FINISH": true,
-		"FAILED": true,
-		"IDLE":   true,
-	}
 
 	if activeStates[previousState] && terminalStates[currentState] {
 		slog.Debug("Print state transition detected, clearing metadata", "from", previousState, "to", currentState)
@@ -581,12 +718,7 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 	var fetchFile string
 
 	if activeFile != "" && activeFile != "???" {
-		allowedStates := map[string]bool{
-			"RUNNING": true,
-			"PAUSE":   true,
-			"PREPARE": true,
-		}
-		isActive := allowedStates[session.Status.GcodeState]
+		isActive := activeStates[session.Status.GcodeState]
 
 		if isActive || session.CurrentMetadata == nil {
 			var foundMD *bambu3mf.Metadata
@@ -732,6 +864,8 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	// Initial State Hydration
 	resp := s.buildStatusPayload(session)
 	lastJSON, _ := json.Marshal(resp)
+	var lastMap map[string]any
+	_ = json.Unmarshal(lastJSON, &lastMap)
 
 	if err := s.sendSSEEvent(w, "status_update", resp); err != nil {
 		return
@@ -746,11 +880,13 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			session.touch() // an open page keeps its session alive, even with the printer off
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
 		case update := <-sub.C:
+			session.touch()
 			if update != nil {
 				session.Mu.Lock()
 				session.Status = update
@@ -759,21 +895,22 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 			payload := s.buildStatusPayload(session)
 			newJSON, _ := json.Marshal(payload)
 
-			if string(newJSON) == string(lastJSON) {
+			if bytes.Equal(newJSON, lastJSON) {
 				continue
 			}
 
-			var oldMap, newMap map[string]any
-			json.Unmarshal(lastJSON, &oldMap)
-			json.Unmarshal(newJSON, &newMap)
+			// Diff against the JSON form so values compare the same way the browser sees them.
+			var newMap map[string]any
+			_ = json.Unmarshal(newJSON, &newMap)
 
-			delta := computeDelta(oldMap, newMap)
+			delta := computeDelta(lastMap, newMap)
 			if len(delta) > 0 {
 				if err := s.sendSSEEvent(w, "status_update", delta); err != nil {
 					return
 				}
 				flusher.Flush()
 				lastJSON = newJSON
+				lastMap = newMap
 			}
 		}
 	}
@@ -1269,33 +1406,29 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
 
-	// Start stream callback
-	stopChan := make(chan struct{})
-	var wg sync.WaitGroup
+	// The stream goroutine may still call onImage after StopStream, so writes
+	// are serialized with shutdown: once stopped is set, w is never touched.
+	var (
+		writeMu sync.Mutex
+		stopped bool
+	)
 
 	onImage := func(frame []byte) {
 		// This callback is executed in a separate goroutine.
 		// TODO: Implement broadcasting to support multiple simultaneous viewers.
 
-		select {
-		case <-stopChan:
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		if stopped {
 			return
-		default:
-			wg.Add(1)
-			defer wg.Done()
-			select {
-			case <-stopChan:
-				return
-			default:
-				// Construct MJPEG frame
-				header := fmt.Sprintf("\r\n--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame))
-				_, _ = w.Write([]byte(header))
-				_, _ = w.Write(frame)
-				_, _ = w.Write([]byte("\r\n"))
-				if f, ok := w.(http.Flusher); ok {
-					f.Flush()
-				}
-			}
+		}
+		// Construct MJPEG frame
+		header := fmt.Sprintf("\r\n--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(frame))
+		_, _ = w.Write([]byte(header))
+		_, _ = w.Write(frame)
+		_, _ = w.Write([]byte("\r\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
 		}
 	}
 
@@ -1305,9 +1438,10 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() {
-		close(stopChan)
+		writeMu.Lock()
+		stopped = true
+		writeMu.Unlock()
 		session.Client.Camera.StopStream()
-		wg.Wait()
 	}()
 
 	// Wait until client disconnects
@@ -1430,6 +1564,7 @@ func (s *WebServer) getSession(w http.ResponseWriter, r *http.Request) (*Session
 	s.Mu.RUnlock()
 
 	if exists {
+		session.touch()
 		return session, true
 	}
 
@@ -1487,9 +1622,7 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 	session.Client = client
 	session.Status = client.GetPrinterStatus()
 
-	s.Mu.Lock()
-	s.Sessions[sessionID] = session
-	s.Mu.Unlock()
+	s.addSession(sessionID, session)
 
 	// Update the session cookie so subsequent requests use this session
 	http.SetCookie(w, &http.Cookie{
@@ -1563,48 +1696,33 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 	}
 }
 
-func (s *WebServer) downloadMetadataWithRetry(ctx context.Context, session *Session, filename string) (*os.File, int64, string, error) {
-	// If the file starts with "_", try the version without it first.
-	// The printer often reports "_foo.3mf" but the actual file we want is often "foo.3mf".
+// metadataCandidates lists the names to try, in order, when downloading the
+// file for a print job name reported by the printer.
+func metadataCandidates(filename string) []string {
+	var names []string
+	// The printer often reports "_foo.3mf" when the actual file is "foo.3mf".
 	if after, ok := strings.CutPrefix(filename, "_"); ok {
-		corrected := after
-		slog.Debug("Attempting to download sanitized filename first", "original", filename, "try", corrected)
-		t, sz, err := s.downloadToTemp(ctx, session, corrected)
-		if err == nil {
-			return t, sz, corrected, nil
-		}
-		slog.Warn("Sanitized filename not found, falling back to original", "file", corrected, "error", err)
+		names = append(names, after)
 	}
-
-	// Fallback to original filename
-	tmpFile, size, err := s.downloadToTemp(ctx, session, filename)
-	if err == nil {
-		return tmpFile, size, filename, nil
-	}
-	slog.Warn("Failed to download metadata with original filename", "file", filename, "error", err)
-
-	// If original failed and had no extension, try appending extensions
+	names = append(names, filename)
+	// Job names without an extension: .gcode.3mf is the most likely for print jobs.
 	if filepath.Ext(filename) == "" {
-		// Try .gcode.3mf first (most likely for print jobs)
-		withGcodeExt := filename + ".gcode.3mf"
-		slog.Debug("Attempting to download with .gcode.3mf appended", "original", filename, "try", withGcodeExt)
-		t, sz, err := s.downloadToTemp(ctx, session, withGcodeExt)
-		if err == nil {
-			return t, sz, withGcodeExt, nil
-		}
-		slog.Warn("Failed to download with .gcode.3mf appended", "file", withGcodeExt, "error", err)
-
-		// Try .3mf second
-		withExt := filename + ".3mf"
-		slog.Debug("Attempting to download with .3mf appended", "original", filename, "try", withExt)
-		t, sz, err = s.downloadToTemp(ctx, session, withExt)
-		if err == nil {
-			return t, sz, withExt, nil
-		}
-		slog.Warn("Failed to download with .3mf appended", "file", withExt, "error", err)
+		names = append(names, filename+".gcode.3mf", filename+".3mf")
 	}
+	return names
+}
 
-	return nil, 0, "", err
+func (s *WebServer) downloadMetadataWithRetry(ctx context.Context, session *Session, filename string) (*os.File, int64, string, error) {
+	var lastErr error
+	for _, name := range metadataCandidates(filename) {
+		t, sz, err := s.downloadToTemp(ctx, session, name)
+		if err == nil {
+			return t, sz, name, nil
+		}
+		slog.Warn("Metadata download failed", "file", name, "error", err)
+		lastErr = err
+	}
+	return nil, 0, "", lastErr
 }
 
 func (s *WebServer) downloadToTemp(ctx context.Context, session *Session, target string) (*os.File, int64, error) {
@@ -1739,7 +1857,10 @@ func (s *WebServer) handleFanControl(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 
-	caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
+	session.Mu.RLock()
+	model := session.Status.DeviceModel
+	session.Mu.RUnlock()
+	caps := bambulan.GetPrinterCapabilities(model)
 	if fan == "chamber" && !caps.HasChamberFan {
 		http.Error(w, "Chamber fan not supported", http.StatusBadRequest)
 		return
@@ -1766,7 +1887,10 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	caps := bambulan.GetPrinterCapabilities(session.Status.DeviceModel)
+	session.Mu.RLock()
+	model := session.Status.DeviceModel
+	session.Mu.RUnlock()
+	caps := bambulan.GetPrinterCapabilities(model)
 
 	var err error
 	switch target {

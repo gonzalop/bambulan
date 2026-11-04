@@ -94,18 +94,17 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 	}
 
 	// Setup connection callbacks
-	bambu.MQTT.OnConnect = func() {
+	bambu.MQTT.SetConnectionHandlers(func() {
 		slog.Debug("Printer-to-BambuLAN connection established")
 		if b.serial != "" {
 			b.publishOnline(true)
 		}
-	}
-	bambu.MQTT.OnDisconnect = func(err error) {
+	}, func(err error) {
 		slog.Warn("Printer-to-BambuLAN connection lost", "error", err)
 		if b.serial != "" {
 			b.publishOnline(false)
 		}
-	}
+	})
 
 	return b, nil
 }
@@ -499,7 +498,8 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 	_ = subscribe(fmt.Sprintf("%s/%s/target_nozzle_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Nozzle Temp", "value", temp)
-		caps := bambulan.GetPrinterCapabilities(b.model)
+		model, _, _ := b.identity()
+		caps := bambulan.GetPrinterCapabilities(model)
 		if temp > caps.MaxNozzleTemp {
 			temp = caps.MaxNozzleTemp
 		}
@@ -508,7 +508,8 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 	_ = subscribe(fmt.Sprintf("%s/%s/target_bed_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Bed Temp", "value", temp)
-		caps := bambulan.GetPrinterCapabilities(b.model)
+		model, _, _ := b.identity()
+		caps := bambulan.GetPrinterCapabilities(model)
 		if temp > caps.MaxBedTemp {
 			temp = caps.MaxBedTemp
 		}
@@ -517,7 +518,8 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 	_ = subscribe(fmt.Sprintf("%s/%s/target_chamber_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Chamber Temp", "value", temp)
-		caps := bambulan.GetPrinterCapabilities(b.model)
+		model, _, _ := b.identity()
+		caps := bambulan.GetPrinterCapabilities(model)
 		if caps.HasChamberHeater {
 			if temp > caps.MaxChamberTemp {
 				temp = caps.MaxChamberTemp
@@ -777,15 +779,7 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		"hms_error_description":     status.HMSMessage(),
 	}
 
-	if caps.HasChamberTemp {
-		state["chamber_temp"] = chamberTemp
-		state["chamber_temperature"] = chamberTemp
-	}
-
-	if caps.HasChamberHeater {
-		state["target_chamber_temp"] = int(status.ChamberTargetTemp)
-		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
-	}
+	addChamberState(state, caps, status, chamberTemp)
 
 	// Parse fan speeds (both short and long keys for compatibility)
 	partFanSpeed := parseFanSpeed(status.CoolingFanSpeed)
@@ -914,6 +908,19 @@ func (b *Bridge) Close() {
 	}
 	if b.ha != nil {
 		_ = b.ha.Disconnect(context.Background())
+	}
+}
+
+// addChamberState adds the chamber temperature entries the printer supports.
+// The target is reported even when it is 0 so HA shows the heater as off.
+func addChamberState(state map[string]any, caps bambulan.PrinterCapability, status *bambulan.PrinterStatus, chamberTemp float64) {
+	if caps.HasChamberTemp {
+		state["chamber_temp"] = chamberTemp
+		state["chamber_temperature"] = chamberTemp
+	}
+	if caps.HasChamberHeater {
+		state["target_chamber_temp"] = int(status.ChamberTargetTemp)
+		state["target_chamber_temperature"] = int(status.ChamberTargetTemp)
 	}
 }
 
