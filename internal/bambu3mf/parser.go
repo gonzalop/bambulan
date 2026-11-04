@@ -60,16 +60,10 @@ func (r *Reader) ParseMetadata() (*Metadata, error) {
 			}
 		}
 
-		// Append to global filaments maintaining slice order
-		for _, f := range p.Filaments {
-			found := false
-			for _, existing := range md.Filaments {
-				if existing.ID == f.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
+		// A printer prints one plate per job, and callers show the first plate,
+		// so report that plate's filaments rather than a sum over all plates.
+		if len(md.Plates) == 0 {
+			for _, f := range p.Filaments {
 				md.Filaments = append(md.Filaments, Filament(f))
 			}
 		}

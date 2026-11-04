@@ -161,38 +161,54 @@ func TestThumbnailExistenceCheck_DoesNotLeak(t *testing.T) {
 	}
 }
 
-func TestFilamentOrder_Deterministic(t *testing.T) {
-	si := &sliceInfoConfig{
-		Plates: []sliceInfoPlate{
-			{
-				Filaments: []sliceInfoFilament{
-					{ID: 1, Type: "PLA", Color: "#FF0000"},
-					{ID: 2, Type: "PETG", Color: "#00FF00"},
-					{ID: 3, Type: "ABS", Color: "#0000FF"},
-				},
-			},
-		},
+func TestParseMetadata_FilamentsFromFirstPlate(t *testing.T) {
+	const sliceInfo = `<config>
+  <plate>
+    <metadata key="index" value="1"/>
+    <filament id="1" type="PLA" color="#FF0000" used_g="10"/>
+    <filament id="2" type="PETG" color="#00FF00" used_g="5"/>
+  </plate>
+  <plate>
+    <metadata key="index" value="2"/>
+    <filament id="1" type="PLA" color="#FF0000" used_g="30"/>
+    <filament id="3" type="ABS" color="#0000FF" used_g="7"/>
+  </plate>
+</config>`
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	w, err := zw.Create("Metadata/slice_info.config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(sliceInfo)); err != nil {
+		t.Fatal(err)
+	}
+	zw.Close()
+
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	md, err := r.ParseMetadata()
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for trial := 0; trial < 20; trial++ {
-		md := &Metadata{}
-		for _, p := range si.Plates {
-			for _, f := range p.Filaments {
-				found := false
-				for _, existing := range md.Filaments {
-					if existing.ID == f.ID {
-						found = true
-						break
-					}
-				}
-				if !found {
-					md.Filaments = append(md.Filaments, Filament(f))
-				}
-			}
-		}
-
-		if len(md.Filaments) != 3 || md.Filaments[0].ID != 1 || md.Filaments[1].ID != 2 || md.Filaments[2].ID != 3 {
-			t.Fatalf("trial %d: filament order changed: %+v", trial, md.Filaments)
+	if len(md.Plates) != 2 || md.Plates[0].ID != 1 {
+		t.Fatalf("plates = %+v, want IDs 1 and 2", md.Plates)
+	}
+	// Plate 1 only: plate 2's grams must not be added, and ABS (plate 2 only) must not appear.
+	want := []struct {
+		id    int
+		grams float64
+	}{{1, 10}, {2, 5}}
+	if len(md.Filaments) != len(want) {
+		t.Fatalf("got %d filaments, want %d: %+v", len(md.Filaments), len(want), md.Filaments)
+	}
+	for i, w := range want {
+		if f := md.Filaments[i]; f.ID != w.id || f.UsedGrams != w.grams {
+			t.Errorf("filament %d = {ID:%d Grams:%v}, want {ID:%d Grams:%v}", i, f.ID, f.UsedGrams, w.id, w.grams)
 		}
 	}
 }
