@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -60,6 +61,9 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 	}
 
 	serial := bambu.MQTT.Serial
+	if serial == "" {
+		return nil, errors.New("printer serial is required")
+	}
 
 	opts := []mq.Option{
 		mq.WithCredentials(user, pass),
@@ -70,10 +74,8 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 		mq.WithLogger(slog.Default()),
 	}
 
-	if serial != "" {
-		lwtTopic := fmt.Sprintf("%s/%s/online/state", prefix, DeviceTag(serial))
-		opts = append(opts, mq.WithWill(lwtTopic, []byte("OFF"), 0, true))
-	}
+	lwtTopic := fmt.Sprintf("%s/%s/online/state", prefix, DeviceTag(serial))
+	opts = append(opts, mq.WithWill(lwtTopic, []byte("OFF"), 0, true))
 
 	client, err := mq.Dial(broker, opts...)
 	if err != nil {
@@ -96,14 +98,10 @@ func NewBridge(bambu *bambulan.Client, broker, user, pass, prefix string) (*Brid
 	// Setup connection callbacks
 	bambu.MQTT.SetConnectionHandlers(func() {
 		slog.Debug("Printer-to-BambuLAN connection established")
-		if b.serial != "" {
-			b.publishOnline(true)
-		}
+		b.publishOnline(true)
 	}, func(err error) {
 		slog.Warn("Printer-to-BambuLAN connection lost", "error", err)
-		if b.serial != "" {
-			b.publishOnline(false)
-		}
+		b.publishOnline(false)
 	})
 
 	return b, nil
@@ -132,9 +130,6 @@ func (b *Bridge) identity() (model, haModel, displayName string) {
 }
 
 func (b *Bridge) publishOnline(online bool) {
-	if b.serial == "" {
-		return
-	}
 	topic := fmt.Sprintf("%s/%s/online/state", b.prefix, b.tag())
 
 	state := "OFF"
@@ -151,9 +146,6 @@ func (b *Bridge) publishOnline(online bool) {
 }
 
 func (b *Bridge) publishCameraState(ctx context.Context) {
-	if b.serial == "" {
-		return
-	}
 	topic := fmt.Sprintf("%s/%s/camera_streaming/state", b.prefix, b.tag())
 
 	state := "OFF"
@@ -171,18 +163,10 @@ func (b *Bridge) Start(ctx context.Context) error {
 	sub := b.bambu.Subscribe()
 	defer sub.Cancel()
 
-	// Initial check for serial
-	if b.serial == "" {
-		b.serial = b.bambu.MQTT.Serial
-	}
-
-	if b.serial != "" {
-		slog.Debug("Printer serial known on start", "serial", b.serial)
-		_ = b.setupSubscriptions(ctx)
-		b.publishCameraState(ctx)
-		if b.bambu.MQTT.IsConnected() {
-			b.publishOnline(true)
-		}
+	_ = b.setupSubscriptions(ctx)
+	b.publishCameraState(ctx)
+	if b.bambu.MQTT.IsConnected() {
+		b.publishOnline(true)
 	}
 
 	// File sync loop
@@ -245,22 +229,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 			return ctx.Err()
 		case status := <-sub.C:
 			if status == nil {
-				continue
-			}
-
-			// Update serial if it was unknown
-			if b.serial == "" && b.bambu.MQTT.Serial != "" {
-				b.serial = b.bambu.MQTT.Serial
-				slog.Debug("Printer serial discovered from status", "serial", b.serial)
-				_ = b.setupSubscriptions(ctx)
-				b.publishCameraState(ctx)
-				if b.bambu.MQTT.IsConnected() {
-					b.publishOnline(true)
-				}
-			}
-
-			if b.serial == "" {
-				// Can't do anything without a serial
 				continue
 			}
 
@@ -903,9 +871,7 @@ func (b *Bridge) publishActionAvailability(ctx context.Context, entityID, state 
 }
 
 func (b *Bridge) Close() {
-	if b.serial != "" {
-		b.publishOnline(false)
-	}
+	b.publishOnline(false)
 	if b.ha != nil {
 		_ = b.ha.Disconnect(context.Background())
 	}

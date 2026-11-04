@@ -3,6 +3,7 @@ package homeassistant
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -106,5 +107,13 @@ func TestAddChamberState(t *testing.T) {
 				t.Errorf("chamber_temperature present = %v, want %v", ok, tt.wantTemp)
 			}
 		})
+	}
+}
+
+func TestNewBridgeRequiresSerial(t *testing.T) {
+	// The broker address is unreachable on purpose: the check must fail before dialing.
+	_, err := NewBridge(bambulan.NewClient("h", "c", ""), "tcp://127.0.0.1:1", "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "serial is required") {
+		t.Fatalf("NewBridge with empty serial = %v, want 'serial is required'", err)
 	}
 }
