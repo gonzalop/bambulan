@@ -458,7 +458,8 @@
         function setTempUnit(unit) {
             tempUnit = unit;
             localStorage.setItem("bambulan_temp_unit", unit);
-            updateStatus();
+            if (latestStatus) renderStatus(latestStatus); // re-render in the new unit
+            else updateStatus();
         }
 
         function toggleTheme() {
@@ -674,12 +675,13 @@
                 },
                 body: data
             }).then(resp => {
+                if (sessionExpired(resp)) return;
                 if (!resp.ok) resp.text().then(text => alert("Start failed: " + text));
                 else {
                     closeStartPrint();
                     updateStatus();
                 }
-            }).finally(() => {
+            }).catch(requestFailed).finally(() => {
                 btn.disabled = false;
                 btn.innerText = "Start Print";
             });
@@ -1247,6 +1249,9 @@
             fetch('/api/b/status')
                 .then(response => response.json())
                 .then(data => {
+                    // While the live stream is open it is the source of truth: this
+                    // snapshot may be older than updates it already delivered.
+                    if (evtSource && evtSource.readyState === EventSource.OPEN && latestStatus) return;
                     renderStatus(data);
                     if (pollingFallbackTimer) setConnectionStatus('connected');
                 })
@@ -1351,13 +1356,14 @@
                 },
                 body: body
             }).then(resp => {
+                if (sessionExpired(resp)) return;
                 if (!resp.ok) {
                     resp.text().then(t => alert("Failed: " + t));
                 } else {
                     document.getElementById('tempModal').style.display = 'none';
                     updateStatus();
                 }
-            });
+            }).catch(requestFailed);
         }
 
         function showFanControl(fan) {
@@ -1393,13 +1399,14 @@
                 },
                 body: `cmd=set_fan&fan=${fan}&speed=${speed}`
             }).then(resp => {
+                if (sessionExpired(resp)) return;
                 if (!resp.ok) {
                     resp.text().then(t => alert("Failed: " + t));
                 } else {
                     document.getElementById('fanModal').style.display = 'none';
                     updateStatus();
                 }
-            });
+            }).catch(requestFailed);
         }
 
         function showFilamentControl() {
@@ -1418,23 +1425,23 @@
             // Determine current filament
             let currentFilament = "None loaded";
             const trayNow = p.ams ? p.ams.tray_now : null;
-            const hasFilament = trayNow !== undefined && trayNow !== null && trayNow !== "255" && trayNow !== 255;
+            const trayNum = parseInt(trayNow);
+            // 254 is the external spool, 255 means nothing loaded.
+            const hasFilament = !isNaN(trayNum) && trayNum !== 255;
 
-            if (hasFilament) {
-                const unitIdx = Math.floor(parseInt(trayNow) / 4);
-                const slotIdx = parseInt(trayNow) % 4;
-
-                if (p.ams.ams[unitIdx] && p.ams.ams[unitIdx].tray && p.ams.ams[unitIdx].tray[slotIdx]) {
-                    const tray = p.ams.ams[unitIdx].tray[slotIdx];
-                    const type = tray.tray_sub_brands || tray.tray_type || "Unknown";
-                    currentFilament = `Slot ${trayNow}: ${type}`;
-                }
-            } else if (trayNow === "254" || trayNow === 254) {
+            if (trayNum === 254) {
                 currentFilament = "External Spool";
-                hasFilament = true; // External spool is loaded
+            } else if (hasFilament) {
+                const unit = p.ams.ams && p.ams.ams[Math.floor(trayNum / 4)];
+                const tray = unit && unit.tray && unit.tray[trayNum % 4];
+                if (tray) {
+                    const type = tray.tray_sub_brands || tray.tray_type || "Unknown";
+                    currentFilament = `Slot ${trayNum}: ${type}`;
+                }
             }
 
-            modalCurrent.innerHTML = currentFilament;
+            // Printer-supplied text: never insert it as HTML.
+            modalCurrent.textContent = currentFilament;
 
             // Populate slot dropdown
             slotSelect.innerHTML = '<option value="">-- Select Slot --</option>';
@@ -1607,6 +1614,19 @@
             });
         }
 
+        // Reloads the page when the session or CSRF token expired. Returns true if it did.
+        function sessionExpired(resp) {
+            if (resp.status !== 403) return false;
+            alert("Session expired or invalid. Reloading...");
+            window.location.reload();
+            return true;
+        }
+
+        function requestFailed(err) {
+            console.error("Request failed:", err);
+            alert("Request failed: " + err);
+        }
+
         function control(cmd) {
             const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             fetch('/api/b/control', {
@@ -1617,14 +1637,10 @@
                 },
                 body: 'cmd=' + cmd
             }).then(resp => {
-                if (resp.status === 403) {
-                    alert("Session expired or invalid. Reloading...");
-                    window.location.reload();
-                    return;
-                }
+                if (sessionExpired(resp)) return;
                 if (!resp.ok) alert("Command failed");
                 else updateStatus(); // Refresh immediately
-            });
+            }).catch(requestFailed);
         }
 
 
@@ -1641,7 +1657,8 @@
             const source = sources.shift();
 
             if (isObject(target) && isObject(source)) {
-                for (const key in source) {
+                for (const key of Object.keys(source)) {
+                    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
                     if (isObject(source[key])) {
                         if (!target[key]) Object.assign(target, { [key]: {} });
                         mergeDeep(target[key], source[key]);
@@ -1687,8 +1704,9 @@
                 console.error("SSE error", err);
                 setConnectionStatus('disconnected');
                 sseFailures++;
-                if (sseFailures >= 3) {
-                    console.warn("Multiple SSE failures, falling back to polling.");
+                // CLOSED means the browser gave up (e.g. a non-200 reply) and won't retry.
+                if (sseFailures >= 3 || evtSource.readyState === EventSource.CLOSED) {
+                    console.warn("SSE failed, falling back to polling.");
                     evtSource.close();
                     evtSource = null;
                     if (!pollingFallbackTimer) {

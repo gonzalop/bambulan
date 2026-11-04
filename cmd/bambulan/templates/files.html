@@ -298,25 +298,26 @@
                             details.innerText = `(${u.percent.toFixed(1)}%)`;
                         }
                     }
-                });
+                }).catch(() => {}); // progress is best-effort; the upload request reports errors
             }, 500);
             fetch('/api/b/upload', {
                 method: 'POST',
                 headers: { 'X-CSRF-Token': token },
                 body: formData
             }).then(resp => {
-                clearInterval(poller);
                 if (resp.status === 403) {
                     alert("Session expired or invalid. Reloading...");
                     window.location.reload();
                     return;
                 }
                 if (!resp.ok) resp.text().then(text => alert("Upload failed: " + text));
-                else { loadFiles(currentPath); }
-                input.value = '';
             }).catch(err => {
-                clearInterval(poller);
                 alert("Upload error: " + err);
+            }).finally(() => {
+                // Always leave the list usable and let the same file be picked again.
+                clearInterval(poller);
+                input.value = '';
+                loadFiles(currentPath);
             });
         }
 
@@ -588,7 +589,7 @@
                     closePrintModal();
                     window.location.href = "/";
                 }
-            }).finally(() => {
+            }).catch(err => alert("Start failed: " + err)).finally(() => {
                 btn.disabled = false;
                 btn.innerText = "Start Print";
             });
