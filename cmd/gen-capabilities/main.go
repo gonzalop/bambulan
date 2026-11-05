@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -15,7 +16,9 @@ import (
 type PrinterDefinition map[string]struct {
 	DisplayName string `json:"display_name"`
 	ModelID     string `json:"model_id"`
-	Print       struct {
+	// PrinterModes lists what the machine does: "fdm", "laser", "cut".
+	PrinterModes []string `json:"printer_modes"`
+	Print        struct {
 		NozzleTempRange              []int `json:"nozzle_temp_range"`
 		BedTempLimit                 int   `json:"bed_temp_limit"`
 		BedTemperatureLimit          int   `json:"bed_temperature_limit"` // Alternative spelling
@@ -92,6 +95,7 @@ func main() {
 		var caps Capabilities
 		caps.NumExtruders = 1 // Default to 1
 		var modelID string
+		var modes []string
 
 		// Iterate over all versions in sorted order so last-write-wins fields
 		// (model ID, display name) give the same output on every run.
@@ -105,6 +109,9 @@ func main() {
 			// If we find a model ID, keep it. Usually in base version.
 			if data.ModelID != "" {
 				modelID = data.ModelID
+			}
+			if data.PrinterModes != nil {
+				modes = data.PrinterModes
 			}
 			if data.DisplayName != "" {
 				caps.DisplayName = data.DisplayName
@@ -178,6 +185,13 @@ func main() {
 					caps.HasBedLeveling = true
 				}
 			}
+		}
+
+		// Skip machines that can't 3D print (laser-only N8, for example),
+		// as BambuStudio's public builds do. No printer_modes means FDM.
+		if modes != nil && !slices.Contains(modes, "fdm") {
+			fmt.Fprintf(os.Stderr, "Skipping non-FDM printer %s (%s)\n", modelID, path)
+			return nil
 		}
 
 		if modelID != "" {
