@@ -437,7 +437,7 @@
                         let menuItems = `
                             ${e.Type !== "dir" ? `<a href="/api/b/download?path=${encodeURIComponent(path + e.Name)}" target="_blank">⬇️ Download</a><div class="dropdown-divider"></div>` : ''}
                             <button data-name="${escapedName}" data-isdir="${e.Type === "dir"}" onclick="renameItem(this)">✎ Rename</button>
-                            <button data-path="${fullPath}" onclick="deleteFile(this)" style="color: #d9534f;">🗑️ Delete</button>
+                            <button data-path="${fullPath}" data-isdir="${e.Type === "dir"}" onclick="deleteFile(this)" style="color: #d9534f;">🗑️ Delete</button>
                         `;
 
                         if (e.Type === "dir") { // Directory
@@ -508,11 +508,14 @@
 
         async function deleteFile(arg) {
             let filename = arg;
+            let isDir = false;
             if (arg instanceof HTMLElement) {
                 filename = arg.dataset.path;
+                isDir = arg.dataset.isdir === "true";
             }
 
-            const confirmed = await showConfirm(`Are you sure you want to delete "${filename}"?`);
+            const what = isDir ? `the folder "${filename}" and everything in it` : `"${filename}"`;
+            const confirmed = await showConfirm(`Are you sure you want to delete ${what}?`);
             if (!confirmed) {
                 return;
             }

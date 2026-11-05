@@ -942,9 +942,13 @@ func (s *WebServer) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 
 	// Sanitize path
 	cleanPath := path.Clean("/" + file)
+	if cleanPath == "/" {
+		http.Error(w, "Refusing to delete the root directory", http.StatusBadRequest)
+		return
+	}
 
-	// 1. Delete file
-	if err := session.Client.File.Delete(r.Context(), cleanPath); err != nil {
+	// Files are deleted directly; folders are deleted with their contents.
+	if err := session.Client.File.RemoveAll(r.Context(), cleanPath); err != nil {
 		slog.Error("Delete failed", "path", cleanPath, "error", err)
 		http.Error(w, "Delete failed: "+err.Error(), http.StatusInternalServerError)
 		return

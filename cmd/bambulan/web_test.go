@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path"
 	"slices"
 	"strconv"
@@ -308,5 +309,22 @@ func TestAddSessionEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	if _, ok := s.Sessions["new"]; !ok {
 		t.Error("new session was not added")
+	}
+}
+
+// Delete is recursive, so it must never reach the printer for the root folder.
+func TestHandleAPIDeleteRefusesRoot(t *testing.T) {
+	s := NewWebServer()
+	s.Sessions["sid"] = &Session{CSRFToken: "tok", Client: newTestClient("h", "c", "S")}
+	for _, file := range []string{"/", "../..", "/./"} {
+		req := httptest.NewRequest("POST", "/api/b/delete", strings.NewReader("file="+url.QueryEscape(file)))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-CSRF-Token", "tok")
+		req.AddCookie(&http.Cookie{Name: "bambulan_session", Value: "sid"})
+		rr := httptest.NewRecorder()
+		s.handleAPIDelete(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("delete %q: status %d, want 400", file, rr.Code)
+		}
 	}
 }

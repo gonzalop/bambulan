@@ -486,9 +486,6 @@ func (f *FileClient) RemoveAll(ctx context.Context, path string) error {
 	})
 }
 
-// listingIsSingleFile reports whether a LIST of targetPath returned the file
-// itself. Some servers answer with the full path, so compare base names. A
-// directory holding one file must not match, or we'd Delete the directory.
 // localEntryPath maps a remote directory entry name to a path inside localDir.
 // It returns ok=false for names that would land outside it, such as "../x".
 // Names that merely start with dots, like "..cache", are fine.
@@ -505,26 +502,17 @@ func localEntryPath(localDir, name string) (string, bool) {
 	return p, true
 }
 
-func listingIsSingleFile(targetPath string, entries []*ftp.Entry) bool {
-	return len(entries) == 1 && path.Base(entries[0].Name) == path.Base(targetPath)
-}
-
 func (f *FileClient) removeAll(c *ftp.Client, targetPath string) error {
-	// Try to list the path to see if it's a directory
-	entries, err := c.List(targetPath)
-	if err != nil {
-		// If listing fails, it might be a file or not exist
-		// Try deleting as file
-		if delErr := c.Delete(targetPath); delErr == nil {
-			return nil
-		}
-		// If delete failed, return the original list error or delete error?
-		// Usually if list fails it means it's not a dir (550).
-		return err
+	// Files and symlinks delete directly. Trying this first also means a
+	// symlink to a directory is never listed and emptied through the link.
+	delErr := c.Delete(targetPath)
+	if delErr == nil {
+		return nil
 	}
 
-	if listingIsSingleFile(targetPath, entries) {
-		return c.Delete(targetPath)
+	entries, err := c.List(targetPath)
+	if err != nil {
+		return delErr // neither a file nor a listable directory
 	}
 
 	// It's a directory (or empty), iterate entries

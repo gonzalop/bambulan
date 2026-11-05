@@ -69,26 +69,6 @@ func TestFileClient_RemotePathJoining(t *testing.T) {
 	}
 }
 
-func TestListingIsSingleFile(t *testing.T) {
-	tests := []struct {
-		name    string
-		target  string
-		entries []*ftp.Entry
-		want    bool
-	}{
-		{"file lists itself", "/a.gcode", []*ftp.Entry{{Name: "a.gcode", Type: "file"}}, true},
-		{"server returns full path", "/cache/a.gcode", []*ftp.Entry{{Name: "/cache/a.gcode", Type: "file"}}, true},
-		{"directory with one file", "/dir", []*ftp.Entry{{Name: "a.gcode", Type: "file"}}, false},
-		{"directory with one subdir", "/dir", []*ftp.Entry{{Name: "sub", Type: "dir"}}, false},
-		{"empty directory", "/dir", nil, false},
-	}
-	for _, tt := range tests {
-		if got := listingIsSingleFile(tt.target, tt.entries); got != tt.want {
-			t.Errorf("%s: listingIsSingleFile = %v, want %v", tt.name, got, tt.want)
-		}
-	}
-}
-
 func TestWriteFileAtomically(t *testing.T) {
 	tests := []struct {
 		name     string
