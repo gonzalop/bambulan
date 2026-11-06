@@ -3,7 +3,8 @@ package bambulan
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -242,8 +243,8 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 		if err := json.Unmarshal(msgWrapper.Print, m.status); err != nil {
 			// A field with an unexpected type is skipped and the rest is still
 			// applied, so keep going and broadcast. Other errors apply nothing.
-			var typeErr *json.UnmarshalTypeError
-			if !errors.As(err, &typeErr) {
+			var semErr *json.SemanticError
+			if !errors.As(err, &semErr) || !unmarshalValidFields(msgWrapper.Print, m.status) {
 				m.mu.Unlock()
 				slog.Error("Error updating status", "error", err)
 				return
@@ -271,6 +272,19 @@ func (m *MQTTClient) onMessage(_ *mq.Client, msg mq.Message) {
 		m.processInfo(msgWrapper.Info)
 		m.broadcastStatus()
 	}
+}
+
+func unmarshalValidFields(raw jsontext.Value, status *PrinterStatus) bool {
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false
+	}
+	for k, v := range fields {
+		if single, err := json.Marshal(map[string]jsontext.Value{k: v}); err == nil {
+			_ = json.Unmarshal(single, status)
+		}
+	}
+	return true
 }
 
 // Publish sends a JSON command to the printer request topic.

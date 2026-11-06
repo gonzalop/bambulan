@@ -1,7 +1,7 @@
 package bambulan
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 
@@ -12,8 +12,8 @@ import (
 // It is used internally to unwrap the "print" object. Print is kept raw so it can be
 // merged into the existing status only when the key is present.
 type bambuMessage struct {
-	Print json.RawMessage `json:"print,omitempty"`
-	Info  *InfoMessage    `json:"info,omitempty"`
+	Print jsontext.Value `json:"print,omitempty"`
+	Info  *InfoMessage   `json:"info,omitempty"`
 }
 
 // InfoMessage represents a message containing system information or responses from the printer.
@@ -50,10 +50,10 @@ type PrinterStatus struct {
 	Modules []ModuleInfo `json:"modules,omitempty"`
 
 	// BedTempLimit is the hardware-enforced maximum temperature for the heatbed.
-	BedTempLimit int `json:"bed_temp_limit,omitempty"`
+	BedTempLimit int `json:"bed_temp_limit,omitzero"`
 
 	// NozzleTempLimit is the hardware-enforced maximum temperature for the nozzle.
-	NozzleTempLimit int `json:"nozzle_temp_limit,omitempty"`
+	NozzleTempLimit int `json:"nozzle_temp_limit,omitzero"`
 
 	// NozzleTemp is the current actual nozzle temperature in Celsius.
 	NozzleTemp float64 `json:"nozzle_temper"`

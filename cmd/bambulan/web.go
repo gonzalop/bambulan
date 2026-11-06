@@ -11,7 +11,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"html/template"
@@ -800,7 +800,7 @@ func (s *WebServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	resp := s.buildStatusPayload(session)
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := json.MarshalWrite(w, resp); err != nil {
 		slog.Error("JSON encode failed", "error", err)
 	}
 }
@@ -1115,7 +1115,7 @@ func (s *WebServer) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(files); err != nil {
+	if err := json.MarshalWrite(w, files); err != nil {
 		slog.Error("JSON encode failed", "error", err)
 	}
 }

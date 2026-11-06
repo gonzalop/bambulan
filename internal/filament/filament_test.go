@@ -1,7 +1,7 @@
 package filament
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -211,7 +211,7 @@ func createJSON(t *testing.T, dir, name string, data any) {
 		t.Fatalf("Failed to create file %s: %v", name, err)
 	}
 	defer f.Close()
-	if err := json.NewEncoder(f).Encode(data); err != nil {
+	if err := json.MarshalWrite(f, data); err != nil {
 		t.Fatalf("Failed to encode JSON for %s: %v", name, err)
 	}
 }

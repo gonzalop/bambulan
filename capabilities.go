@@ -2,7 +2,7 @@ package bambulan
 
 import (
 	_ "embed"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"strings"
 	"sync"

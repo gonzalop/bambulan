@@ -1,7 +1,7 @@
 package filament
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,7 +57,7 @@ func LoadAll(rootDir string) ([]Filament, error) {
 		defer f.Close()
 
 		var fil Filament
-		if err := json.NewDecoder(f).Decode(&fil); err != nil {
+		if err := json.UnmarshalRead(f, &fil); err != nil {
 			return nil // Skip invalid JSON
 		}
 
@@ -251,7 +251,7 @@ func LoadColors(path string) (map[string]string, error) {
 	defer f.Close()
 
 	var cf ColorFile
-	if err := json.NewDecoder(f).Decode(&cf); err != nil {
+	if err := json.UnmarshalRead(f, &cf); err != nil {
 		return nil, err
 	}
 

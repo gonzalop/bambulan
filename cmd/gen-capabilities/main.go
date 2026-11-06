@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -224,9 +225,7 @@ func main() {
 	}
 	defer file.Close()
 
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(capabilitiesMap); err != nil {
+	if err := json.MarshalWrite(file, capabilitiesMap, jsontext.WithIndent("  ")); err != nil {
 		panic(err)
 	}
 

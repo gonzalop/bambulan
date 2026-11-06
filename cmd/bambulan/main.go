@@ -3,7 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"log/slog"
 	"os"
@@ -988,7 +989,7 @@ func (c *DumpInfoCmd) Run(ctx *Context) error {
 
 	go func() {
 		for status := range sub.C {
-			b, err := json.MarshalIndent(status, "", "  ")
+			b, err := json.Marshal(status, jsontext.WithIndent("  "))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error marshaling status: %v\n", err)
 				return

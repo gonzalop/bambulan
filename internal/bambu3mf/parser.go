@@ -1,7 +1,7 @@
 package bambu3mf
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -106,7 +106,7 @@ func (r *Reader) parsePlateName(filename string) (string, error) {
 
 	var pi plateInfo
 	lr := io.LimitReader(rc, r.maxFileSize()+1)
-	if err := json.NewDecoder(lr).Decode(&pi); err != nil {
+	if err := json.UnmarshalRead(lr, &pi); err != nil {
 		return "", err
 	}
 	return pi.PlateName, nil
