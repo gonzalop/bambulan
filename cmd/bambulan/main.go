@@ -25,7 +25,19 @@ import (
 	"github.com/gonzalop/bambulan/internal/hms"
 )
 
-var version = "dev"
+// version and buildDate are set at build time via -ldflags "-X main.version=...".
+var (
+	version   = "dev"
+	buildDate = ""
+)
+
+// versionString formats the version like "v1.2.3 (built 2026-01-02T15:04:05-0500)".
+func versionString() string {
+	if buildDate != "" {
+		return version + " (built " + buildDate + ")"
+	}
+	return version
+}
 
 // ByteSize represents a size in bytes, but can be unmarshaled from strings like "5MB", "10KB", etc.
 type ByteSize int64
@@ -1477,7 +1489,7 @@ func main() {
 			//          Compact: true,
 		}),
 		kong.Vars{
-			"version": version,
+			"version": versionString(),
 		},
 	)
 

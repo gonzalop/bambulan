@@ -23,20 +23,20 @@ GOLANGREVIVE=$(shell which revive)
 all: fmt revive-run $(GENERATED) build ; $(info $(M) building executable…) @ ## Build program binary
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/bambulan
+	go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY) ./cmd/bambulan
 
 fuzz:
 	go test -fuzz=FuzzPacketMatchesFilter -fuzztime=10s ./pkg/repeater
 
 # Cross-compilation targets
 build-linux-amd64:
-	GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-linux-amd64 ./cmd/bambulan
+	GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY)-linux-amd64 ./cmd/bambulan
 
 build-darwin-amd64:
-	GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-darwin-amd64 ./cmd/bambulan
+	GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY)-darwin-amd64 ./cmd/bambulan
 
 build-windows-amd64:
-	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY)-windows-amd64.exe ./cmd/bambulan
+	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY)-windows-amd64.exe ./cmd/bambulan
 
 build-all: build-linux-amd64 build-darwin-amd64 build-windows-amd64
 
