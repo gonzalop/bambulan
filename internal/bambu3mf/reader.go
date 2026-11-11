@@ -13,6 +13,7 @@ type Reader struct {
 	MaxFileSize int64 // Maximum allowed size for a single file entry (default: 50MB)
 }
 
+// DefaultMaxFileSize is the default maximum size (50 MB) allowed when extracting a single file from a 3MF archive.
 const DefaultMaxFileSize = 50 * 1024 * 1024
 
 // Open opens a Bambu 3MF file for reading.
@@ -44,10 +45,12 @@ func (r *Reader) Close() error {
 	return nil
 }
 
+// ReadFile reads the named entry from the 3MF archive.
 func (r *Reader) ReadFile(name string) ([]byte, error) {
 	return r.readFileBytes(name)
 }
 
+// GetPackageThumbnail returns the archive-level thumbnail PNG (`Metadata/thumbnail.png`).
 func (r *Reader) GetPackageThumbnail() ([]byte, error) {
 	// Try standard or common paths
 	// In the future this should use relationships

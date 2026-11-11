@@ -53,6 +53,7 @@ type DiscoveryConfig struct {
 	Topic               string               `json:"t,omitempty"` // For Camera
 }
 
+// ToJSON marshals the discovery configuration to JSON.
 func (d *DiscoveryConfig) ToJSON() ([]byte, error) {
 	return json.Marshal(d)
 }
@@ -71,6 +72,7 @@ func DeviceTag(serial string) string {
 	return fmt.Sprintf("bambu_lab_%s", serial)
 }
 
+// NewDiscoveryFactory creates a DiscoveryFactory for a specific printer.
 func NewDiscoveryFactory(prefix, serial, model, displayName string) *DiscoveryFactory {
 	return &DiscoveryFactory{
 		Prefix:      prefix,
@@ -116,6 +118,7 @@ func (f *DiscoveryFactory) entity(id, name, icon, cat string) *DiscoveryConfig {
 	return cfg
 }
 
+// Sensor creates a Home Assistant sensor discovery configuration.
 func (f *DiscoveryFactory) Sensor(entityID, name, unit, devClass, statClass, icon, category string) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, icon, category)
 	cfg.StateTopic, cfg.ValueTemplate = "~/state", fmt.Sprintf("{{ value_json.%s }}", entityID)
@@ -123,6 +126,7 @@ func (f *DiscoveryFactory) Sensor(entityID, name, unit, devClass, statClass, ico
 	return cfg
 }
 
+// BinarySensor creates a Home Assistant binary_sensor discovery configuration.
 func (f *DiscoveryFactory) BinarySensor(entityID, name, devClass, icon, category string) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, icon, category)
 	cfg.StateTopic, cfg.PayloadOn, cfg.PayloadOff, cfg.DeviceClass = fmt.Sprintf("~/%s/state", entityID), "ON", "OFF", devClass
@@ -132,31 +136,36 @@ func (f *DiscoveryFactory) BinarySensor(entityID, name, devClass, icon, category
 	return cfg
 }
 
+// Switch creates a Home Assistant switch discovery configuration.
 func (f *DiscoveryFactory) Switch(entityID, name, icon, category string) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, icon, category)
 	cfg.StateTopic, cfg.CommandTopic, cfg.PayloadOn, cfg.PayloadOff = fmt.Sprintf("~/%s/state", entityID), fmt.Sprintf("~/%s/set", entityID), "ON", "OFF"
 	return cfg
 }
 
+// Button creates a Home Assistant button discovery configuration.
 func (f *DiscoveryFactory) Button(entityID, name, icon, category string) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, icon, category)
 	cfg.CommandTopic = fmt.Sprintf("~/%s/set", entityID)
 	return cfg
 }
 
+// Select creates a Home Assistant select discovery configuration.
 func (f *DiscoveryFactory) Select(entityID, name, icon, category string, options []string) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, icon, category)
 	cfg.StateTopic, cfg.ValueTemplate, cfg.CommandTopic, cfg.Options = "~/state", fmt.Sprintf("{{ value_json.%s }}", entityID), fmt.Sprintf("~/%s/set", entityID), options
 	return cfg
 }
 
-func (f *DiscoveryFactory) Number(entityID, name, unit, devClass, icon, category string, min, max, step float64) *DiscoveryConfig {
+// Number creates a Home Assistant number discovery configuration.
+func (f *DiscoveryFactory) Number(entityID, name, unit, devClass, icon, category string, minVal, maxVal, step float64) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, icon, category)
 	cfg.StateTopic, cfg.ValueTemplate, cfg.CommandTopic = "~/state", fmt.Sprintf("{{ value_json.%s }}", entityID), fmt.Sprintf("~/%s/set", entityID)
-	cfg.UnitOfMeasurement, cfg.DeviceClass, cfg.Min, cfg.Max, cfg.Step = unit, devClass, &min, &max, &step
+	cfg.UnitOfMeasurement, cfg.DeviceClass, cfg.Min, cfg.Max, cfg.Step = unit, devClass, &minVal, &maxVal, &step
 	return cfg
 }
 
+// Camera creates a Home Assistant MQTT camera discovery configuration.
 func (f *DiscoveryFactory) Camera(entityID, name, category string) *DiscoveryConfig {
 	cfg := f.entity(entityID, name, "", category)
 	cfg.Topic = fmt.Sprintf("~/%s/image", entityID)

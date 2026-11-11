@@ -1,3 +1,4 @@
+// Package filament loads and resolves BambuStudio filament profiles and color codes.
 package filament
 
 import (
@@ -236,6 +237,7 @@ type ColorDef struct {
 	FilaColor []string `json:"fila_color"`
 }
 
+// ColorFile represents the root JSON structure of filaments_color_codes.json.
 type ColorFile struct {
 	Data []ColorDef `json:"data"`
 }

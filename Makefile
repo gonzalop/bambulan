@@ -18,15 +18,12 @@ GOIMPORTS = $(shell which goimports)
 GOTESTSUM=$(shell which gotestsum)
 GOLANGREVIVE=$(shell which revive)
 
-.PHONY: all build run clean test build-all fuzz
+.PHONY: all build run clean test build-all
 
 all: fmt revive-run $(GENERATED) build ; $(info $(M) building executable…) @ ## Build program binary
 
 build:
 	go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY) ./cmd/bambulan
-
-fuzz:
-	go test -fuzz=FuzzPacketMatchesFilter -fuzztime=10s ./pkg/repeater
 
 # Cross-compilation targets
 build-linux-amd64:
@@ -98,7 +95,7 @@ test-coverage: | gotestsum ; $(info $(M) running coverage tests…) @ ## Run cov
 
 .PHONY: revive-run
 revive-run: | revive ; $(info $(M) running revive…) @
-	$Q revive
+	$Q revive ./...
 
 .PHONY: fmt
 fmt: | goimports ; $(info $(M) running gofmt…) @ ## Run gofmt on all source files

@@ -1,3 +1,4 @@
+// Gen-capabilities generates printer capability definitions from BambuStudio profile JSON files.
 package main
 
 import (

@@ -1,3 +1,4 @@
+// Bambulan is a CLI and web dashboard for managing Bambu Lab 3D printers on the local network.
 package main
 
 import (

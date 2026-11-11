@@ -216,7 +216,8 @@ func NewWebServer() *WebServer {
 	}
 }
 
-func (c *WebCmd) Run(ctx *Context) error {
+// Run starts the web dashboard server.
+func (c *WebCmd) Run(_ *Context) error {
 	// Validate TLS configuration
 	if (c.CertFile != "" && c.KeyFile == "") || (c.CertFile == "" && c.KeyFile != "") {
 		return fmt.Errorf("both --cert and --key must be provided together for HTTPS")
@@ -517,7 +518,7 @@ func (s *WebServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *WebServer) handleStyle(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleStyle(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/css")
 	content, err := templateFS.ReadFile("templates/style.css")
 	if err != nil {

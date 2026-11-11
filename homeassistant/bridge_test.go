@@ -12,7 +12,7 @@ import (
 
 // TestBridgeSharedStateConcurrentAccess exercises the fields touched by MQTT
 // callbacks, the event loop and the file-sync goroutine. Run with -race.
-func TestBridgeSharedStateConcurrentAccess(t *testing.T) {
+func TestBridgeSharedStateConcurrentAccess(_ *testing.T) {
 	b := &Bridge{lastLight: "UNKNOWN", files: []string{"None"}}
 
 	var wg sync.WaitGroup

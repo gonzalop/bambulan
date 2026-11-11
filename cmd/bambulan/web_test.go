@@ -269,7 +269,7 @@ func TestMetadataCandidates(t *testing.T) {
 }
 
 // Run with -race: control handlers read the model while the SSE loop swaps Status.
-func TestControlHandlersStatusRace(t *testing.T) {
+func TestControlHandlersStatusRace(_ *testing.T) {
 	s := NewWebServer()
 	session := &Session{Status: &bambulan.PrinterStatus{DeviceModel: "C12"}, Client: newTestClient("h", "c", "S")}
 	done := make(chan struct{})

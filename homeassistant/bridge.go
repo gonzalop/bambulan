@@ -1,3 +1,4 @@
+// Package homeassistant implements an MQTT auto-discovery bridge between Bambu Lab printers and Home Assistant.
 package homeassistant
 
 import (
@@ -870,6 +871,7 @@ func (b *Bridge) publishActionAvailability(ctx context.Context, entityID, state 
 	b.lastActionAvail[entityID] = state
 }
 
+// Close marks the printer offline and disconnects from the Home Assistant MQTT broker.
 func (b *Bridge) Close() {
 	b.publishOnline(false)
 	if b.ha != nil {

@@ -1,3 +1,4 @@
+// Package bambu3mf parses Bambu Lab 3MF archive metadata, plate configurations, and thumbnails.
 package bambu3mf
 
 import "encoding/xml"
