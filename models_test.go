@@ -119,14 +119,14 @@ func TestHMSDecoding(t *testing.T) {
 	})
 }
 
-func TestGetPrintStageName(t *testing.T) {
+func TestPrintStageName(t *testing.T) {
 	status := PrinterStatus{StgCur: 77}
-	if stage := status.GetPrintStageName(); stage != "Preparing AMS" {
+	if stage := status.PrintStageName(); stage != "Preparing AMS" {
 		t.Errorf("Expected 'Preparing AMS' for stage 77, got '%s'", stage)
 	}
 
 	status = PrinterStatus{StgCur: 67}
-	if stage := status.GetPrintStageName(); stage != "Measuring Rotary Attachment" {
+	if stage := status.PrintStageName(); stage != "Measuring Rotary Attachment" {
 		t.Errorf("Expected 'Measuring Rotary Attachment' for stage 67, got '%s'", stage)
 	}
 }

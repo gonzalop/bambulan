@@ -84,11 +84,11 @@ func normalizeModelKey(s string) string {
 	return s
 }
 
-// GetPrinterCapabilities returns the capabilities for the given printer model ID, model name, or serial number.
+// CapabilitiesForModel returns the capabilities for the given printer model ID, model name, or serial number.
 //
 // If the model ID is unknown or empty, this function returns a default PrinterCapability struct with
 // common enclosed printer capabilities (enabling fan and temp controls).
-func GetPrinterCapabilities(modelID string) PrinterCapability {
+func CapabilitiesForModel(modelID string) PrinterCapability {
 	ensureCapabilitiesLoaded()
 	if modelID == "" {
 		return defaultPrinterCapability

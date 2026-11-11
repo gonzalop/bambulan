@@ -22,6 +22,9 @@ const (
 	BambuQoS = 0 // Anything else either blocks (for subscriptions) or is ignored (for publications).
 )
 
+// ErrNotConnected is returned when attempting to publish on an unstarted or disconnected MQTTClient.
+var ErrNotConnected = errors.New("MQTT client not connected")
+
 // MQTTClient handles the MQTT connection to the printer for control and monitoring.
 // It manages the connection lifecycle, subscription to status topics, and publishing of commands.
 type MQTTClient struct {
@@ -42,19 +45,17 @@ type MQTTClient struct {
 	subscribers map[int64]chan *PrinterStatus
 	nextSubID   int64
 
-	// OnConnect and OnDisconnect may be assigned directly before Start.
-	// Once the client is running, use SetConnectionHandlers instead.
-	OnConnect    func()
-	OnDisconnect func(error)
+	onConnectHandler    func()
+	onDisconnectHandler func(error)
 }
 
-// SetConnectionHandlers sets OnConnect and OnDisconnect. It is safe to call
-// while the client is running.
+// SetConnectionHandlers sets the connect and disconnect callbacks. It is safe to call
+// before or while the client is running.
 func (m *MQTTClient) SetConnectionHandlers(onConnect func(), onDisconnect func(error)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.OnConnect = onConnect
-	m.OnDisconnect = onDisconnect
+	m.onConnectHandler = onConnect
+	m.onDisconnectHandler = onDisconnect
 }
 
 // NewMQTTClient creates a new MQTTClient.
@@ -76,8 +77,8 @@ func NewMQTTClient(hostname, accessCode, serial string) *MQTTClient {
 	return client
 }
 
-// GetPrinterStatus returns a thread-safe deep copy of the current status.
-func (m *MQTTClient) GetPrinterStatus() *PrinterStatus {
+// PrinterStatus returns a thread-safe deep copy of the current status.
+func (m *MQTTClient) PrinterStatus() *PrinterStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.status.Clone()
@@ -189,7 +190,7 @@ func (m *MQTTClient) broadcastStatus() {
 func (m *MQTTClient) onConnectionLost(_ *mq.Client, err error) {
 	slog.Warn("Connection lost", "error", err)
 	m.mu.RLock()
-	onDisconnect := m.OnDisconnect
+	onDisconnect := m.onDisconnectHandler
 	m.mu.RUnlock()
 	if onDisconnect != nil {
 		onDisconnect(err)
@@ -200,7 +201,7 @@ func (m *MQTTClient) onConnect(client *mq.Client) {
 	slog.Info("Connection established")
 	m.client.Store(client) // so the requests below can publish before Dial returns
 	m.mu.RLock()
-	onConnect := m.OnConnect
+	onConnect := m.onConnectHandler
 	m.mu.RUnlock()
 	if onConnect != nil {
 		onConnect()
@@ -291,7 +292,7 @@ func unmarshalValidFields(raw jsontext.Value, status *PrinterStatus) bool {
 func (m *MQTTClient) Publish(ctx context.Context, command any) error {
 	client := m.client.Load()
 	if client == nil {
-		return fmt.Errorf("MQTT client not connected")
+		return ErrNotConnected
 	}
 	payload, err := json.Marshal(command)
 	if err != nil {
@@ -932,7 +933,7 @@ func (m *MQTTClient) SetChamberTemperature(ctx context.Context, temp int) (strin
 	m.mu.RLock()
 	model := m.status.DeviceModel
 	m.mu.RUnlock()
-	caps := GetPrinterCapabilities(model)
+	caps := CapabilitiesForModel(model)
 	if !caps.HasChamberHeater {
 		return "", fmt.Errorf("printer does not support chamber heating")
 	}
@@ -978,7 +979,7 @@ func (m *MQTTClient) processInfo(info *InfoMessage) {
 }
 
 func getBedTempLimit(model string) int {
-	printerCap := GetPrinterCapabilities(model)
+	printerCap := CapabilitiesForModel(model)
 	if printerCap.MaxBedTemp > 0 {
 		return printerCap.MaxBedTemp
 	}
@@ -987,7 +988,7 @@ func getBedTempLimit(model string) int {
 }
 
 func getNozzleTempLimit(model string) int {
-	printerCap := GetPrinterCapabilities(model)
+	printerCap := CapabilitiesForModel(model)
 	if printerCap.MaxNozzleTemp > 0 {
 		return printerCap.MaxNozzleTemp
 	}

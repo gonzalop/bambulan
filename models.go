@@ -40,7 +40,7 @@ type PrinterStatus struct {
 	// Upload contains status information about current file uploads (FTPS).
 	Upload *Upload `json:"upload,omitempty"`
 
-	// DeviceModel is the printer's model ID (e.g., "BL-P001", "C11"). Use this with GetPrinterCapabilities.
+	// DeviceModel is the printer's model ID (e.g., "BL-P001", "C11"). Use this with CapabilitiesForModel.
 	DeviceModel string `json:"device_model,omitempty"`
 
 	// DevName is the user-defined nickname of the printer.
@@ -75,7 +75,7 @@ type PrinterStatus struct {
 	ChamberTargetTemp float64 `json:"chamber_target_temper"`
 
 	// McPrintStage is the internal numeric code for the current print stage.
-	// Use GetPrintStageName() to get a human-readable description.
+	// Use PrintStageName() to get a human-readable description.
 	McPrintStage string `json:"mc_print_stage"`
 
 	// PrintStageDesc is a human-readable description of the print stage, if available.
@@ -447,14 +447,14 @@ var stgDescriptions = map[int]string{
 	255: "Idle",
 }
 
-// GetPrintStageName converts the internal `mc_print_stage` code and `gcode_state` into a human-readable string
+// PrintStageName converts the internal `mc_print_stage` code and `gcode_state` into a human-readable string
 // representing the current activity of the printer.
 //
 // Example:
 //
-//	status := client.GetPrinterStatus()
-//	fmt.Println("Printer stage:", status.GetPrintStageName())
-func (ps *PrinterStatus) GetPrintStageName() string {
+//	status := client.PrinterStatus()
+//	fmt.Println("Printer stage:", status.PrintStageName())
+func (ps *PrinterStatus) PrintStageName() string {
 	if ps.GcodeState == "PAUSE" {
 		return "Paused"
 	}

@@ -2,6 +2,7 @@ package bambulan
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func TestCaptureFrameTimesOutOnStalledHandshake(t *testing.T) {
 
 	cam := &CameraClient{Hostname: "127.0.0.1", Port: ln.Addr().(*net.TCPAddr).Port}
 	done := make(chan error, 1)
-	go func() { _, err := cam.CaptureFrame(); done <- err }()
+	go func() { _, err := cam.CaptureFrame(context.Background()); done <- err }()
 	select {
 	case err := <-done:
 		if err == nil {

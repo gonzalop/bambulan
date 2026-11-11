@@ -148,7 +148,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 	for {
 		select {
 		case <-ticker.C:
-			status := client.GetPrinterStatus() // Need to expose this or use ctx.Client.MQTT.GetPrinterStatus()
+			status := client.PrinterStatus()
 			hasPrint := status.McPrintStage != "" || status.GcodeState != ""
 			hasInfo := len(status.Modules) > 0 || status.DeviceModel != ""
 
@@ -158,7 +158,7 @@ func (c *StatusCmd) Run(ctx *Context) error {
 			}
 		case <-timeout:
 			// Timeout, print what we have
-			c.printStatus(client, client.MQTT.GetPrinterStatus())
+			c.printStatus(client, client.MQTT.PrinterStatus())
 			return nil
 		}
 	}
@@ -169,14 +169,14 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 		fmt.Printf("\033[2J\033[H") // Clear screen only in watch mode
 	}
 	fmt.Println("=== Bambu Printer Status ===")
-	caps := bambulan.GetPrinterCapabilities(status.DeviceModel)
+	caps := bambulan.CapabilitiesForModel(status.DeviceModel)
 	name := caps.DisplayName
 	if name == "" {
 		name = "Unknown Model"
 	}
 	fmt.Printf("Device Model: %s (%s)\n", status.DeviceModel, name)
 	fmt.Println("----------------------------")
-	fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.GetPrintStageName())
+	fmt.Printf("Stage:        %s (%s)\n", status.McPrintStage, status.PrintStageName())
 	fmt.Printf("Progress:     %d%%\n", status.McPercent)
 	fmt.Printf("Remaining:    %d min\n", status.McRemainingTime)
 	fmt.Printf("Layer:        %d / %d\n", status.LayerNum, status.TotalLayerNum)
@@ -291,7 +291,7 @@ func (c *StatusCmd) printStatus(client *bambulan.Client, status *bambulan.Printe
 	if status.IPCam != nil && status.IPCam.RTSPURL != "" {
 		fmt.Println("\n--- Camera ---")
 		// Use the helper to get the authenticated URL
-		rtspURL := client.Camera.GetRTSPURL(status.IPCam.RTSPURL)
+		rtspURL := client.Camera.RTSPURL(status.IPCam.RTSPURL)
 		fmt.Printf("RTSP Stream: %s\n", rtspURL)
 	}
 
@@ -670,7 +670,7 @@ type CaptureCmd struct {
 
 func (c *CaptureCmd) Run(ctx *Context) error {
 	fmt.Println("Capturing frame...")
-	frame, err := ctx.Client.Camera.CaptureFrame()
+	frame, err := ctx.Client.Camera.CaptureFrame(context.Background())
 	if err != nil {
 		return err
 	}
@@ -1056,7 +1056,7 @@ func (c *SysInfoCmd) Run(ctx *Context) error {
 	for {
 		select {
 		case <-ticker.C:
-			status := client.GetPrinterStatus()
+			status := client.PrinterStatus()
 			hasInfo := len(status.Modules) > 0 || status.DeviceModel != ""
 			hasStatus := status.McPrintStage != "" || status.GcodeState != ""
 
@@ -1066,7 +1066,7 @@ func (c *SysInfoCmd) Run(ctx *Context) error {
 			}
 		case <-timeout:
 			// Timeout, print what we have
-			c.printSysInfo(client, client.MQTT.GetPrinterStatus())
+			c.printSysInfo(client, client.MQTT.PrinterStatus())
 			return nil
 		}
 	}
@@ -1077,7 +1077,7 @@ func (c *SysInfoCmd) printSysInfo(client *bambulan.Client, status *bambulan.Prin
 	fmt.Println()
 
 	// 1. Hardware Summary
-	caps := bambulan.GetPrinterCapabilities(status.DeviceModel)
+	caps := bambulan.CapabilitiesForModel(status.DeviceModel)
 	modelName := caps.DisplayName
 	if modelName == "" {
 		modelName = "Unknown Model (" + status.DeviceModel + ")"

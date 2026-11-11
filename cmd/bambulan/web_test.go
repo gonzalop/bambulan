@@ -31,9 +31,9 @@ func TestHandleLogout(t *testing.T) {
 		File:   &bambulan.FileClient{},
 	}
 
-	s.Sessions["session1"] = &Session{Client: c1}
-	s.Sessions["session2"] = &Session{Client: c2}
-	s.ActiveClients[serial] = c1 // In reality they would share the same client instance from getClient
+	s.sessions["session1"] = &Session{client: c1}
+	s.sessions["session2"] = &Session{client: c2}
+	s.activeClients[serial] = c1 // In reality they would share the same client instance from getClient
 
 	// Mock logout for session1
 	req1 := httptest.NewRequest("GET", "/logout", nil)
@@ -42,20 +42,20 @@ func TestHandleLogout(t *testing.T) {
 
 	s.handleLogout(w1, req1)
 
-	s.Mu.RLock()
-	if _, ok := s.Sessions["session1"]; ok {
+	s.mu.RLock()
+	if _, ok := s.sessions["session1"]; ok {
 		t.Error("Session 1 should have been deleted")
 	}
-	if _, ok := s.Sessions["session2"]; !ok {
+	if _, ok := s.sessions["session2"]; !ok {
 		t.Error("Session 2 should still exist")
 	}
-	s.Mu.RUnlock()
+	s.mu.RUnlock()
 
-	s.ClientsMu.Lock()
-	if _, ok := s.ActiveClients[serial]; !ok {
+	s.clientsMu.Lock()
+	if _, ok := s.activeClients[serial]; !ok {
 		t.Error("Active client should still exist because session 2 is using it")
 	}
-	s.ClientsMu.Unlock()
+	s.clientsMu.Unlock()
 
 	// Mock logout for session2
 	req2 := httptest.NewRequest("GET", "/logout", nil)
@@ -64,17 +64,17 @@ func TestHandleLogout(t *testing.T) {
 
 	s.handleLogout(w2, req2)
 
-	s.Mu.RLock()
-	if _, ok := s.Sessions["session2"]; ok {
+	s.mu.RLock()
+	if _, ok := s.sessions["session2"]; ok {
 		t.Error("Session 2 should have been deleted")
 	}
-	s.Mu.RUnlock()
+	s.mu.RUnlock()
 
-	s.ClientsMu.Lock()
-	if _, ok := s.ActiveClients[serial]; ok {
+	s.clientsMu.Lock()
+	if _, ok := s.activeClients[serial]; ok {
 		t.Error("Active client should have been deleted because no sessions are using it")
 	}
-	s.ClientsMu.Unlock()
+	s.clientsMu.Unlock()
 }
 
 func TestPathSanitization(t *testing.T) {
@@ -189,7 +189,7 @@ func TestGetClientChecksAccessCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := NewWebServer()
 			existing := newTestClient(host, "good", serial)
-			s.ActiveClients[serial] = existing
+			s.activeClients[serial] = existing
 
 			got, err := s.getClient(host, tt.code, serial)
 			if tt.wantErr {
@@ -199,7 +199,7 @@ func TestGetClientChecksAccessCode(t *testing.T) {
 			} else if err != nil || got != existing {
 				t.Fatalf("getClient(%q) = %p, %v; want existing client", tt.code, got, err)
 			}
-			if s.ActiveClients[serial] != existing {
+			if s.activeClients[serial] != existing {
 				t.Error("pooled client was replaced")
 			}
 		})
@@ -209,25 +209,25 @@ func TestGetClientChecksAccessCode(t *testing.T) {
 func TestExpireSessions(t *testing.T) {
 	s := NewWebServer()
 	now := time.Now()
-	stale := &Session{Client: newTestClient("h", "c", "OLD")}
+	stale := &Session{client: newTestClient("h", "c", "OLD")}
 	stale.lastSeen.Store(now.Add(-sessionIdleTimeout - time.Minute).Unix())
-	fresh := &Session{Client: newTestClient("h", "c", "NEW")}
+	fresh := &Session{client: newTestClient("h", "c", "NEW")}
 	fresh.lastSeen.Store(now.Unix())
-	s.Sessions["stale"], s.Sessions["fresh"] = stale, fresh
-	s.ActiveClients["OLD"], s.ActiveClients["NEW"] = stale.Client, fresh.Client
+	s.sessions["stale"], s.sessions["fresh"] = stale, fresh
+	s.activeClients["OLD"], s.activeClients["NEW"] = stale.client, fresh.client
 
 	s.expireSessions(now)
 
-	if _, ok := s.Sessions["stale"]; ok {
+	if _, ok := s.sessions["stale"]; ok {
 		t.Error("stale session not expired")
 	}
-	if _, ok := s.ActiveClients["OLD"]; ok {
+	if _, ok := s.activeClients["OLD"]; ok {
 		t.Error("client of expired session not stopped")
 	}
-	if _, ok := s.Sessions["fresh"]; !ok {
+	if _, ok := s.sessions["fresh"]; !ok {
 		t.Error("fresh session expired")
 	}
-	if _, ok := s.ActiveClients["NEW"]; !ok {
+	if _, ok := s.activeClients["NEW"]; !ok {
 		t.Error("client of fresh session stopped")
 	}
 }
@@ -271,14 +271,14 @@ func TestMetadataCandidates(t *testing.T) {
 // Run with -race: control handlers read the model while the SSE loop swaps Status.
 func TestControlHandlersStatusRace(_ *testing.T) {
 	s := NewWebServer()
-	session := &Session{Status: &bambulan.PrinterStatus{DeviceModel: "C12"}, Client: newTestClient("h", "c", "S")}
+	session := &Session{status: &bambulan.PrinterStatus{DeviceModel: "C12"}, client: newTestClient("h", "c", "S")}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			session.Mu.Lock()
-			session.Status = &bambulan.PrinterStatus{DeviceModel: "C13"}
-			session.Mu.Unlock()
+			session.mu.Lock()
+			session.status = &bambulan.PrinterStatus{DeviceModel: "C13"}
+			session.mu.Unlock()
 		}
 	}()
 	for i := 0; i < 200; i++ {
@@ -293,21 +293,21 @@ func TestAddSessionEvictsLeastRecentlyUsed(t *testing.T) {
 	s := NewWebServer()
 	now := time.Now().Unix()
 	for i := 0; i < maxSessions; i++ {
-		sess := &Session{Client: newTestClient("h", "c", "S")}
+		sess := &Session{client: newTestClient("h", "c", "S")}
 		sess.lastSeen.Store(now)
-		s.Sessions[strconv.Itoa(i)] = sess
+		s.sessions[strconv.Itoa(i)] = sess
 	}
-	s.Sessions["7"].lastSeen.Store(now - 3600)
+	s.sessions["7"].lastSeen.Store(now - 3600)
 
-	s.addSession("new", &Session{Client: newTestClient("h", "c", "S")})
+	s.addSession("new", &Session{client: newTestClient("h", "c", "S")})
 
-	if len(s.Sessions) != maxSessions {
-		t.Fatalf("len(Sessions) = %d, want %d", len(s.Sessions), maxSessions)
+	if len(s.sessions) != maxSessions {
+		t.Fatalf("len(Sessions) = %d, want %d", len(s.sessions), maxSessions)
 	}
-	if _, ok := s.Sessions["7"]; ok {
+	if _, ok := s.sessions["7"]; ok {
 		t.Error("least recently used session was not evicted")
 	}
-	if _, ok := s.Sessions["new"]; !ok {
+	if _, ok := s.sessions["new"]; !ok {
 		t.Error("new session was not added")
 	}
 }
@@ -315,7 +315,7 @@ func TestAddSessionEvictsLeastRecentlyUsed(t *testing.T) {
 // Delete is recursive, so it must never reach the printer for the root folder.
 func TestHandleAPIDeleteRefusesRoot(t *testing.T) {
 	s := NewWebServer()
-	s.Sessions["sid"] = &Session{CSRFToken: "tok", Client: newTestClient("h", "c", "S")}
+	s.sessions["sid"] = &Session{csrfToken: "tok", client: newTestClient("h", "c", "S")}
 	for _, file := range []string{"/", "../..", "/./"} {
 		req := httptest.NewRequest("POST", "/api/b/delete", strings.NewReader("file="+url.QueryEscape(file)))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

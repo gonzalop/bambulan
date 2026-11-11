@@ -112,13 +112,13 @@ func (r *Reader) parsePlateName(filename string) (string, error) {
 	return pi.PlateName, nil
 }
 
-// GetThumbnail returns the full-size thumbnail PNG for the given plate ID.
-func (r *Reader) GetThumbnail(plateID int) ([]byte, error) {
+// Thumbnail returns the full-size thumbnail PNG for the given plate ID.
+func (r *Reader) Thumbnail(plateID int) ([]byte, error) {
 	return r.readFileBytes(fmt.Sprintf("Metadata/plate_%d.png", plateID))
 }
 
-// GetThumbnailSmall returns the small thumbnail PNG for the given plate ID.
-func (r *Reader) GetThumbnailSmall(plateID int) ([]byte, error) {
+// ThumbnailSmall returns the small thumbnail PNG for the given plate ID.
+func (r *Reader) ThumbnailSmall(plateID int) ([]byte, error) {
 	return r.readFileBytes(fmt.Sprintf("Metadata/plate_%d_small.png", plateID))
 }
 func (r *Reader) parseStandardMetadata(md *Metadata) error {

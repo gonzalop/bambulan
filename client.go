@@ -45,10 +45,10 @@ func NewClient(hostname, accessCode, serial string) *Client {
 	return c
 }
 
-// GetPrinterStatus returns the most recently received printer status.
+// PrinterStatus returns the most recently received printer status.
 // It returns nil if no status has been received yet.
-func (c *Client) GetPrinterStatus() *PrinterStatus {
-	return c.MQTT.GetPrinterStatus()
+func (c *Client) PrinterStatus() *PrinterStatus {
+	return c.MQTT.PrinterStatus()
 }
 
 // Start initiates the MQTT connection and subscribes to the printer's report topic.

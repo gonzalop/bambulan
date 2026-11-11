@@ -69,7 +69,7 @@ func TestParseMetadata(t *testing.T) {
 		}
 
 		// Check thumbnails
-		b, err := r.GetThumbnail(p.ID)
+		b, err := r.Thumbnail(p.ID)
 		if err != nil {
 			t.Errorf("Failed to get thumbnail for plate %d: %v", p.ID, err)
 		}
@@ -77,7 +77,7 @@ func TestParseMetadata(t *testing.T) {
 			t.Errorf("Thumbnail empty for plate %d", p.ID)
 		}
 
-		bSmall, err := r.GetThumbnailSmall(p.ID)
+		bSmall, err := r.ThumbnailSmall(p.ID)
 		if err != nil {
 			t.Errorf("Failed to get small thumbnail for plate %d: %v", p.ID, err)
 		}
@@ -102,7 +102,7 @@ func TestParseMetadata(t *testing.T) {
 	if md.ThumbnailPath != "" {
 		t.Logf("Found Package Thumbnail at %s", md.ThumbnailPath)
 		// Try to read it
-		if _, err := r.GetPackageThumbnail(); err != nil {
+		if _, err := r.PackageThumbnail(); err != nil {
 			t.Errorf("Failed to read package thumbnail: %v", err)
 		}
 	}

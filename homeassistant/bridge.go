@@ -212,7 +212,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 				return
 			case <-ticker.C:
 				if b.discoveryOk.Load() && b.cameraEnabled.Load() {
-					img, err := b.bambu.Camera.CaptureFrame()
+					img, err := b.bambu.Camera.CaptureFrame(ctx)
 					if err == nil {
 						topic := fmt.Sprintf("%s/%s/camera/image", b.prefix, b.tag())
 						_ = b.ha.Publish(ctx, topic, img)
@@ -262,7 +262,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 
 			// If discovery hasn't run OR if model was updated
 			if !b.discoveryOk.Load() || (b.model == "Printer" && newModel != "Printer") || (b.model != newModel && newModel != "Printer") {
-				caps := bambulan.GetPrinterCapabilities(newModel)
+				caps := bambulan.CapabilitiesForModel(newModel)
 				modelName := caps.DisplayName
 				if modelName == "" {
 					modelName = newModel
@@ -314,7 +314,7 @@ func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.Print
 	}
 
 	printerModel, haModel, displayName := b.identity()
-	caps := bambulan.GetPrinterCapabilities(printerModel)
+	caps := bambulan.CapabilitiesForModel(printerModel)
 	var factory *DiscoveryFactory
 	getFactory := func() *DiscoveryFactory {
 		if factory == nil {
@@ -468,7 +468,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Nozzle Temp", "value", temp)
 		model, _, _ := b.identity()
-		caps := bambulan.GetPrinterCapabilities(model)
+		caps := bambulan.CapabilitiesForModel(model)
 		if temp > caps.MaxNozzleTemp {
 			temp = caps.MaxNozzleTemp
 		}
@@ -478,7 +478,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Bed Temp", "value", temp)
 		model, _, _ := b.identity()
-		caps := bambulan.GetPrinterCapabilities(model)
+		caps := bambulan.CapabilitiesForModel(model)
 		if temp > caps.MaxBedTemp {
 			temp = caps.MaxBedTemp
 		}
@@ -488,7 +488,7 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		temp, _ := strconv.Atoi(string(msg.Payload))
 		slog.Debug("HA Command received: Target Chamber Temp", "value", temp)
 		model, _, _ := b.identity()
-		caps := bambulan.GetPrinterCapabilities(model)
+		caps := bambulan.CapabilitiesForModel(model)
 		if caps.HasChamberHeater {
 			if temp > caps.MaxChamberTemp {
 				temp = caps.MaxChamberTemp
@@ -548,7 +548,7 @@ func (b *Bridge) publishDiscovery(ctx context.Context, model string) error {
 	b.mu.Lock()
 	files := b.files
 	b.mu.Unlock()
-	caps := bambulan.GetPrinterCapabilities(printerModel)
+	caps := bambulan.CapabilitiesForModel(printerModel)
 	factory := NewDiscoveryFactory(b.prefix, b.serial, model, displayName)
 
 	type entry struct {
@@ -676,7 +676,7 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 		speed = "Ludicrous"
 	}
 
-	caps := bambulan.GetPrinterCapabilities(b.model)
+	caps := bambulan.CapabilitiesForModel(b.model)
 
 	subtask := status.SubtaskName
 	if subtask == "" {
@@ -720,7 +720,7 @@ func (b *Bridge) publishState(ctx context.Context, status *bambulan.PrinterStatu
 	b.hasLastPubState = true
 
 	state := map[string]any{
-		"print_stage":               status.GetPrintStageName(),
+		"print_stage":               status.PrintStageName(),
 		"subtask_name":              subtask,
 		"progress":                  status.McPercent,
 		"print_progress":            status.McPercent,

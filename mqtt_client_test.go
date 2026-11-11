@@ -2,6 +2,7 @@ package bambulan
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -78,7 +79,7 @@ func TestMQTTClient_StatusDataRace(_ *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			st := client.GetPrinterStatus()
+			st := client.PrinterStatus()
 			if st != nil && len(st.LightsReport) > 0 {
 				_ = st.LightsReport[0].Mode
 			}
@@ -169,13 +170,13 @@ func TestBroadcastWhileUnsubscribing(_ *testing.T) {
 
 func TestPublishWithoutConnection(t *testing.T) {
 	m := NewMQTTClient("h", "c", "S")
-	if err := m.Publish(context.Background(), map[string]any{}); err == nil || !strings.Contains(err.Error(), "not connected") {
-		t.Fatalf("Publish on unstarted client = %v, want 'not connected' error", err)
+	if err := m.Publish(context.Background(), map[string]any{}); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Publish on unstarted client = %v, want ErrNotConnected", err)
 	}
 }
 
 func TestSetChamberTemperatureLimits(t *testing.T) {
-	limit := GetPrinterCapabilities("C13").MaxChamberTemp
+	limit := CapabilitiesForModel("C13").MaxChamberTemp
 	tests := []struct {
 		name    string
 		model   string
@@ -207,7 +208,7 @@ func TestSetChamberLightKeepsStateWhenPublishFails(t *testing.T) {
 	if _, err := m.SetChamberLight(context.Background(), true); err == nil {
 		t.Fatal("SetChamberLight on unstarted client succeeded")
 	}
-	got := m.GetPrinterStatus().LightsReport
+	got := m.PrinterStatus().LightsReport
 	if len(got) != 2 || got[0].Mode != "off" || got[1].Mode != "on" {
 		t.Errorf("lights changed after failed publish: %+v %+v", got[0], got[1])
 	}

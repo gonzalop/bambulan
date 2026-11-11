@@ -187,7 +187,7 @@ client.MQTT.StartPrint("my-model.gcode.3mf", opts)
 
 ```go
 // Capture a single JPEG frame
-imgData, err := client.Camera.CaptureFrame()
+imgData, err := client.Camera.CaptureFrame(context.Background())
 if err != nil {
     log.Println("Error capturing frame:", err)
 }

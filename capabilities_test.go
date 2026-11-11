@@ -7,7 +7,7 @@ import (
 
 func TestCapabilities(t *testing.T) {
 	// Test X1C
-	x1c := GetPrinterCapabilities("BL-P001")
+	x1c := CapabilitiesForModel("BL-P001")
 	if x1c.DisplayName != "Bambu Lab X1 Carbon" {
 		t.Errorf("Expected X1 Carbon, got %s", x1c.DisplayName)
 	}
@@ -23,7 +23,7 @@ func TestCapabilities(t *testing.T) {
 	}
 
 	// Test A2L
-	a2l := GetPrinterCapabilities("N9")
+	a2l := CapabilitiesForModel("N9")
 	if a2l.DisplayName != "Bambu Lab A2L" {
 		t.Errorf("Expected A2L, got %s", a2l.DisplayName)
 	}
@@ -32,29 +32,29 @@ func TestCapabilities(t *testing.T) {
 	}
 
 	// Test Aliases
-	p1s := GetPrinterCapabilities("P1S")
+	p1s := CapabilitiesForModel("P1S")
 	if p1s.DisplayName != "Bambu Lab P1S" || !p1s.HasAuxFan || !p1s.HasChamberFan {
 		t.Errorf("Expected P1S with fans, got %+v", p1s)
 	}
 
-	p1sLower := GetPrinterCapabilities("p1s")
+	p1sLower := CapabilitiesForModel("p1s")
 	if p1sLower.DisplayName != "Bambu Lab P1S" {
 		t.Errorf("Expected P1S via lowercase alias, got %s", p1sLower.DisplayName)
 	}
 
 	// Test Serial Lookup
-	p1sSerial := GetPrinterCapabilities("01S00A12345678")
+	p1sSerial := CapabilitiesForModel("01S00A12345678")
 	if p1sSerial.DisplayName != "Bambu Lab P1S" {
 		t.Errorf("Expected P1S via 01S serial prefix, got %s", p1sSerial.DisplayName)
 	}
 
-	p1sComboSerial := GetPrinterCapabilities("01C00A12345678")
+	p1sComboSerial := CapabilitiesForModel("01C00A12345678")
 	if p1sComboSerial.DisplayName != "Bambu Lab P1S" {
 		t.Errorf("Expected P1S via 01C serial prefix, got %s", p1sComboSerial.DisplayName)
 	}
 
 	// Test Fallback
-	fallback := GetPrinterCapabilities("Printer")
+	fallback := CapabilitiesForModel("Printer")
 	if !fallback.HasAuxFan || !fallback.HasChamberFan {
 		t.Errorf("Expected default fallback with fans enabled, got %+v", fallback)
 	}

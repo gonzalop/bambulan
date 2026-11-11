@@ -50,8 +50,8 @@ func (r *Reader) ReadFile(name string) ([]byte, error) {
 	return r.readFileBytes(name)
 }
 
-// GetPackageThumbnail returns the archive-level thumbnail PNG (`Metadata/thumbnail.png`).
-func (r *Reader) GetPackageThumbnail() ([]byte, error) {
+// PackageThumbnail returns the archive-level thumbnail PNG (`Metadata/thumbnail.png`).
+func (r *Reader) PackageThumbnail() ([]byte, error) {
 	// Try standard or common paths
 	// In the future this should use relationships
 	return r.readFileBytes("Metadata/thumbnail.png")

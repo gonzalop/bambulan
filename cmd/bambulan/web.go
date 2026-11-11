@@ -53,19 +53,19 @@ type WebCmd struct {
 }
 
 type Session struct {
-	Client                  *bambulan.Client
-	Status                  *bambulan.PrinterStatus
-	CSRFToken               string
-	UploadStatus            UploadStatus
-	MetadataDownloadStatus  MetadataDownloadStatus
-	CurrentMetadata         *bambu3mf.Metadata
-	CurrentMetadataFilename string // Track which file the metadata belongs to
-	MetadataCache           map[string]*bambu3mf.Metadata
-	ThumbnailCache          map[string][]byte
-	FailedFetches           map[string]int  // Track retry counts
-	Fetching                map[string]bool // Track active fetches to prevent thundering herd // key: filename/plate_id
-	PreviousGcodeState      string          // Track previous state to detect transitions
-	Mu                      sync.RWMutex
+	client                  *bambulan.Client
+	status                  *bambulan.PrinterStatus
+	csrfToken               string
+	uploadStatus            UploadStatus
+	metadataDownloadStatus  MetadataDownloadStatus
+	currentMetadata         *bambu3mf.Metadata
+	currentMetadataFilename string // Track which file the metadata belongs to
+	metadataCache           map[string]*bambu3mf.Metadata
+	thumbnailCache          map[string][]byte
+	failedFetches           map[string]int  // Track retry counts
+	fetching                map[string]bool // Track active fetches to prevent thundering herd // key: filename/plate_id
+	previousGcodeState      string          // Track previous state to detect transitions
+	mu                      sync.RWMutex
 
 	lastSeen atomic.Int64 // Unix seconds of the last request or live update
 }
@@ -96,24 +96,24 @@ type MetadataDownloadStatus struct {
 }
 
 type WebServer struct {
-	BindAddr string
-	Sessions map[string]*Session
-	Mu       sync.RWMutex
+	bindAddr string
+	sessions map[string]*Session
+	mu       sync.RWMutex
 	// Connection pooling
-	ActiveClients map[string]*bambulan.Client
-	ActiveBridges map[string]context.CancelFunc
-	ClientsMu     sync.Mutex
-	Key           []byte
-	UseTLS        bool
-	CertFile      string
-	KeyFile       string
-	MaxFileSize   int64
+	activeClients map[string]*bambulan.Client
+	activeBridges map[string]context.CancelFunc
+	clientsMu     sync.Mutex
+	key           []byte
+	useTLS        bool
+	certFile      string
+	keyFile       string
+	maxFileSize   int64
 
 	// HA MQTT Bridge
-	MQTTBroker   string
-	MQTTUser     string
-	MQTTPassword string
-	MQTTPrefix   string
+	mqttBroker   string
+	mqttUser     string
+	mqttPassword string
+	mqttPrefix   string
 
 	loginMu       sync.Mutex
 	loginAttempts map[string]*loginWindow
@@ -147,55 +147,55 @@ func (s *WebServer) allowLogin(r *http.Request) bool {
 // sessions created just to fill the table go first.
 func (s *WebServer) addSession(id string, session *Session) {
 	session.touch()
-	s.Mu.Lock()
-	defer s.Mu.Unlock()
-	if len(s.Sessions) >= maxSessions {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessions) >= maxSessions {
 		var oldestID string
 		var oldest int64
-		for sid, sess := range s.Sessions {
+		for sid, sess := range s.sessions {
 			if seen := sess.lastSeen.Load(); oldestID == "" || seen < oldest {
 				oldestID, oldest = sid, seen
 			}
 		}
 		s.removeSessionLocked(oldestID)
 	}
-	s.Sessions[id] = session
+	s.sessions[id] = session
 }
 
 // removeSessionLocked deletes a session and stops its printer client if no
 // other session uses it. s.Mu must be held.
 func (s *WebServer) removeSessionLocked(id string) {
-	session, ok := s.Sessions[id]
+	session, ok := s.sessions[id]
 	if !ok {
 		return
 	}
-	delete(s.Sessions, id)
-	if session.Client == nil {
+	delete(s.sessions, id)
+	if session.client == nil {
 		return
 	}
-	serial := session.Client.MQTT.Serial
-	for _, sess := range s.Sessions {
-		if sess.Client != nil && sess.Client.MQTT.Serial == serial {
+	serial := session.client.MQTT.Serial
+	for _, sess := range s.sessions {
+		if sess.client != nil && sess.client.MQTT.Serial == serial {
 			return
 		}
 	}
-	s.ClientsMu.Lock()
+	s.clientsMu.Lock()
 	s.stopClientLocked(serial)
-	s.ClientsMu.Unlock()
+	s.clientsMu.Unlock()
 }
 
 // expireSessions removes sessions idle for longer than sessionIdleTimeout,
 // and forgets old login rate-limit windows.
 func (s *WebServer) expireSessions(now time.Time) {
 	cutoff := now.Add(-sessionIdleTimeout).Unix()
-	s.Mu.Lock()
-	for id, session := range s.Sessions {
+	s.mu.Lock()
+	for id, session := range s.sessions {
 		if session.lastSeen.Load() < cutoff {
 			slog.Debug("Expiring idle session")
 			s.removeSessionLocked(id)
 		}
 	}
-	s.Mu.Unlock()
+	s.mu.Unlock()
 
 	s.loginMu.Lock()
 	for ip, w := range s.loginAttempts {
@@ -208,11 +208,11 @@ func (s *WebServer) expireSessions(now time.Time) {
 
 func NewWebServer() *WebServer {
 	return &WebServer{
-		Sessions:      make(map[string]*Session),
-		ActiveClients: make(map[string]*bambulan.Client),
-		ActiveBridges: make(map[string]context.CancelFunc),
+		sessions:      make(map[string]*Session),
+		activeClients: make(map[string]*bambulan.Client),
+		activeBridges: make(map[string]context.CancelFunc),
 		loginAttempts: make(map[string]*loginWindow),
-		MaxFileSize:   bambu3mf.DefaultMaxFileSize,
+		maxFileSize:   bambu3mf.DefaultMaxFileSize,
 	}
 }
 
@@ -242,16 +242,16 @@ func (c *WebCmd) Run(_ *Context) error {
 	key := keyHash[:]
 
 	s := NewWebServer()
-	s.BindAddr = c.Bind
-	s.Key = key
-	s.UseTLS = c.CertFile != "" && c.KeyFile != ""
-	s.CertFile = c.CertFile
-	s.KeyFile = c.KeyFile
-	s.MaxFileSize = int64(c.MaxFileSize)
-	s.MQTTBroker = c.MQTTBroker
-	s.MQTTUser = c.MQTTUser
-	s.MQTTPassword = c.MQTTPassword
-	s.MQTTPrefix = c.MQTTPrefix
+	s.bindAddr = c.Bind
+	s.key = key
+	s.useTLS = c.CertFile != "" && c.KeyFile != ""
+	s.certFile = c.CertFile
+	s.keyFile = c.KeyFile
+	s.maxFileSize = int64(c.MaxFileSize)
+	s.mqttBroker = c.MQTTBroker
+	s.mqttUser = c.MQTTUser
+	s.mqttPassword = c.MQTTPassword
+	s.mqttPrefix = c.MQTTPrefix
 
 	return s.Start()
 }
@@ -286,17 +286,17 @@ func (s *WebServer) Start() error {
 
 	// No ReadTimeout/WriteTimeout: uploads, SSE and the camera stream are long-lived.
 	srv := &http.Server{
-		Addr:              s.BindAddr,
+		Addr:              s.bindAddr,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 
-	if s.UseTLS {
-		slog.Info("Starting web server with TLS", "addr", s.BindAddr, "cert", s.CertFile)
-		return srv.ListenAndServeTLS(s.CertFile, s.KeyFile)
+	if s.useTLS {
+		slog.Info("Starting web server with TLS", "addr", s.bindAddr, "cert", s.certFile)
+		return srv.ListenAndServeTLS(s.certFile, s.keyFile)
 	}
 
-	slog.Debug("Starting web server", "addr", s.BindAddr)
+	slog.Debug("Starting web server", "addr", s.bindAddr)
 	return srv.ListenAndServe()
 }
 
@@ -344,11 +344,11 @@ func generateRandomString(n int) string {
 // getClient returns an existing client or creates a new one.
 // It matches clients by Serial number. If Host changes for the same Serial, it reconnects.
 func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, error) {
-	s.ClientsMu.Lock()
-	defer s.ClientsMu.Unlock()
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
 
 	key := serial
-	client, exists := s.ActiveClients[key]
+	client, exists := s.activeClients[key]
 
 	if exists && subtle.ConstantTimeCompare([]byte(client.MQTT.AccessCode), []byte(code)) != 1 {
 		// Never hand out a live connection to someone who doesn't know its code.
@@ -365,7 +365,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 		}
 		s.stopClientLocked(key)
 		client = newClient
-		s.ActiveClients[key] = client
+		s.activeClients[key] = client
 		s.startBridgeLocked(key, client)
 		return client, nil
 	}
@@ -386,7 +386,7 @@ func (s *WebServer) getClient(host, code, serial string) (*bambulan.Client, erro
 		if err := client.Start(); err != nil {
 			return nil, err
 		}
-		s.ActiveClients[key] = client
+		s.activeClients[key] = client
 		s.startBridgeLocked(key, client)
 	}
 
@@ -399,17 +399,17 @@ var errAccessCodeMismatch = errors.New("access code does not match")
 var isConnected = func(c *bambulan.Client) bool { return c.MQTT.IsConnected() }
 
 // startBridgeLocked starts the Home Assistant bridge for a client, if configured.
-// s.ClientsMu must be held.
+// s.clientsMu must be held.
 func (s *WebServer) startBridgeLocked(key string, client *bambulan.Client) {
-	if s.MQTTBroker == "" {
+	if s.mqttBroker == "" {
 		return
 	}
 	serial := client.MQTT.Serial
 	bridgeCtx, bridgeCancel := context.WithCancel(context.Background())
-	s.ActiveBridges[key] = bridgeCancel
+	s.activeBridges[key] = bridgeCancel
 	go func() {
-		slog.Info("Starting Home Assistant bridge for newly connected printer", "serial", serial, "broker", s.MQTTBroker)
-		bridge, err := homeassistant.NewBridge(client, s.MQTTBroker, s.MQTTUser, s.MQTTPassword, s.MQTTPrefix)
+		slog.Info("Starting Home Assistant bridge for newly connected printer", "serial", serial, "broker", s.mqttBroker)
+		bridge, err := homeassistant.NewBridge(client, s.mqttBroker, s.mqttUser, s.mqttPassword, s.mqttPrefix)
 		if err != nil {
 			slog.Error("Failed to initialize Home Assistant bridge", "serial", serial, "error", err)
 			return
@@ -422,15 +422,15 @@ func (s *WebServer) startBridgeLocked(key string, client *bambulan.Client) {
 }
 
 // stopClientLocked stops the bridge and client for key and removes them.
-// s.ClientsMu must be held.
+// s.clientsMu must be held.
 func (s *WebServer) stopClientLocked(key string) {
-	if cancelBridge, ok := s.ActiveBridges[key]; ok {
+	if cancelBridge, ok := s.activeBridges[key]; ok {
 		cancelBridge()
-		delete(s.ActiveBridges, key)
+		delete(s.activeBridges, key)
 	}
-	if client, ok := s.ActiveClients[key]; ok {
+	if client, ok := s.activeClients[key]; ok {
 		client.Stop()
-		delete(s.ActiveClients, key)
+		delete(s.activeClients, key)
 	}
 }
 
@@ -450,7 +450,7 @@ func (s *WebServer) validateCSRF(r *http.Request, session *Session) bool {
 		return false
 	}
 
-	return token == session.CSRFToken
+	return token == session.csrfToken
 }
 
 func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -473,18 +473,18 @@ func (s *WebServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// We pass the session (which contains Status) to the template
-	session.Mu.RLock()
-	defer session.Mu.RUnlock()
+	session.mu.RLock()
+	defer session.mu.RUnlock()
 	data := struct {
 		Status       *bambulan.PrinterStatus
 		Host         string
 		CSRFToken    string
 		Capabilities bambulan.PrinterCapability
 	}{
-		Status:       session.Status,
-		Host:         session.Client.MQTT.Hostname,
-		CSRFToken:    session.CSRFToken,
-		Capabilities: bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
+		Status:       session.status,
+		Host:         session.client.MQTT.Hostname,
+		CSRFToken:    session.csrfToken,
+		Capabilities: bambulan.CapabilitiesForModel(session.status.DeviceModel),
 	}
 	if err := tmpl.Execute(w, data); err != nil {
 		slog.Error("Template execution failed", "error", err)
@@ -504,13 +504,13 @@ func (s *WebServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session.Mu.RLock()
-	defer session.Mu.RUnlock()
+	session.mu.RLock()
+	defer session.mu.RUnlock()
 
 	data := struct {
 		CSRFToken string
 	}{
-		CSRFToken: session.CSRFToken,
+		CSRFToken: session.csrfToken,
 	}
 
 	if err := tmpl.Execute(w, data); err != nil {
@@ -578,12 +578,12 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		sessionID := hex.EncodeToString(b)
 
 		session := &Session{
-			Status:         &bambulan.PrinterStatus{},
-			CSRFToken:      generateRandomString(32),
-			MetadataCache:  make(map[string]*bambu3mf.Metadata),
-			ThumbnailCache: make(map[string][]byte),
-			FailedFetches:  make(map[string]int),
-			Fetching:       make(map[string]bool),
+			status:         &bambulan.PrinterStatus{},
+			csrfToken:      generateRandomString(32),
+			metadataCache:  make(map[string]*bambu3mf.Metadata),
+			thumbnailCache: make(map[string][]byte),
+			failedFetches:  make(map[string]int),
+			fetching:       make(map[string]bool),
 		}
 
 		client, err := s.getClient(data.Host, data.Code, data.Serial)
@@ -598,8 +598,8 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		session.Client = client
-		session.Status = client.GetPrinterStatus() // Shared Status pointer
+		session.client = client
+		session.status = client.PrinterStatus() // Shared Status pointer
 
 		s.addSession(sessionID, session)
 
@@ -608,7 +608,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Value:    sessionID,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   s.UseTLS,
+			Secure:   s.useTLS,
 			SameSite: http.SameSiteStrictMode,
 		})
 
@@ -622,14 +622,14 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		authBytes, err := json.Marshal(authData)
 		if err == nil {
 			// Encrypt the JSON data
-			encrypted, err := encrypt(authBytes, s.Key)
+			encrypted, err := encrypt(authBytes, s.key)
 			if err == nil {
 				http.SetCookie(w, &http.Cookie{
 					Name:     "bambulan_auth",
 					Value:    base64.StdEncoding.EncodeToString(encrypted),
 					Path:     "/",
 					HttpOnly: true,
-					Secure:   s.UseTLS,
+					Secure:   s.useTLS,
 					SameSite: http.SameSiteStrictMode,
 				})
 			} else {
@@ -644,7 +644,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// GET request: Try to pre-fill from cookie
 	if cookie, err := r.Cookie("bambulan_auth"); err == nil && cookie.Value != "" {
 		if encryptedBytes, err := base64.StdEncoding.DecodeString(cookie.Value); err == nil {
-			if decryptedBytes, err := decrypt(encryptedBytes, s.Key); err == nil {
+			if decryptedBytes, err := decrypt(encryptedBytes, s.key); err == nil {
 				var authData map[string]string
 				if err := json.Unmarshal(decryptedBytes, &authData); err == nil {
 					data.Host = authData["host"]
@@ -660,9 +660,9 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if sessionID, ok := s.getSessionID(r); ok {
-		s.Mu.Lock()
+		s.mu.Lock()
 		s.removeSessionLocked(sessionID)
-		s.Mu.Unlock()
+		s.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "bambulan_session",
@@ -670,7 +670,7 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   s.UseTLS,
+		Secure:   s.useTLS,
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     "bambulan_auth",
@@ -678,7 +678,7 @@ func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   s.UseTLS,
+		Secure:   s.useTLS,
 		SameSite: http.SameSiteStrictMode,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
@@ -690,27 +690,27 @@ var (
 )
 
 func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
-	session.Mu.Lock()
+	session.mu.Lock()
 
 	// Detect state transitions and clear metadata when print finishes/stops
-	currentState := session.Status.GcodeState
-	previousState := session.PreviousGcodeState
+	currentState := session.status.GcodeState
+	previousState := session.previousGcodeState
 
 	if activeStates[previousState] && terminalStates[currentState] {
 		slog.Debug("Print state transition detected, clearing metadata", "from", previousState, "to", currentState)
-		if session.CurrentMetadataFilename != "" {
-			delete(session.MetadataCache, session.CurrentMetadataFilename)
-			slog.Debug("Cleared metadata cache entry", "file", session.CurrentMetadataFilename)
+		if session.currentMetadataFilename != "" {
+			delete(session.metadataCache, session.currentMetadataFilename)
+			slog.Debug("Cleared metadata cache entry", "file", session.currentMetadataFilename)
 		}
-		session.CurrentMetadata = nil
-		session.CurrentMetadataFilename = ""
+		session.currentMetadata = nil
+		session.currentMetadataFilename = ""
 	}
 
-	session.PreviousGcodeState = currentState
+	session.previousGcodeState = currentState
 
-	activeFile := session.Status.SubtaskName
+	activeFile := session.status.SubtaskName
 	if activeFile == "" {
-		activeFile = session.Status.GcodeFile
+		activeFile = session.status.GcodeFile
 	}
 	if len(activeFile) > 0 && activeFile[0] == '/' {
 		activeFile = activeFile[1:]
@@ -719,16 +719,16 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 	var fetchFile string
 
 	if activeFile != "" && activeFile != "???" {
-		isActive := activeStates[session.Status.GcodeState]
+		isActive := activeStates[session.status.GcodeState]
 
-		if isActive || session.CurrentMetadata == nil {
+		if isActive || session.currentMetadata == nil {
 			var foundMD *bambu3mf.Metadata
 			var foundFilename string
 
 			// 1. Try sanitized filename first (if starts with _)
 			if after, ok := strings.CutPrefix(activeFile, "_"); ok {
 				sanitized := after
-				if md, ok := session.MetadataCache[sanitized]; ok {
+				if md, ok := session.metadataCache[sanitized]; ok {
 					foundMD = md
 					foundFilename = sanitized
 				}
@@ -736,15 +736,15 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 
 			// 2. Try exact filename
 			if foundMD == nil {
-				if md, ok := session.MetadataCache[activeFile]; ok {
+				if md, ok := session.metadataCache[activeFile]; ok {
 					foundMD = md
 					foundFilename = activeFile
 				}
 			}
 
 			if foundMD != nil {
-				session.CurrentMetadata = foundMD
-				session.CurrentMetadataFilename = foundFilename
+				session.currentMetadata = foundMD
+				session.currentMetadataFilename = foundFilename
 			} else if isActive {
 				// Trigger fetch if not found and looks like a 3mf/gcode file OR has no extension
 				lower := strings.ToLower(activeFile)
@@ -757,31 +757,31 @@ func (s *WebServer) buildStatusPayload(session *Session) map[string]any {
 
 	// Wrap in top-level object as expected by the frontend.
 	resp := map[string]any{
-		"print":                    session.Status,
-		"stage_message":            session.Status.GetPrintStageName(),
-		"upload_status":            session.UploadStatus,
-		"metadata_download_status": session.MetadataDownloadStatus,
-		"capabilities":             bambulan.GetPrinterCapabilities(session.Status.DeviceModel),
+		"print":                    session.status,
+		"stage_message":            session.status.PrintStageName(),
+		"upload_status":            session.uploadStatus,
+		"metadata_download_status": session.metadataDownloadStatus,
+		"capabilities":             bambulan.CapabilitiesForModel(session.status.DeviceModel),
 		"metadata":                 nil,
 		"hms": map[string]any{
-			"message":     session.Status.HMSMessage(),
-			"description": session.Status.HMSDescription(),
-			"urls":        session.Status.WikiURLs(),
-			"active":      len(session.Status.Hms) > 0,
+			"message":     session.status.HMSMessage(),
+			"description": session.status.HMSDescription(),
+			"urls":        session.status.WikiURLs(),
+			"active":      len(session.status.Hms) > 0,
 		},
 	}
 
-	if session.CurrentMetadata != nil {
+	if session.currentMetadata != nil {
 		mdMap := map[string]any{
-			"plates":    session.CurrentMetadata.Plates,
-			"filaments": session.CurrentMetadata.Filaments,
+			"plates":    session.currentMetadata.Plates,
+			"filaments": session.currentMetadata.Filaments,
 			// Add unified filename field for thumbnails
-			"filename": session.CurrentMetadataFilename,
+			"filename": session.currentMetadataFilename,
 		}
 		resp["metadata"] = mdMap
 	}
 
-	session.Mu.Unlock()
+	session.mu.Unlock()
 
 	// Must run in goroutine to avoid deadlock, outside of lock
 	if fetchFile != "" {
@@ -859,7 +859,7 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	sub := session.Client.Subscribe()
+	sub := session.client.Subscribe()
 	defer sub.Cancel()
 
 	// Initial State Hydration
@@ -889,9 +889,9 @@ func (s *WebServer) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
 		case update := <-sub.C:
 			session.touch()
 			if update != nil {
-				session.Mu.Lock()
-				session.Status = update
-				session.Mu.Unlock()
+				session.mu.Lock()
+				session.status = update
+				session.mu.Unlock()
 			}
 			payload := s.buildStatusPayload(session)
 			newJSON, _ := json.Marshal(payload)
@@ -949,7 +949,7 @@ func (s *WebServer) handleAPIDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Files are deleted directly; folders are deleted with their contents.
-	if err := session.Client.File.RemoveAll(r.Context(), cleanPath); err != nil {
+	if err := session.client.File.RemoveAll(r.Context(), cleanPath); err != nil {
 		slog.Error("Delete failed", "path", cleanPath, "error", err)
 		http.Error(w, "Delete failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -987,7 +987,7 @@ func (s *WebServer) handleAPIRename(w http.ResponseWriter, r *http.Request) {
 	cleanOld := path.Clean("/" + oldPath)
 	cleanNew := path.Clean("/" + newPath)
 
-	if err := session.Client.File.Rename(r.Context(), cleanOld, cleanNew); err != nil {
+	if err := session.client.File.Rename(r.Context(), cleanOld, cleanNew); err != nil {
 		slog.Error("Rename failed", "old", cleanOld, "new", cleanNew, "error", err)
 		http.Error(w, "Rename failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1023,7 +1023,7 @@ func (s *WebServer) handleAPIMkdir(w http.ResponseWriter, r *http.Request) {
 	// Sanitize path
 	cleanPath := path.Clean("/" + pathParam)
 
-	if err := session.Client.File.MakeDirectory(r.Context(), cleanPath); err != nil {
+	if err := session.client.File.MakeDirectory(r.Context(), cleanPath); err != nil {
 		slog.Error("Mkdir failed", "path", cleanPath, "error", err)
 		http.Error(w, "Mkdir failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1057,23 +1057,23 @@ func (s *WebServer) handleAPIControl(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch cmd {
 	case "light_on":
-		_, err = session.Client.MQTT.SetChamberLight(r.Context(), true)
+		_, err = session.client.MQTT.SetChamberLight(r.Context(), true)
 	case "light_off":
-		_, err = session.Client.MQTT.SetChamberLight(r.Context(), false)
+		_, err = session.client.MQTT.SetChamberLight(r.Context(), false)
 	case "speed_silent":
-		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedSilent)
+		_, err = session.client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedSilent)
 	case "speed_std":
-		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedStandard)
+		_, err = session.client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedStandard)
 	case "speed_sport":
-		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedSport)
+		_, err = session.client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedSport)
 	case "speed_ludi":
-		_, err = session.Client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedLudicrous)
+		_, err = session.client.MQTT.SetSpeedProfile(r.Context(), bambulan.SpeedLudicrous)
 	case "pause":
-		_, err = session.Client.MQTT.PausePrint(r.Context())
+		_, err = session.client.MQTT.PausePrint(r.Context())
 	case "resume":
-		_, err = session.Client.MQTT.ResumePrint(r.Context())
+		_, err = session.client.MQTT.ResumePrint(r.Context())
 	case "stop":
-		_, err = session.Client.MQTT.StopPrint(r.Context())
+		_, err = session.client.MQTT.StopPrint(r.Context())
 	case "set_fan":
 		s.handleFanControl(w, r, session)
 		return
@@ -1108,7 +1108,7 @@ func (s *WebServer) handleAPIFiles(w http.ResponseWriter, r *http.Request) {
 	// Sanitize path
 	cleanDir := path.Clean("/" + dir)
 
-	files, err := session.Client.File.ListFiles(r.Context(), cleanDir)
+	files, err := session.client.File.ListFiles(r.Context(), cleanDir)
 	if err != nil {
 		slog.Error("Failed to list files", "dir", cleanDir, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1137,7 +1137,7 @@ func (s *WebServer) handleAPIDownload(w http.ResponseWriter, r *http.Request) {
 	// Sanitize path
 	cleanPath := path.Clean("/" + pathParam)
 
-	reader, err := session.Client.File.Download(r.Context(), cleanPath)
+	reader, err := session.client.File.Download(r.Context(), cleanPath)
 	if err != nil {
 		slog.Error("Failed to start download", "path", cleanPath, "error", err)
 		http.Error(w, "Failed to download", http.StatusInternalServerError)
@@ -1199,30 +1199,30 @@ func (s *WebServer) handleAPIUpload(w http.ResponseWriter, r *http.Request) {
 	remotePath := path.Join(cleanDir, cleanFilename)
 
 	// Setup progress tracking
-	session.Mu.Lock()
-	session.UploadStatus = UploadStatus{
+	session.mu.Lock()
+	session.uploadStatus = UploadStatus{
 		Uploading: true,
 		Filename:  cleanFilename,
 	}
-	session.Mu.Unlock()
+	session.mu.Unlock()
 
 	defer func() {
-		session.Mu.Lock()
-		session.UploadStatus = UploadStatus{} // Reset
-		session.Mu.Unlock()
+		session.mu.Lock()
+		session.uploadStatus = UploadStatus{} // Reset
+		session.mu.Unlock()
 	}()
 
 	progressCb := func(current, total int64) {
-		session.Mu.Lock()
-		defer session.Mu.Unlock()
-		session.UploadStatus.Current = current
-		session.UploadStatus.Total = total
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		session.uploadStatus.Current = current
+		session.uploadStatus.Total = total
 		if total > 0 {
-			session.UploadStatus.Percent = float64(current) / float64(total) * 100
+			session.uploadStatus.Percent = float64(current) / float64(total) * 100
 		}
 	}
 
-	if err := session.Client.File.Upload(r.Context(), remotePath, file, progressCb); err != nil {
+	if err := session.client.File.Upload(r.Context(), remotePath, file, progressCb); err != nil {
 		slog.Error("Upload failed", "path", remotePath, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1277,30 +1277,30 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 		// 1. Upload file
 		remotePath = path.Join("/", header.Filename) // Root dir
 
-		session.Mu.Lock()
-		session.UploadStatus = UploadStatus{
+		session.mu.Lock()
+		session.uploadStatus = UploadStatus{
 			Uploading: true,
 			Filename:  header.Filename,
 		}
-		session.Mu.Unlock()
+		session.mu.Unlock()
 
 		defer func() {
-			session.Mu.Lock()
-			session.UploadStatus = UploadStatus{} // Reset
-			session.Mu.Unlock()
+			session.mu.Lock()
+			session.uploadStatus = UploadStatus{} // Reset
+			session.mu.Unlock()
 		}()
 
 		progressCb := func(current, total int64) {
-			session.Mu.Lock()
-			defer session.Mu.Unlock()
-			session.UploadStatus.Current = current
-			session.UploadStatus.Total = total
+			session.mu.Lock()
+			defer session.mu.Unlock()
+			session.uploadStatus.Current = current
+			session.uploadStatus.Total = total
 			if total > 0 {
-				session.UploadStatus.Percent = float64(current) / float64(total) * 100
+				session.uploadStatus.Percent = float64(current) / float64(total) * 100
 			}
 		}
 
-		if err := session.Client.File.Upload(r.Context(), remotePath, file, progressCb); err != nil {
+		if err := session.client.File.Upload(r.Context(), remotePath, file, progressCb); err != nil {
 			slog.Error("Upload failed during print start", "path", remotePath, "error", err)
 			http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1333,7 +1333,7 @@ func (s *WebServer) handleAPIPrint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Start Print
-	if _, err := session.Client.MQTT.StartPrint(r.Context(), remotePath, opts); err != nil {
+	if _, err := session.client.MQTT.StartPrint(r.Context(), remotePath, opts); err != nil {
 		slog.Error("Start print failed", "path", remotePath, "error", err)
 		http.Error(w, "Start print failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1381,14 +1381,14 @@ func (s *WebServer) handleAPIFilament(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if _, err := session.Client.MQTT.LoadFilament(r.Context(), target); err != nil {
+		if _, err := session.client.MQTT.LoadFilament(r.Context(), target); err != nil {
 			slog.Error("Load filament failed", "target", target, "error", err)
 			http.Error(w, "Load filament failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 	case "unload":
-		if _, err := session.Client.MQTT.UnloadFilament(r.Context()); err != nil {
+		if _, err := session.client.MQTT.UnloadFilament(r.Context()); err != nil {
 			slog.Error("Unload filament failed", "error", err)
 			http.Error(w, "Unload filament failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1437,7 +1437,7 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := session.Client.Camera.StartStream(onImage); err != nil {
+	if err := session.client.Camera.StartStream(r.Context(), onImage); err != nil {
 		slog.Error("Failed to start camera stream", "error", err)
 		http.Error(w, "Camera busy", http.StatusServiceUnavailable)
 		return
@@ -1446,7 +1446,7 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 		writeMu.Lock()
 		stopped = true
 		writeMu.Unlock()
-		session.Client.Camera.StopStream()
+		session.client.Camera.StopStream()
 	}()
 
 	// Wait until client disconnects
@@ -1455,28 +1455,28 @@ func (s *WebServer) handleCamera(w http.ResponseWriter, r *http.Request) {
 
 func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 	// Check concurrency and retry limits
-	session.Mu.Lock()
-	if session.Fetching[filename] {
-		session.Mu.Unlock()
+	session.mu.Lock()
+	if session.fetching[filename] {
+		session.mu.Unlock()
 		return
 	}
-	if session.FailedFetches[filename] >= 3 {
-		session.Mu.Unlock()
+	if session.failedFetches[filename] >= 3 {
+		session.mu.Unlock()
 		return
 	}
-	session.Fetching[filename] = true
-	session.Mu.Unlock()
+	session.fetching[filename] = true
+	session.mu.Unlock()
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
 		defer func() {
-			session.Mu.Lock()
-			delete(session.Fetching, filename)
+			session.mu.Lock()
+			delete(session.fetching, filename)
 			// Clear download status when done
-			session.MetadataDownloadStatus = MetadataDownloadStatus{}
-			session.Mu.Unlock()
+			session.metadataDownloadStatus = MetadataDownloadStatus{}
+			session.mu.Unlock()
 		}()
 
 		slog.Info("Async fetching metadata for", "file", filename)
@@ -1484,12 +1484,12 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 		tmpFile, size, tryFile, err := s.downloadMetadataWithRetry(ctx, session, filename)
 		if err != nil {
 			slog.Error("Failed to download metadata after retry", "file", filename, "error", err)
-			session.Mu.Lock()
-			session.FailedFetches[filename]++
-			if session.FailedFetches[filename] >= 3 {
-				slog.Debug("Skipping metadata fetch, max retries reached", "file", filename, "count", session.FailedFetches[filename])
+			session.mu.Lock()
+			session.failedFetches[filename]++
+			if session.failedFetches[filename] >= 3 {
+				slog.Debug("Skipping metadata fetch, max retries reached", "file", filename, "count", session.failedFetches[filename])
 			}
-			session.Mu.Unlock()
+			session.mu.Unlock()
 			return
 		}
 
@@ -1504,7 +1504,7 @@ func (s *WebServer) fetchMetadataAsync(session *Session, filename string) {
 			slog.Warn("Failed to open 3mf reader", "error", err)
 			return
 		}
-		rdr.MaxFileSize = s.MaxFileSize
+		rdr.MaxFileSize = s.maxFileSize
 		defer rdr.Close()
 
 		md, err := rdr.ParseMetadata()
@@ -1531,9 +1531,9 @@ func (s *WebServer) handleAPIThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session.Mu.RLock()
-	data, exists := session.ThumbnailCache[key]
-	session.Mu.RUnlock()
+	session.mu.RLock()
+	data, exists := session.thumbnailCache[key]
+	session.mu.RUnlock()
 
 	if !exists {
 		http.Error(w, "Thumbnail not found", http.StatusNotFound)
@@ -1564,9 +1564,9 @@ func (s *WebServer) getSession(w http.ResponseWriter, r *http.Request) (*Session
 		return s.tryRestoreSession(w, r)
 	}
 
-	s.Mu.RLock()
-	session, exists := s.Sessions[id]
-	s.Mu.RUnlock()
+	s.mu.RLock()
+	session, exists := s.sessions[id]
+	s.mu.RUnlock()
 
 	if exists {
 		session.touch()
@@ -1589,7 +1589,7 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 	}
 
 	// Decrypt
-	decryptedBytes, err := decrypt(dataBytes, s.Key)
+	decryptedBytes, err := decrypt(dataBytes, s.key)
 	if err != nil {
 		slog.Error("Failed to decrypt auth cookie", "error", err)
 		return nil, false
@@ -1611,12 +1611,12 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 	// Re-create session
 	sessionID := generateRandomString(32)
 	session := &Session{
-		Status:         &bambulan.PrinterStatus{},
-		CSRFToken:      generateRandomString(32),
-		MetadataCache:  make(map[string]*bambu3mf.Metadata),
-		ThumbnailCache: make(map[string][]byte),
-		FailedFetches:  make(map[string]int),
-		Fetching:       make(map[string]bool),
+		status:         &bambulan.PrinterStatus{},
+		csrfToken:      generateRandomString(32),
+		metadataCache:  make(map[string]*bambu3mf.Metadata),
+		thumbnailCache: make(map[string][]byte),
+		failedFetches:  make(map[string]int),
+		fetching:       make(map[string]bool),
 	}
 
 	client, err := s.getClient(host, code, serial)
@@ -1624,8 +1624,8 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 		slog.Error("Failed to restore session connection", "error", err)
 		return nil, false
 	}
-	session.Client = client
-	session.Status = client.GetPrinterStatus()
+	session.client = client
+	session.status = client.PrinterStatus()
 
 	s.addSession(sessionID, session)
 
@@ -1635,7 +1635,7 @@ func (s *WebServer) tryRestoreSession(w http.ResponseWriter, r *http.Request) (*
 		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   s.UseTLS,
+		Secure:   s.useTLS,
 		SameSite: http.SameSiteStrictMode,
 	})
 
@@ -1657,7 +1657,7 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 		slog.Warn("Failed to create 3MF reader", "error", err)
 		return
 	}
-	rdr.MaxFileSize = s.MaxFileSize
+	rdr.MaxFileSize = s.maxFileSize
 	defer rdr.Close()
 
 	md, err := rdr.ParseMetadata()
@@ -1668,19 +1668,19 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 
 	slog.Info("Parsed 3MF metadata", "file", header.Filename, "plates", len(md.Plates))
 
-	session.Mu.Lock()
-	defer session.Mu.Unlock()
+	session.mu.Lock()
+	defer session.mu.Unlock()
 
-	session.CurrentMetadata = md
-	session.CurrentMetadataFilename = header.Filename
-	if session.MetadataCache == nil {
-		session.MetadataCache = make(map[string]*bambu3mf.Metadata)
+	session.currentMetadata = md
+	session.currentMetadataFilename = header.Filename
+	if session.metadataCache == nil {
+		session.metadataCache = make(map[string]*bambu3mf.Metadata)
 	}
-	session.MetadataCache[header.Filename] = md
+	session.metadataCache[header.Filename] = md
 
 	// Cache thumbnails
-	if session.ThumbnailCache == nil {
-		session.ThumbnailCache = make(map[string][]byte)
+	if session.thumbnailCache == nil {
+		session.thumbnailCache = make(map[string][]byte)
 	}
 	for _, p := range md.Plates {
 		// Cache small thumbnail
@@ -1688,14 +1688,14 @@ func (s *WebServer) processUploaded3MF(session *Session, file multipart.File, he
 			if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
 				// Key format: filename/plate_id_small
 				key := fmt.Sprintf("%s/%d_small", header.Filename, p.ID)
-				session.ThumbnailCache[key] = small
+				session.thumbnailCache[key] = small
 			}
 		}
 		// Cache large thumbnail
 		if p.ThumbnailPath != "" {
 			if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
 				key := fmt.Sprintf("%s/%d", header.Filename, p.ID)
-				session.ThumbnailCache[key] = large
+				session.thumbnailCache[key] = large
 			}
 		}
 	}
@@ -1731,7 +1731,7 @@ func (s *WebServer) downloadMetadataWithRetry(ctx context.Context, session *Sess
 }
 
 func (s *WebServer) downloadToTemp(ctx context.Context, session *Session, target string) (*os.File, int64, error) {
-	rc, err := session.Client.File.Download(ctx, target)
+	rc, err := session.client.File.Download(ctx, target)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1751,15 +1751,15 @@ func (s *WebServer) downloadToTemp(ctx context.Context, session *Session, target
 	}()
 
 	// Set initial download status
-	session.Mu.Lock()
-	session.MetadataDownloadStatus = MetadataDownloadStatus{
+	session.mu.Lock()
+	session.metadataDownloadStatus = MetadataDownloadStatus{
 		Downloading: true,
 		Filename:    target,
 		Current:     0,
 		Total:       0,
 		Percent:     0,
 	}
-	session.Mu.Unlock()
+	session.mu.Unlock()
 
 	// Create a progress tracking writer
 	var written int64
@@ -1767,10 +1767,10 @@ func (s *WebServer) downloadToTemp(ctx context.Context, session *Session, target
 		writer: tFile,
 		onProgress: func(n int64) {
 			written += n
-			session.Mu.Lock()
-			session.MetadataDownloadStatus.Current = written
+			session.mu.Lock()
+			session.metadataDownloadStatus.Current = written
 			// We don't know total size for FTP, so just show bytes downloaded
-			session.Mu.Unlock()
+			session.mu.Unlock()
 		},
 	}
 
@@ -1780,13 +1780,13 @@ func (s *WebServer) downloadToTemp(ctx context.Context, session *Session, target
 	}
 
 	// Update final size
-	session.Mu.Lock()
-	session.MetadataDownloadStatus.Total = sz
-	session.MetadataDownloadStatus.Current = sz
+	session.mu.Lock()
+	session.metadataDownloadStatus.Total = sz
+	session.metadataDownloadStatus.Current = sz
 	if sz > 0 {
-		session.MetadataDownloadStatus.Percent = 100
+		session.metadataDownloadStatus.Percent = 100
 	}
-	session.Mu.Unlock()
+	session.mu.Unlock()
 
 	if _, err := tFile.Seek(0, 0); err != nil {
 		return nil, 0, err
@@ -1811,12 +1811,12 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 }
 
 func (s *WebServer) updateSessionMetadata(session *Session, filename string, tryFile string, md *bambu3mf.Metadata, rdr *bambu3mf.Reader) {
-	session.Mu.Lock()
-	defer session.Mu.Unlock()
+	session.mu.Lock()
+	defer session.mu.Unlock()
 
-	session.MetadataCache[filename] = md
+	session.metadataCache[filename] = md
 	if tryFile != filename {
-		session.MetadataCache[tryFile] = md
+		session.metadataCache[tryFile] = md
 	}
 
 	// Helper to strip leading slash for comparison
@@ -1824,29 +1824,29 @@ func (s *WebServer) updateSessionMetadata(session *Session, filename string, try
 		return strings.TrimPrefix(s, "/")
 	}
 
-	if stripSlash(session.Status.GcodeFile) == filename || stripSlash(session.Status.SubtaskName) == filename {
-		session.CurrentMetadata = md
-		session.CurrentMetadataFilename = tryFile
+	if stripSlash(session.status.GcodeFile) == filename || stripSlash(session.status.SubtaskName) == filename {
+		session.currentMetadata = md
+		session.currentMetadataFilename = tryFile
 	}
 
 	for _, p := range md.Plates {
 		if p.ThumbnailSmall != "" {
 			if small, err := rdr.ReadFile(p.ThumbnailSmall); err == nil {
 				key := fmt.Sprintf("%s/%d_small", filename, p.ID)
-				session.ThumbnailCache[key] = small
+				session.thumbnailCache[key] = small
 				if tryFile != filename {
 					key2 := fmt.Sprintf("%s/%d_small", tryFile, p.ID)
-					session.ThumbnailCache[key2] = small
+					session.thumbnailCache[key2] = small
 				}
 			}
 		}
 		if p.ThumbnailPath != "" {
 			if large, err := rdr.ReadFile(p.ThumbnailPath); err == nil {
 				key := fmt.Sprintf("%s/%d", filename, p.ID)
-				session.ThumbnailCache[key] = large
+				session.thumbnailCache[key] = large
 				if tryFile != filename {
 					key2 := fmt.Sprintf("%s/%d", tryFile, p.ID)
-					session.ThumbnailCache[key2] = large
+					session.thumbnailCache[key2] = large
 				}
 			}
 		}
@@ -1862,10 +1862,10 @@ func (s *WebServer) handleFanControl(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 
-	session.Mu.RLock()
-	model := session.Status.DeviceModel
-	session.Mu.RUnlock()
-	caps := bambulan.GetPrinterCapabilities(model)
+	session.mu.RLock()
+	model := session.status.DeviceModel
+	session.mu.RUnlock()
+	caps := bambulan.CapabilitiesForModel(model)
 	if fan == "chamber" && !caps.HasChamberFan {
 		http.Error(w, "Chamber fan not supported", http.StatusBadRequest)
 		return
@@ -1875,7 +1875,7 @@ func (s *WebServer) handleFanControl(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 
-	if _, err := session.Client.MQTT.SetFanSpeed(r.Context(), fan, speed); err != nil {
+	if _, err := session.client.MQTT.SetFanSpeed(r.Context(), fan, speed); err != nil {
 		slog.Error("Control command failed", "cmd", "set_fan", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1892,10 +1892,10 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	session.Mu.RLock()
-	model := session.Status.DeviceModel
-	session.Mu.RUnlock()
-	caps := bambulan.GetPrinterCapabilities(model)
+	session.mu.RLock()
+	model := session.status.DeviceModel
+	session.mu.RUnlock()
+	caps := bambulan.CapabilitiesForModel(model)
 
 	var err error
 	switch target {
@@ -1909,13 +1909,13 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 		if indexStr != "" {
 			index, _ = strconv.Atoi(indexStr)
 		}
-		_, err = session.Client.MQTT.SetNozzleTemperature(r.Context(), temp, index)
+		_, err = session.client.MQTT.SetNozzleTemperature(r.Context(), temp, index)
 	case "bed":
 		if temp > caps.MaxBedTemp {
 			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxBedTemp), http.StatusBadRequest)
 			return
 		}
-		_, err = session.Client.MQTT.SetBedTemperature(r.Context(), temp)
+		_, err = session.client.MQTT.SetBedTemperature(r.Context(), temp)
 	case "chamber":
 		if !caps.HasChamberHeater {
 			http.Error(w, "Chamber heater not supported", http.StatusBadRequest)
@@ -1925,7 +1925,7 @@ func (s *WebServer) handleTempControl(w http.ResponseWriter, r *http.Request, se
 			http.Error(w, fmt.Sprintf("Temperature exceeds limit of %d", caps.MaxChamberTemp), http.StatusBadRequest)
 			return
 		}
-		_, err = session.Client.MQTT.SetChamberTemperature(r.Context(), temp)
+		_, err = session.client.MQTT.SetChamberTemperature(r.Context(), temp)
 	default:
 		http.Error(w, "Invalid target type", http.StatusBadRequest)
 		return

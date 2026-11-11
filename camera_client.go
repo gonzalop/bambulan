@@ -2,8 +2,10 @@ package bambulan
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +15,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+)
+
+var (
+	// ErrStreamAlreadyRunning is returned by StartStream when a camera stream is already active.
+	ErrStreamAlreadyRunning = errors.New("stream already running")
+	// ErrFrameTimeout is returned by CaptureFrame when no complete JPEG frame arrives before the timeout.
+	ErrFrameTimeout = errors.New("timeout waiting for frame")
 )
 
 // CameraClient handles the MJPEG camera stream connection over TCP/TLS.
@@ -47,12 +56,15 @@ var (
 
 // dial connects to the camera. The timeout covers both TCP connect and the TLS
 // handshake, so a host that accepts but never answers can't block forever.
-func (c *CameraClient) dial() (*tls.Conn, error) {
-	return tls.DialWithDialer(&net.Dialer{Timeout: cameraDialTimeout}, "tcp",
-		net.JoinHostPort(c.Hostname, strconv.Itoa(c.Port)), &tls.Config{
+func (c *CameraClient) dial(ctx context.Context) (net.Conn, error) {
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: cameraDialTimeout},
+		Config: &tls.Config{
 			// Bambu Lab printers use self-signed certificates for their camera stream.
 			InsecureSkipVerify: true,
-		})
+		},
+	}
+	return dialer.DialContext(ctx, "tcp", net.JoinHostPort(c.Hostname, strconv.Itoa(c.Port)))
 }
 
 // extractFrames calls emit with each complete JPEG frame in buf and returns
@@ -102,7 +114,7 @@ func NewCameraClient(hostname, accessCode string) *CameraClient {
 	}
 }
 
-// GetRTSPURL returns the authenticated RTSPS URL for the printer's camera stream.
+// RTSPURL returns the authenticated RTSPS URL for the printer's camera stream.
 // It accepts an optional `reportedURL` (e.g., from PrinterStatus.IPCam.RTSPURL).
 //
 // If `reportedURL` is provided (non-empty), it injects the authentication credentials into it.
@@ -112,16 +124,16 @@ func NewCameraClient(hostname, accessCode string) *CameraClient {
 //
 // Example:
 //
-//	status := client.GetPrinterStatus()
+//	status := client.PrinterStatus()
 //	var url string
 //	if status.IPCam != nil {
 //	    // Use the URL reported by the printer (recommended)
-//	    url = client.Camera.GetRTSPURL(status.IPCam.RTSPURL)
+//	    url = client.Camera.RTSPURL(status.IPCam.RTSPURL)
 //	} else {
 //	    // Fallback to default guess (logs a warning)
-//	    url = client.Camera.GetRTSPURL("")
+//	    url = client.Camera.RTSPURL("")
 //	}
-func (c *CameraClient) GetRTSPURL(reportedURL string) string {
+func (c *CameraClient) RTSPURL(reportedURL string) string {
 	if reportedURL != "" {
 		// e.g. rtsps://192.168.1.50:322/streaming/live/1
 		// We need to inject "bblp:<code >@" after "rtsps://"
@@ -167,34 +179,35 @@ func (c *CameraClient) createAuthPacket() []byte {
 // Compatibility:
 //   - P1 / A1 Series: This is the primary method for streaming in LAN mode.
 //   - X1 Series: Supported as a standard fallback. For higher quality (1080p/30fps),
-//     consider using GetRTSPURL() if supported by the network configuration.
+//     consider using RTSPURL() if supported by the network configuration.
 //
-// This method runs in a new goroutine and will continue until StopStream is called or an error occurs.
+// This method runs in a new goroutine and will continue until ctx is cancelled, StopStream is called, or an error occurs.
 //
 // Parameters:
+//   - ctx: Context controlling the stream lifecycle.
 //   - onImage: A callback function `func(imageData []byte)` which is invoked for each received JPEG frame.
 //
 // Example:
 //
-//	err := client.Camera.StartStream(func(imgData []byte) {
+//	err := client.Camera.StartStream(ctx, func(imgData []byte) {
 //	    fmt.Printf("Received JPEG frame of %d bytes\n", len(imgData))
 //	    // Process or save image data
 //	})
 //	if err != nil {
 //	    log.Println("Error starting stream:", err)
 //	}
-func (c *CameraClient) StartStream(onImage func([]byte)) error {
+func (c *CameraClient) StartStream(ctx context.Context, onImage func([]byte)) error {
 	c.mu.Lock()
 	if c.streaming {
 		c.mu.Unlock()
-		return fmt.Errorf("stream already running")
+		return ErrStreamAlreadyRunning
 	}
 	c.streaming = true
 	c.stopChan = make(chan struct{})
 	stopChan := c.stopChan
 	c.mu.Unlock()
 
-	go c.streamLoop(stopChan, onImage)
+	go c.streamLoop(ctx, stopChan, onImage)
 	return nil
 }
 
@@ -208,7 +221,7 @@ func (c *CameraClient) StopStream() {
 	}
 }
 
-func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) {
+func (c *CameraClient) streamLoop(ctx context.Context, stopChan chan struct{}, onImage func([]byte)) {
 	defer func() {
 		c.mu.Lock()
 		if c.stopChan == stopChan {
@@ -217,7 +230,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 		c.mu.Unlock()
 	}()
 
-	conn, err := c.dial()
+	conn, err := c.dial(ctx)
 	if err != nil {
 		slog.Error("Camera connection failed", "error", err)
 		return
@@ -236,6 +249,8 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 	for {
 		select {
 		case <-stopChan:
+			return
+		case <-ctx.Done():
 			return
 		default:
 			// Set a read deadline so we don't block indefinitely and can check stopChan
@@ -274,7 +289,7 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 //
 // Example:
 //
-//	imgData, err := client.Camera.CaptureFrame()
+//	imgData, err := client.Camera.CaptureFrame(ctx)
 //	if err != nil {
 //	    log.Println("Error capturing frame:", err)
 //	} else {
@@ -283,14 +298,21 @@ func (c *CameraClient) streamLoop(stopChan chan struct{}, onImage func([]byte)) 
 //	        log.Println("Error saving frame:", err)
 //	    }
 //	}
-func (c *CameraClient) CaptureFrame() ([]byte, error) {
-	conn, err := c.dial()
+func (c *CameraClient) CaptureFrame(ctx context.Context) ([]byte, error) {
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
+	stopCancel := context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+	})
+	defer stopCancel()
 
 	if _, err := conn.Write(c.createAuthPacket()); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 
@@ -303,14 +325,19 @@ func (c *CameraClient) CaptureFrame() ([]byte, error) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-timeout:
-			return nil, fmt.Errorf("timeout waiting for frame")
+			return nil, ErrFrameTimeout
 		default:
 			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 				return nil, err
 			}
 			n, err := conn.Read(readBuf)
 			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				return nil, err
 			}
 			buffer, scanned = extractFrames(append(buffer, readBuf[:n]...), scanned, func(img []byte) {
