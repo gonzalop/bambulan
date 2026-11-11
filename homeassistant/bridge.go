@@ -374,10 +374,11 @@ func (b *Bridge) publishAMSDiscovery(ctx context.Context, status *bambulan.Print
 }
 
 func (b *Bridge) setupSubscriptions(ctx context.Context) error {
-	tag := fmt.Sprintf("bambu_lab_%s", b.serial)
+	tag := b.tag()
 	slog.Debug("Setting up Home Assistant command subscriptions", "tag", tag)
 
-	subscribe := func(topic string, cb func(*mq.Client, mq.Message)) error {
+	subscribe := func(entity string, cb func(*mq.Client, mq.Message)) error {
+		topic := fmt.Sprintf("%s/%s/%s/set", b.prefix, tag, entity)
 		slog.Debug("Subscribing to HA topic", "topic", topic)
 		token := b.ha.Subscribe(ctx, topic, 0, cb)
 		if err := token.Wait(ctx); err != nil {
@@ -386,141 +387,150 @@ func (b *Bridge) setupSubscriptions(ctx context.Context) error {
 		return token.Error()
 	}
 
-	// Chamber Light
-	if err := subscribe(fmt.Sprintf("%s/%s/chamber_light/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		on := strings.ToUpper(string(msg.Payload)) == "ON"
-		slog.Debug("HA Command received: Chamber Light", "on", on)
-		_, _ = b.bambu.MQTT.SetChamberLight(context.Background(), on)
-
-		state := "OFF"
-		if on {
-			state = "ON"
-		}
-		lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
-		b.ha.Publish(context.Background(), lightTopic, []byte(state), mq.WithRetain(true))
-		b.swapLastLight(state)
+	if err := subscribe("chamber_light", func(_ *mq.Client, msg mq.Message) {
+		b.handleLightCommand(tag, msg)
 	}); err != nil {
 		return err
 	}
 
-	// Print Actions
-	_ = subscribe(fmt.Sprintf("%s/%s/pause_print/set", b.prefix, tag), func(_ *mq.Client, _ mq.Message) {
+	_ = subscribe("pause_print", func(_ *mq.Client, _ mq.Message) {
 		slog.Debug("HA Command received: Pause Print")
 		_, _ = b.bambu.MQTT.PausePrint(context.Background())
 	})
-	_ = subscribe(fmt.Sprintf("%s/%s/resume_print/set", b.prefix, tag), func(_ *mq.Client, _ mq.Message) {
+	_ = subscribe("resume_print", func(_ *mq.Client, _ mq.Message) {
 		slog.Debug("HA Command received: Resume Print")
 		_, _ = b.bambu.MQTT.ResumePrint(context.Background())
 	})
-	_ = subscribe(fmt.Sprintf("%s/%s/stop_print/set", b.prefix, tag), func(_ *mq.Client, _ mq.Message) {
+	_ = subscribe("stop_print", func(_ *mq.Client, _ mq.Message) {
 		slog.Debug("HA Command received: Stop Print")
 		_, _ = b.bambu.MQTT.StopPrint(context.Background())
 	})
-
-	// Refresh Files
-	_ = subscribe(fmt.Sprintf("%s/%s/refresh_files/set", b.prefix, tag), func(_ *mq.Client, _ mq.Message) {
+	_ = subscribe("refresh_files", func(_ *mq.Client, _ mq.Message) {
 		slog.Debug("HA Command received: Refresh Files")
 		_ = b.syncFiles(ctx)
 	})
-
-	// Camera Streaming
-	_ = subscribe(fmt.Sprintf("%s/%s/camera_streaming/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
+	_ = subscribe("camera_streaming", func(_ *mq.Client, msg mq.Message) {
 		on := strings.ToUpper(string(msg.Payload)) == "ON"
 		slog.Debug("HA Command received: Camera Enable", "on", on)
 		b.cameraEnabled.Store(on)
 		b.publishCameraState(ctx)
 	})
-
-	// Speed Profile
-	_ = subscribe(fmt.Sprintf("%s/%s/speed_profile/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		val := string(msg.Payload)
-		slog.Debug("HA Command received: Speed Profile", "value", val)
-		level := "2"
-		switch val {
-		case "Silent":
-			level = "1"
-		case "Standard":
-			level = "2"
-		case "Sport":
-			level = "3"
-		case "Ludicrous":
-			level = "4"
-		}
-		_, _ = b.bambu.MQTT.SetSpeedProfile(context.Background(), level)
+	_ = subscribe("speed_profile", func(_ *mq.Client, msg mq.Message) {
+		b.handleSpeedCommand(msg)
+	})
+	_ = subscribe("print_file", func(_ *mq.Client, msg mq.Message) {
+		b.handlePrintFileCommand(msg)
 	})
 
-	// Print File
-	_ = subscribe(fmt.Sprintf("%s/%s/print_file/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		file := string(msg.Payload)
-		if file == "None" || file == "" {
-			return
-		}
-		slog.Debug("HA Command received: Print File", "file", file)
-		opts := bambulan.PrintOptions{
-			BedType:     "textured_plate",
-			BedLeveling: true,
-		}
-		_, _ = b.bambu.MQTT.StartPrint(context.Background(), file, opts)
-	})
+	for _, target := range []string{"target_nozzle_temperature", "target_bed_temperature", "target_chamber_temperature"} {
+		_ = subscribe(target, func(_ *mq.Client, msg mq.Message) {
+			b.handleTempCommand(target, msg)
+		})
+	}
 
-	// Temperatures
-	_ = subscribe(fmt.Sprintf("%s/%s/target_nozzle_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		temp, _ := strconv.Atoi(string(msg.Payload))
+	for _, fan := range []struct {
+		entity string
+		name   string
+	}{
+		{"part_cooling_fan", "part"},
+		{"aux_fan", "aux"},
+		{"chamber_fan", "chamber"},
+	} {
+		_ = subscribe(fan.entity, func(_ *mq.Client, msg mq.Message) {
+			b.handleFanCommand(fan.name, msg)
+		})
+	}
+
+	return nil
+}
+
+func (b *Bridge) handleLightCommand(tag string, msg mq.Message) {
+	on := strings.ToUpper(string(msg.Payload)) == "ON"
+	slog.Debug("HA Command received: Chamber Light", "on", on)
+	_, _ = b.bambu.MQTT.SetChamberLight(context.Background(), on)
+
+	state := "OFF"
+	if on {
+		state = "ON"
+	}
+	lightTopic := fmt.Sprintf("%s/%s/chamber_light/state", b.prefix, tag)
+	b.ha.Publish(context.Background(), lightTopic, []byte(state), mq.WithRetain(true))
+	b.swapLastLight(state)
+}
+
+func (b *Bridge) handleSpeedCommand(msg mq.Message) {
+	val := string(msg.Payload)
+	slog.Debug("HA Command received: Speed Profile", "value", val)
+	level := bambulan.SpeedStandard
+	switch val {
+	case "Silent":
+		level = bambulan.SpeedSilent
+	case "Standard":
+		level = bambulan.SpeedStandard
+	case "Sport":
+		level = bambulan.SpeedSport
+	case "Ludicrous":
+		level = bambulan.SpeedLudicrous
+	}
+	_, _ = b.bambu.MQTT.SetSpeedProfile(context.Background(), level)
+}
+
+func (b *Bridge) handlePrintFileCommand(msg mq.Message) {
+	file := string(msg.Payload)
+	if file == "None" || file == "" {
+		return
+	}
+	slog.Debug("HA Command received: Print File", "file", file)
+	opts := bambulan.PrintOptions{
+		BedType:     "textured_plate",
+		BedLeveling: true,
+	}
+	_, _ = b.bambu.MQTT.StartPrint(context.Background(), file, opts)
+}
+
+func (b *Bridge) handleTempCommand(target string, msg mq.Message) {
+	temp, err := strconv.Atoi(strings.TrimSpace(string(msg.Payload)))
+	if err != nil {
+		slog.Warn("HA Command ignored: invalid temperature payload", "target", target, "payload", string(msg.Payload))
+		return
+	}
+	model, _, _ := b.identity()
+	caps := bambulan.CapabilitiesForModel(model)
+
+	switch target {
+	case "target_nozzle_temperature":
 		slog.Debug("HA Command received: Target Nozzle Temp", "value", temp)
-		model, _, _ := b.identity()
-		caps := bambulan.CapabilitiesForModel(model)
 		if temp > caps.MaxNozzleTemp {
 			temp = caps.MaxNozzleTemp
 		}
 		_, _ = b.bambu.MQTT.SetNozzleTemperature(context.Background(), temp, 0)
-	})
-	_ = subscribe(fmt.Sprintf("%s/%s/target_bed_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		temp, _ := strconv.Atoi(string(msg.Payload))
+	case "target_bed_temperature":
 		slog.Debug("HA Command received: Target Bed Temp", "value", temp)
-		model, _, _ := b.identity()
-		caps := bambulan.CapabilitiesForModel(model)
 		if temp > caps.MaxBedTemp {
 			temp = caps.MaxBedTemp
 		}
 		_, _ = b.bambu.MQTT.SetBedTemperature(context.Background(), temp)
-	})
-	_ = subscribe(fmt.Sprintf("%s/%s/target_chamber_temperature/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		temp, _ := strconv.Atoi(string(msg.Payload))
+	case "target_chamber_temperature":
 		slog.Debug("HA Command received: Target Chamber Temp", "value", temp)
-		model, _, _ := b.identity()
-		caps := bambulan.CapabilitiesForModel(model)
 		if caps.HasChamberHeater {
 			if temp > caps.MaxChamberTemp {
 				temp = caps.MaxChamberTemp
 			}
 			_, _ = b.bambu.MQTT.SetChamberTemperature(context.Background(), temp)
 		}
-	})
+	}
+}
 
-	// Fans
-	_ = subscribe(fmt.Sprintf("%s/%s/part_cooling_fan/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		val, _ := strconv.Atoi(string(msg.Payload))
-		slog.Debug("HA Command received: Fan Part", "value", val)
-		// Scale 0-15 to 0-100%
-		percent := (val * 100) / 15
-		_, _ = b.bambu.MQTT.SetFanSpeed(context.Background(), "part", percent)
-	})
-	_ = subscribe(fmt.Sprintf("%s/%s/aux_fan/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		val, _ := strconv.Atoi(string(msg.Payload))
-		slog.Debug("HA Command received: Fan Aux", "value", val)
-		// Scale 0-15 to 0-100%
-		percent := (val * 100) / 15
-		_, _ = b.bambu.MQTT.SetFanSpeed(context.Background(), "aux", percent)
-	})
-	_ = subscribe(fmt.Sprintf("%s/%s/chamber_fan/set", b.prefix, tag), func(_ *mq.Client, msg mq.Message) {
-		val, _ := strconv.Atoi(string(msg.Payload))
-		slog.Debug("HA Command received: Fan Chamber", "value", val)
-		// Scale 0-15 to 0-100%
-		percent := (val * 100) / 15
-		_, _ = b.bambu.MQTT.SetFanSpeed(context.Background(), "chamber", percent)
-	})
-
-	return nil
+func (b *Bridge) handleFanCommand(fan string, msg mq.Message) {
+	val, err := strconv.Atoi(strings.TrimSpace(string(msg.Payload)))
+	if err != nil {
+		slog.Warn("HA Command ignored: invalid fan speed payload", "fan", fan, "payload", string(msg.Payload))
+		return
+	}
+	slog.Debug("HA Command received: Fan", "fan", fan, "value", val)
+	// Scale 0-15 to 0-100%
+	percent := (val * 100) / 15
+	_, _ = b.bambu.MQTT.SetFanSpeed(context.Background(), fan, percent)
 }
 
 func (b *Bridge) syncFiles(ctx context.Context) error {
@@ -542,6 +552,72 @@ func (b *Bridge) syncFiles(ctx context.Context) error {
 	return b.publishDiscovery(ctx, haModel)
 }
 
+type discoveryEntry struct {
+	cfg       *DiscoveryConfig
+	component string
+}
+
+func (b *Bridge) discoveryEntries(factory *DiscoveryFactory, caps bambulan.PrinterCapability, files []string) []discoveryEntry {
+	configs := []discoveryEntry{
+		// Base Sensors
+		{factory.Sensor("print_stage", "Print Stage", "", "", "", "mdi:printer-3d", ""), "sensor"},
+		{factory.Sensor("subtask_name", "Subtask Name", "", "", "", "mdi:file-text-outline", ""), "sensor"},
+		{factory.Sensor("progress", "Progress", "%", "", "measurement", "mdi:progress-clock", ""), "sensor"},
+		{factory.Sensor("remaining_time", "Remaining Time", "min", "duration", "measurement", "mdi:timer-sand", ""), "sensor"},
+		{factory.Sensor("layer_progress", "Layer Progress", "", "", "", "mdi:layers-triple", ""), "sensor"},
+		{factory.Sensor("current_layer", "Current Layer", "", "", "", "mdi:layers-triple", "diagnostic"), "sensor"},
+		{factory.Sensor("total_layers", "Total Layers", "", "", "", "mdi:layers-triple-outline", "diagnostic"), "sensor"},
+		{factory.Sensor("nozzle_temperature", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"},
+		{factory.Sensor("nozzle_target_temperature", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"},
+		{factory.Sensor("bed_temperature", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"},
+		{factory.Sensor("bed_target_temperature", "Bed Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"},
+	}
+
+	if caps.HasChamberTemp {
+		configs = append(configs, discoveryEntry{factory.Sensor("chamber_temperature", "Chamber Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
+	}
+
+	configs = append(configs,
+		discoveryEntry{factory.Sensor("wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi", "diagnostic"), "sensor"},
+		discoveryEntry{factory.Sensor("ip_address", "IP Address", "", "", "", "mdi:ip-network", "diagnostic"), "sensor"},
+		// Binary Sensors
+		discoveryEntry{factory.BinarySensor("online", "Online", "connectivity", "mdi:printer-check", "diagnostic"), "binary_sensor"},
+		discoveryEntry{factory.BinarySensor("hms_error_active", "HMS Error Active", "problem", "mdi:alert-circle", ""), "binary_sensor"},
+		// Diagnostic Sensors
+		discoveryEntry{factory.Sensor("hms_error_description", "HMS Error Description", "", "", "", "mdi:text-box-search", ""), "sensor"},
+		// Switches
+		discoveryEntry{factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""), "switch"},
+		discoveryEntry{factory.Switch("camera_streaming", "Camera Streaming", "mdi:video-outline", "diagnostic"), "switch"},
+		// Buttons
+		discoveryEntry{b.createActionButtonConfig(factory, "pause_print", "Pause Print", "mdi:pause"), "button"},
+		discoveryEntry{b.createActionButtonConfig(factory, "resume_print", "Resume Print", "mdi:play"), "button"},
+		discoveryEntry{b.createActionButtonConfig(factory, "stop_print", "Stop Print", "mdi:stop"), "button"},
+		discoveryEntry{factory.Button("refresh_files", "Refresh Files", "mdi:refresh", ""), "button"},
+		// Selects
+		discoveryEntry{factory.Select("speed_profile", "Speed Profile", "mdi:speedometer", "", []string{"Silent", "Standard", "Sport", "Ludicrous"}), "select"},
+		discoveryEntry{factory.Select("print_file", "Print File", "mdi:file-send", "", files), "select"},
+		// Numbers
+		discoveryEntry{factory.Number("target_nozzle_temperature", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxNozzleTemp), 1), "number"},
+		discoveryEntry{factory.Number("target_bed_temperature", "Target Bed Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxBedTemp), 1), "number"},
+	)
+
+	if caps.HasChamberHeater {
+		configs = append(configs, discoveryEntry{factory.Number("target_chamber_temperature", "Target Chamber Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxChamberTemp), 1), "number"})
+	}
+
+	configs = append(configs, discoveryEntry{factory.Number("part_cooling_fan", "Part Cooling Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
+	if caps.HasAuxFan {
+		configs = append(configs, discoveryEntry{factory.Number("aux_fan", "Aux Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
+	}
+	if caps.HasChamberFan {
+		configs = append(configs, discoveryEntry{factory.Number("chamber_fan", "Chamber Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
+	}
+
+	// Camera
+	configs = append(configs, discoveryEntry{factory.Camera("camera", "Camera", ""), "camera"})
+	return configs
+}
+
 func (b *Bridge) publishDiscovery(ctx context.Context, model string) error {
 	slog.Debug("HA Bridge: Publishing entity discovery configurations", "serial", b.serial)
 	printerModel, _, displayName := b.identity()
@@ -551,73 +627,7 @@ func (b *Bridge) publishDiscovery(ctx context.Context, model string) error {
 	caps := bambulan.CapabilitiesForModel(printerModel)
 	factory := NewDiscoveryFactory(b.prefix, b.serial, model, displayName)
 
-	type entry struct {
-		cfg       *DiscoveryConfig
-		component string
-	}
-	var configs []entry
-
-	// Base Sensors
-	configs = append(configs, entry{factory.Sensor("print_stage", "Print Stage", "", "", "", "mdi:printer-3d", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("subtask_name", "Subtask Name", "", "", "", "mdi:file-text-outline", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("progress", "Progress", "%", "", "measurement", "mdi:progress-clock", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("remaining_time", "Remaining Time", "min", "duration", "measurement", "mdi:timer-sand", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("layer_progress", "Layer Progress", "", "", "", "mdi:layers-triple", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("current_layer", "Current Layer", "", "", "", "mdi:layers-triple", "diagnostic"), "sensor"})
-	configs = append(configs, entry{factory.Sensor("total_layers", "Total Layers", "", "", "", "mdi:layers-triple-outline", "diagnostic"), "sensor"})
-	configs = append(configs, entry{factory.Sensor("nozzle_temperature", "Nozzle Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("nozzle_target_temperature", "Nozzle Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
-	configs = append(configs, entry{factory.Sensor("bed_temperature", "Bed Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
-	configs = append(configs, entry{factory.Sensor("bed_target_temperature", "Bed Target Temperature", "°C", "temperature", "measurement", "mdi:thermometer-chevron-up", "diagnostic"), "sensor"})
-
-	if caps.HasChamberTemp {
-		configs = append(configs, entry{factory.Sensor("chamber_temperature", "Chamber Temperature", "°C", "temperature", "measurement", "mdi:thermometer-lines", ""), "sensor"})
-	}
-
-	configs = append(configs, entry{factory.Sensor("wifi_signal", "WiFi Signal", "dBm", "signal_strength", "measurement", "mdi:wifi", "diagnostic"), "sensor"})
-	configs = append(configs, entry{factory.Sensor("ip_address", "IP Address", "", "", "", "mdi:ip-network", "diagnostic"), "sensor"})
-
-	// Binary Sensors
-	configs = append(configs, entry{factory.BinarySensor("online", "Online", "connectivity", "mdi:printer-check", "diagnostic"), "binary_sensor"})
-	configs = append(configs, entry{factory.BinarySensor("hms_error_active", "HMS Error Active", "problem", "mdi:alert-circle", ""), "binary_sensor"})
-
-	// Diagnostic Sensors
-	configs = append(configs, entry{factory.Sensor("hms_error_description", "HMS Error Description", "", "", "", "mdi:text-box-search", ""), "sensor"})
-
-	// Switches
-	configs = append(configs, entry{factory.Switch("chamber_light", "Chamber Light", "mdi:lightbulb-outline", ""), "switch"})
-	configs = append(configs, entry{factory.Switch("camera_streaming", "Camera Streaming", "mdi:video-outline", "diagnostic"), "switch"})
-
-	// Buttons
-	configs = append(configs, entry{b.createActionButtonConfig(factory, "pause_print", "Pause Print", "mdi:pause"), "button"})
-	configs = append(configs, entry{b.createActionButtonConfig(factory, "resume_print", "Resume Print", "mdi:play"), "button"})
-	configs = append(configs, entry{b.createActionButtonConfig(factory, "stop_print", "Stop Print", "mdi:stop"), "button"})
-	configs = append(configs, entry{factory.Button("refresh_files", "Refresh Files", "mdi:refresh", ""), "button"})
-
-	// Selects
-	configs = append(configs, entry{factory.Select("speed_profile", "Speed Profile", "mdi:speedometer", "", []string{"Silent", "Standard", "Sport", "Ludicrous"}), "select"})
-	configs = append(configs, entry{factory.Select("print_file", "Print File", "mdi:file-send", "", files), "select"})
-
-	// Numbers
-	configs = append(configs, entry{factory.Number("target_nozzle_temperature", "Target Nozzle Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxNozzleTemp), 1), "number"})
-	configs = append(configs, entry{factory.Number("target_bed_temperature", "Target Bed Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxBedTemp), 1), "number"})
-
-	if caps.HasChamberHeater {
-		configs = append(configs, entry{factory.Number("target_chamber_temperature", "Target Chamber Temperature", "°C", "temperature", "mdi:thermometer-chevron-up", "", 0, float64(caps.MaxChamberTemp), 1), "number"})
-	}
-
-	configs = append(configs, entry{factory.Number("part_cooling_fan", "Part Cooling Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
-	if caps.HasAuxFan {
-		configs = append(configs, entry{factory.Number("aux_fan", "Aux Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
-	}
-	if caps.HasChamberFan {
-		configs = append(configs, entry{factory.Number("chamber_fan", "Chamber Fan", "", "", "mdi:fan", "", 0, 15, 1), "number"})
-	}
-
-	// Camera
-	configs = append(configs, entry{factory.Camera("camera", "Camera", ""), "camera"})
-
-	for _, entry := range configs {
+	for _, entry := range b.discoveryEntries(factory, caps, files) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

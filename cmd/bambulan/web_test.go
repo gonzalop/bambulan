@@ -139,9 +139,9 @@ func TestUploadFilename_TraversalSanitization(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := path.Base(strings.ReplaceAll(tc.filename, "\\", "/"))
-			if got != tc.expectBase {
-				t.Errorf("path.Base(%q) = %q, want %q", tc.filename, got, tc.expectBase)
+			got, ok := sanitizeUploadFilename(tc.filename)
+			if !ok || got != tc.expectBase {
+				t.Errorf("sanitizeUploadFilename(%q) = (%q, %v), want (%q, true)", tc.filename, got, ok, tc.expectBase)
 			}
 		})
 	}
