@@ -70,7 +70,7 @@ func TestMQTTClient_StatusDataRace(_ *testing.T) {
 	client := NewMQTTClient("127.0.0.1", "12345678", "0123456789")
 	var wg sync.WaitGroup
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
@@ -103,7 +103,7 @@ func TestMQTTClient_SubscribeBuffering(t *testing.T) {
 	}
 
 	// Broadcast multiple messages without immediately reading, ensuring no drops
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		client.onMessage(nil, mq.Message{Payload: []byte(`{"print":{"mc_percent":10}}`)})
 	}
 
@@ -159,7 +159,7 @@ func TestPrinterStatus_Clone(t *testing.T) {
 func TestBroadcastWhileUnsubscribing(_ *testing.T) {
 	m := NewMQTTClient("h", "c", "S")
 	var wg sync.WaitGroup
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		sub := m.Subscribe()
 		wg.Add(2)
 		go func() { defer wg.Done(); m.broadcastStatus() }()

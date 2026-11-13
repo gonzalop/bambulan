@@ -1,117 +1,145 @@
-MODULE   = $(shell $(GO) list -m)
-DATE    ?= $(shell date +%FT%T%z)
-VERSION ?= $(shell git describe --tags --always --dirty --match=v* 2> /dev/null || \
-			cat .version 2> /dev/null || echo v0)
-PKG 	 =
-PKGS     = $(or $(PKG),$(shell $(GO) list ./...))
-BINARY   = bambulan
+.PHONY: all full help fmt fix lint revive-run vuln build \
+	build-linux-amd64 build-darwin-amd64 build-windows-amd64 build-all \
+	test test-short test-race coverage coverage-html test-coverage \
+	benchmark bench test-bench install-tools update-tools version clean
 
-GO      = go
-TIMEOUT = 15
-V = 0
-Q = $(if $(filter 1,$V),,@)
-M = $(shell if [ "$$(tput colors 2> /dev/null || echo 0)" -ge 8 ]; then printf "\033[34;1m▶\033[0m"; else printf "▶"; fi)
+GO       ?= go
+BINARY   := bambulan
+CMD      := ./cmd/bambulan
+PKGS     := ./...
+COVERPKG := ./...
+FMT_DIRS := .
+DATE     ?= $(shell date +%FT%T%z)
+VERSION  ?= $(shell git describe --tags --always --dirty --match=v* 2>/dev/null || cat .version 2>/dev/null || echo dev)
+LDFLAGS  := -X main.version=$(VERSION) -X main.buildDate=$(DATE)
+BENCH    ?= .
 
-GENERATED = # List of generated files
-
-GOIMPORTS = $(shell which goimports)
-GOTESTSUM=$(shell which gotestsum)
-GOLANGREVIVE=$(shell which revive)
-
-.PHONY: all build run clean test build-all
-
-all: fmt revive-run $(GENERATED) build ; $(info $(M) building executable…) @ ## Build program binary
-
-build:
-	go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY) ./cmd/bambulan
-
-# Cross-compilation targets
-build-linux-amd64:
-	GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY)-linux-amd64 ./cmd/bambulan
-
-build-darwin-amd64:
-	GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY)-darwin-amd64 ./cmd/bambulan
-
-build-windows-amd64:
-	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION) -X main.buildDate=$(DATE)" -o $(BINARY)-windows-amd64.exe ./cmd/bambulan
-
-build-all: build-linux-amd64 build-darwin-amd64 build-windows-amd64
-
-# Tools
-
-goimports:
-ifeq (, $(GOIMPORTS))
-	$(error "No goimport in $$PATH, please run 'make install-tools')
+# Verbosity:
+#   V=0 (default): one status line per operation; command output shown only on error.
+#   V=1:           status lines + standard tool output (e.g. package test summaries).
+#   V=2:           echoed commands + verbose flags (-v).
+VERBOSE  ?= 0
+V        ?= $(VERBOSE)
+ifeq ($(V),0)
+Q        := @
+RUN      := @quiet() { out=$$("$$@" 2>&1) || { printf '%s\n' "$$out" >&2; exit 1; }; }; quiet
+TEST_V   :=
+VULN_V   :=
+else ifeq ($(V),1)
+Q        := @
+RUN      := @
+TEST_V   :=
+VULN_V   :=
+else
+Q        :=
+RUN      :=
+TEST_V   := -v
+VULN_V   := -show verbose
 endif
 
-gotestsum:
-ifeq (, $(GOTESTSUM))
-	$(error "No gotestsum in $$PATH, please run 'make install-tools')
-endif
+# Tool discovery (PATH -> GOPATH/bin -> ~/go/bin)
+GOBIN       := $(shell $(GO) env GOPATH)/bin
+find_tool    = $(or $(shell command -v $(1) 2>/dev/null),$(wildcard $(GOBIN)/$(1)),$(wildcard $(HOME)/go/bin/$(1)))
+REVIVE      := $(call find_tool,revive)
+STATICCHECK := $(call find_tool,staticcheck)
+GOVULNCHECK := $(call find_tool,govulncheck)
 
-revive:
-ifeq (, $(GOLANGREVIVE))
-	$(error "No revive $$PATH, please run 'make install-tools')
-endif
+define require_tool
+	@if [ -z "$(1)" ] || [ ! -x "$(1)" ]; then \
+		echo "Error: $(2) not found (run 'make install-tools')" >&2; \
+		exit 1; \
+	fi
+endef
 
-update-tools:
-	go install golang.org/x/tools/cmd/goimports@latest
-	go install gotest.tools/gotestsum@latest
-	go install github.com/mgechev/revive@latest
+all: fix fmt lint build test ## Run fix, fmt, lint, build, and test
 
-install-tools:
-	test -x "$(GOIMPORTS)" || go install golang.org/x/tools/cmd/goimports@latest
-	test -x "$(GOTESTSUM)" || go install gotest.tools/gotestsum@latest
-	test -x "$(GOLANGREVIVE)" || go install github.com/mgechev/revive@latest
+full: clean fix fmt lint vuln build test coverage ## Clean and run all checks including vuln and coverage
 
-# Generate
+help: ## Show available targets
+	@echo "Usage: make [target] [V=0|1|2]"
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
-# Tests
+fmt: ## Format source files with gofmt
+	@echo "Formatting..."
+	$(RUN) gofmt -w $(FMT_DIRS)
 
-TEST_TARGETS := test-short test-race
-.PHONY: $(TEST_TARGETS) check test tests
-test-short:   ARGS=-short        ## Run only short tests
-test-race:    ARGS=-race         ## Run tests with race detector
-$(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
-$(TEST_TARGETS): test
-check test tests: fmt revive-run $(GENERATED) | gotestsum ; $(info $(M) running $(NAME:%=% )tests…) @ ## Run tests
-	$Q mkdir -p test
-	$Q gotestsum --junitfile test/tests.xml -- -timeout $(TIMEOUT)s $(ARGS) $(PKGS)
-.PHONY: test-bench
-test-bench: $(GENERATED) ; $(info $(M) running benchmarks…) @ ## Run benchmarks
-	$Q gotestsum -f standard-quiet -- --timeout $(TIMEOUT)s -run=__absolutelynothing__ -bench=. $(PKGS)
+fix: ## Modernize Go code with go fix
+	@echo "Fixing..."
+	$(RUN) $(GO) fix $(PKGS)
 
-COVERAGE_MODE = atomic
-.PHONY: test-coverage
-test-coverage: fmt revive-run $(GENERATED)
-test-coverage: | gotestsum ; $(info $(M) running coverage tests…) @ ## Run coverage tests
-	$Q mkdir -p test
-	$Q gotestsum -- \
-		-coverpkg=$(shell echo $(PKGS) | tr ' ' ',') \
-		-covermode=$(COVERAGE_MODE) \
-		-coverprofile=test/profile.out $(PKGS)
-	$Q $(GO) tool cover -html=test/profile.out -o test/coverage.html
-	$Q $(GO) tool cover -func=test/profile.out > test/coverage.txt
+lint: ## Run go vet, revive, and staticcheck
+	$(call require_tool,$(REVIVE),revive)
+	$(call require_tool,$(STATICCHECK),staticcheck)
+	@echo "Linting..."
+	$(RUN) $(GO) vet $(PKGS)
+	$(RUN) "$(REVIVE)" -set_exit_status $(PKGS)
+	$(RUN) "$(STATICCHECK)" $(PKGS)
 
-.PHONY: revive-run
-revive-run: | revive ; $(info $(M) running revive…) @
-	$Q revive ./...
+revive-run: lint
 
-.PHONY: fmt
-fmt: | goimports ; $(info $(M) running gofmt…) @ ## Run gofmt on all source files
-	$Q goimports -local $(MODULE) -w $(shell $(GO) list -f '{{$$d := .Dir}}{{range $$f := .GoFiles}}{{printf "%s/%s\n" $$d $$f}}{{end}}{{range $$f := .CgoFiles}}{{printf "%s/%s\n" $$d $$f}}{{end}}{{range $$f := .TestGoFiles}}{{printf "%s/%s\n" $$d $$f}}{{end}}' $(PKGS))
+vuln: ## Check for vulnerabilities with govulncheck
+	$(call require_tool,$(GOVULNCHECK),govulncheck)
+	@echo "Checking vulnerabilities..."
+	$(RUN) "$(GOVULNCHECK)" $(VULN_V) $(PKGS)
 
-# Misc
+build: ## Build the project
+	@echo "Building..."
+	$(RUN) $(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
-.PHONY: clean
-clean: ; $(info $(M) cleaning…)	@ ## Cleanup everything
-	@rm -rf $(PKG) test $(GENERATED) $(BINARY) $(BINARY)-linux-amd64 $(BINARY)-darwin-amd64 $(BINARY)-windows-amd64.exe
+build-linux-amd64: ## Cross-compile for Linux (amd64)
+	@echo "Building $(BINARY)-linux-amd64..."
+	$(RUN) env GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY)-linux-amd64 $(CMD)
 
-.PHONY: help
-help:
-	@grep -hE '^[ a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-17s\033[0m %s\n", $$1, $$2}'
+build-darwin-amd64: ## Cross-compile for macOS (amd64)
+	@echo "Building $(BINARY)-darwin-amd64..."
+	$(RUN) env GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY)-darwin-amd64 $(CMD)
 
-.PHONY: version
-version:
-	@echo $(VERSION)
+build-windows-amd64: ## Cross-compile for Windows (amd64)
+	@echo "Building $(BINARY)-windows-amd64.exe..."
+	$(RUN) env GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY)-windows-amd64.exe $(CMD)
+
+build-all: build-linux-amd64 build-darwin-amd64 build-windows-amd64 ## Cross-compile for Linux, macOS, and Windows
+
+test: ## Run unit tests with race detector
+	@echo "Running tests..."
+	$(RUN) $(GO) test -race $(TEST_V) $(PKGS)
+
+test-short: ## Run short unit tests with race detector
+	@echo "Running short tests..."
+	$(RUN) $(GO) test -short -race $(TEST_V) $(PKGS)
+
+test-race: test
+
+coverage: ## Run tests with coverage summary (coverage.out)
+	@echo "Generating coverage..."
+	$(RUN) $(GO) test -coverprofile=coverage.out -covermode=atomic -coverpkg=$(COVERPKG) $(PKGS)
+	@$(GO) tool cover -func=coverage.out | $(if $(filter 0,$(V)),tail -n 1,cat)
+
+coverage-html: coverage ## Generate HTML coverage report (coverage.html)
+	@echo "Generating coverage HTML..."
+	@$(GO) tool cover -html=coverage.out -o coverage.html
+
+test-coverage: coverage-html
+
+benchmark: ## Run benchmarks
+	@echo "Running benchmarks..."
+	$(Q) $(GO) test -bench=$(BENCH) -benchmem -run='^$$' $(TEST_V) $(PKGS)
+
+bench: benchmark
+test-bench: benchmark
+
+install-tools: ## Install revive, staticcheck, and govulncheck
+	@echo "Installing tools..."
+	$(RUN) $(GO) install github.com/mgechev/revive@latest
+	$(RUN) $(GO) install honnef.co/go/tools/cmd/staticcheck@latest
+	$(RUN) $(GO) install golang.org/x/vuln/cmd/govulncheck@latest
+
+update-tools: install-tools
+
+version: ## Show current version
+	@echo "$(VERSION)"
+
+clean: ## Remove build and test artifacts
+	@echo "Cleaning..."
+	$Q rm -rf $(BINARY) $(BINARY)-linux-amd64 $(BINARY)-darwin-amd64 $(BINARY)-windows-amd64.exe test coverage.out coverage.html coverage.txt *.test

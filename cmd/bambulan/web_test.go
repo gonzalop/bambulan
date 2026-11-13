@@ -275,13 +275,13 @@ func TestControlHandlersStatusRace(_ *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 200; i++ {
+		for range 200 {
 			session.mu.Lock()
 			session.status = &bambulan.PrinterStatus{DeviceModel: "C13"}
 			session.mu.Unlock()
 		}
 	}()
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		// Invalid target/fan values return before any MQTT command is sent.
 		s.handleTempControl(httptest.NewRecorder(), httptest.NewRequest("POST", "/?target=x&temp=1", nil), session)
 		s.handleFanControl(httptest.NewRecorder(), httptest.NewRequest("POST", "/?fan=chamber&speed=1", nil), session)
@@ -292,7 +292,7 @@ func TestControlHandlersStatusRace(_ *testing.T) {
 func TestAddSessionEvictsLeastRecentlyUsed(t *testing.T) {
 	s := NewWebServer()
 	now := time.Now().Unix()
-	for i := 0; i < maxSessions; i++ {
+	for i := range maxSessions {
 		sess := &Session{client: newTestClient("h", "c", "S")}
 		sess.lastSeen.Store(now)
 		s.sessions[strconv.Itoa(i)] = sess

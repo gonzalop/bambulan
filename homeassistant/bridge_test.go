@@ -16,7 +16,7 @@ func TestBridgeSharedStateConcurrentAccess(_ *testing.T) {
 	b := &Bridge{lastLight: "UNKNOWN", files: []string{"None"}}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		state := "ON"
 		if i%2 == 0 {
 			state = "OFF"
